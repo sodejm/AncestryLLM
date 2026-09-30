@@ -226,6 +226,28 @@ describe('RootsMagic workspace', () => {
     },
   )
 
+  it.each(['cancel', 'snapshot', 'result'] as const)(
+    'clears a revoked inspection confirmed by %s and allows a fresh picker', async (revokedAt) => {
+      const bridge = bridgeFor([])
+      vi.mocked(bridge.getRootsMagicJobResult).mockResolvedValue(failure('FILE_GRANT_FORBIDDEN'))
+      if (revokedAt === 'cancel') vi.mocked(bridge.cancelJob).mockResolvedValue(failure('FILE_GRANT_FORBIDDEN'))
+      if (revokedAt === 'snapshot') {
+        vi.mocked(bridge.cancelJob).mockResolvedValue(failure('REQUEST_CANCELLED'))
+        vi.mocked(bridge.getJob).mockResolvedValue(failure('FILE_GRANT_FORBIDDEN'))
+      }
+      vi.mocked(bridge.requestOpenFileGrant).mockResolvedValueOnce(success(grant)).mockResolvedValue(success(null))
+      render(<RootsMagicWorkspace bridge={bridge} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+      await waitFor(() => expect(bridge.cancelJob).toHaveBeenCalledOnce())
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Choose RootsMagic source' })).toBeEnabled())
+      await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+      expect(bridge.requestOpenFileGrant).toHaveBeenCalledTimes(2)
+      expect(bridge.cancelJob).toHaveBeenCalledOnce()
+      expect(bridge.discardRootsMagicSource).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent('No RootsMagic source was chosen.')
+    },
+  )
+
   it('retains an undisposed inspection for cleanup before the next source selection', async () => {
     const bridge = bridgeFor([])
     const lookup = vi.mocked(bridge.getRootsMagicJobResult)
@@ -504,6 +526,33 @@ describe('RootsMagic workspace', () => {
 
     expect(screen.queryByText('New export folder: stale export folder')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Choose new export folder' })).toBeDisabled()
+  })
+
+  it('freezes root selection and People queries until the receipt identifies the exported root', async () => {
+    const bridge = bridgeFor([inspection, queryResult(people), { schema_version: 1, kind: 'export', result: {
+      schema_version: 1, artifact_id: 'art_fixture_export_0001', display_name: 'fictional-family export',
+      source_ref: sourceRef, source_fingerprint: fingerprint, profile_code: 'portable', gedcom_version: '5.5.5',
+    } }])
+    let resolveExport!: (value: BridgeResult<JobSnapshot>) => void
+    vi.mocked(bridge.exportRootsMagic).mockReturnValueOnce(new Promise((resolve) => { resolveExport = resolve }))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Export portable GEDCOM' }))
+    expect(bridge.exportRootsMagic).toHaveBeenCalledWith(expect.objectContaining({ root_person_id: 101 }))
+    for (const name of ['Select Jordan Example', 'People', 'Next page']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+      await userEvent.click(screen.getByRole('button', { name }))
+    }
+    expect(bridge.queryRootsMagic).toHaveBeenCalledOnce()
+    resolveExport(success(job))
+    expect(await screen.findByRole('region', { name: 'Export receipt' })).toHaveTextContent('Root: Alex Example')
+    expect(screen.getByRole('button', { name: 'Select Jordan Example' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Select Jordan Example' }))
+    expect(screen.queryByRole('region', { name: 'Export receipt' })).not.toBeInTheDocument()
   })
 
   it('does not carry a completed export receipt to a replacement source', async () => {

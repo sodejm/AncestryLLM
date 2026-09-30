@@ -71,7 +71,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   const [generations, setGenerations] = useState('4')
   const [living, setLiving] = useState<RootsMagicLivingPolicy>('exclude')
   const [confirmed, setConfirmed] = useState(false)
-  const [receipt, setReceipt] = useState<RootsMagicExportReceipt | null>(null)
+  const [receipt, setReceipt] = useState<(RootsMagicExportReceipt & { rootLabel: string }) | null>(null)
   const [status, setStatus] = useState('Choose a RootsMagic source to begin.')
   const [failure, setFailure] = useState<string | null>(null)
   const mounted = useRef(true)
@@ -99,13 +99,23 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       let disposed = false
       try {
         const cancelled = await rootsMagic.cancelJob(request)
+        if (!cancelled.ok && cancelled.error.code === 'FILE_GRANT_FORBIDDEN') {
+          disposed = true
+          return true
+        }
         const initial = cancelled.ok ? cancelled : await rootsMagic.getJob(request)
-        if (!initial.ok) return false
+        if (!initial.ok) {
+          disposed = initial.error.code === 'FILE_GRANT_FORBIDDEN'
+          return disposed
+        }
         let snapshot = initial.data
         while (snapshot.state === 'queued' || snapshot.state === 'running') {
           await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
           const polled = await rootsMagic.getJob(request)
-          if (!polled.ok) return false
+          if (!polled.ok) {
+            disposed = polled.error.code === 'FILE_GRANT_FORBIDDEN'
+            return disposed
+          }
           snapshot = polled.data
         }
         if (snapshot.state === 'failed' || snapshot.state === 'cancelled') {
@@ -116,8 +126,12 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
         // Share an in-flight lookup with navigation cleanup; retry a failed lookup once.
         const pendingResult = inspectionResults.current.get(jobId)
         let result = pendingResult ? await pendingResult.catch(() => null) : null
-        if (!result?.ok) result = await rootsMagic.getRootsMagicJobResult(request)
-        if (!result.ok || result.data.kind !== 'inspection') return false
+        if (!result?.ok && result?.error.code !== 'FILE_GRANT_FORBIDDEN') result = await rootsMagic.getRootsMagicJobResult(request)
+        if (!result?.ok) {
+          disposed = result?.error.code === 'FILE_GRANT_FORBIDDEN'
+          return disposed
+        }
+        if (result.data.kind !== 'inspection') return false
         const discarded = await rootsMagic.discardRootsMagicSource({ schema_version: 1, source_ref: result.data.result.source_ref })
         disposed = discarded.ok || discarded.error.code === 'FILE_GRANT_FORBIDDEN'
         return disposed
@@ -299,7 +313,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   }
 
   async function runQuery(queryId: RootsMagicQueryId, offset: number, previousOffsets: readonly number[]) {
-    if (!source || queryPending || discarding || (queryId !== 'people' && !selectedPerson)) return
+    if (!source || queryPending || exportPending || discarding || (queryId !== 'people' && !selectedPerson)) return
     const generation = ++queryGeneration.current
     const operationSourceGeneration = sourceGeneration.current
     setQueryPending(true)
@@ -333,7 +347,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   }
 
   async function chooseOutput() {
-    if (!source || !selectedPerson || outputPending || discarding) return
+    if (!source || !selectedPerson || outputPending || exportPending || discarding) return
     const operationSourceGeneration = sourceGeneration.current
     const operationQueryGeneration = queryGeneration.current
     setOutputPending(true)
@@ -382,7 +396,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       }
       const complete = await awaitResult(submitted.data, 'export', () => sourceGeneration.current === operationSourceGeneration)
       if (!complete || complete.kind !== 'export' || !mounted.current || sourceGeneration.current !== operationSourceGeneration) return
-      setReceipt(complete.result)
+      setReceipt({ ...complete.result, rootLabel: selectedPerson.label })
       setStatus('Export complete. The new export folder is ready to reveal.')
     } catch {
       if (sourceGeneration.current === operationSourceGeneration) fail('ROOTSMAGIC_EXPORT_UNAVAILABLE')
@@ -433,13 +447,13 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       <p>Each result is bounded to {PAGE_SIZE} rows. Family links include parents, spouses, siblings, and children when recorded.</p>
       <form onSubmit={(event) => { event.preventDefault(); void runQuery('people', 0, []) }}>
         <label htmlFor="rootsmagic-name-filter">Find people by name</label>
-        <input id="rootsmagic-name-filter" type="search" maxLength={200} value={nameFilter}
+        <input id="rootsmagic-name-filter" type="search" maxLength={200} value={nameFilter} disabled={exportPending}
           onChange={(event) => setNameFilter(event.currentTarget.value)} />
-        <Button type="submit" disabled={queryPending || discarding}>Search people</Button>
+        <Button type="submit" disabled={queryPending || exportPending || discarding}>Search people</Button>
       </form>
       <div role="group" aria-label="RootsMagic preset queries">
         {definitions.queries.map((definition) => <Button key={definition.query_id} type="button" variant="quiet"
-          disabled={queryPending || discarding || (definition.query_id !== 'people' && !selectedPerson)}
+          disabled={queryPending || exportPending || discarding || (definition.query_id !== 'people' && !selectedPerson)}
           onClick={() => { void runQuery(definition.query_id, 0, []) }}>{definition.label}</Button>)}
       </div>
       {!selectedPerson && <p>Choose a person from People before using Family links or Events.</p>}
@@ -453,7 +467,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
             const person = query.id === 'people' ? rowPerson(query.page, row.values) : null
             return <tr key={`${query.page.offset}:${index}`}>
               {row.values.map((value, valueIndex) => <td key={`${query.page.columns[valueIndex]}:${valueIndex}`}>{displayValue(value)}</td>)}
-              {query.id === 'people' && <td>{person ? <Button type="button" variant="quiet" disabled={discarding} onClick={() => {
+              {query.id === 'people' && <td>{person ? <Button type="button" variant="quiet" disabled={exportPending || discarding} onClick={() => {
                 setSelectedPerson(person); setOutput(null); setReceipt(null); setConfirmed(false)
                 setStatus(`Selected root: ${person.label}`)
               }}>Select {person.label}</Button> : hasUnsupportedPersonId(query.page, row.values) ?
@@ -462,9 +476,9 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
           })}</tbody>
         </table>
         <p>{query.page.total_rows === null ? 'Total rows are not available.' : `${query.page.total_rows} total rows.`}</p>
-        <Button type="button" variant="quiet" disabled={queryPending || discarding || query.previousOffsets.length === 0}
+        <Button type="button" variant="quiet" disabled={queryPending || exportPending || discarding || query.previousOffsets.length === 0}
           onClick={() => { const prior = query.previousOffsets.at(-1); if (prior !== undefined) void runQuery(query.id, prior, query.previousOffsets.slice(0, -1)) }}>Previous page</Button>
-        <Button type="button" variant="quiet" disabled={queryPending || discarding || !query.page.has_more || query.page.next_offset === null}
+        <Button type="button" variant="quiet" disabled={queryPending || exportPending || discarding || !query.page.has_more || query.page.next_offset === null}
           onClick={() => { if (query.page.next_offset !== null) void runQuery(query.id, query.page.next_offset, [...query.previousOffsets, query.page.offset]) }}>Next page</Button>
       </section>}
     </section>}
@@ -501,6 +515,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
       <Button type="button" disabled={!selectedPerson || !output || !confirmed || exportPending || discarding}
         onClick={() => { void exportGedcom() }}>{exportPending ? 'Exporting…' : 'Export portable GEDCOM'}</Button>
       {receipt && <section aria-label="Export receipt"><p>Export complete using the portable GEDCOM {receipt.gedcom_version} profile.</p>
+        <p>Root: {receipt.rootLabel}</p>
         <Button type="button" variant="quiet" disabled={discarding} onClick={() => { void revealArtifact() }}>Reveal export folder</Button></section>}
     </section>}
   </section>

@@ -59,8 +59,8 @@ interface OutputEntry {
   readonly path: string
   readonly displayName: string
   readonly generation: number
-  readonly parentDev: number
-  readonly parentIno: number
+  readonly parentDev: string
+  readonly parentIno: string
   used: boolean
 }
 
@@ -180,7 +180,7 @@ function selectedOutput(value: string): string {
   return resolve(value)
 }
 
-async function inspectOutputPath(path: string): Promise<Readonly<{ dev: number; ino: number }>> {
+async function inspectOutputPath(path: string): Promise<Readonly<{ dev: string; ino: string }>> {
   try {
     await lstat(path)
     fail('FILE_SELECTION_INVALID')
@@ -192,10 +192,10 @@ async function inspectOutputPath(path: string): Promise<Readonly<{ dev: number; 
   }
   try {
     const parentPath = dirname(path)
-    const parent = await lstat(parentPath)
+    const parent = await lstat(parentPath, { bigint: true })
     if (!parent.isDirectory() || parent.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
     if (await realpath(parentPath) !== resolve(parentPath)) fail('FILE_SELECTION_INVALID')
-    return { dev: parent.dev, ino: parent.ino }
+    return { dev: parent.dev.toString(), ino: parent.ino.toString() }
   } catch (error) {
     if (error instanceof FileGrantBrokerError) throw error
     fail('FILE_SELECTION_INVALID')
@@ -366,6 +366,8 @@ export class RootsMagicWorkbenchBroker {
       manifest = await writeManifest(this.directory, 'rootsmagic-output', {
         schema_version: 1,
         path: output.path,
+        parent_dev: output.parentDev,
+        parent_ino: output.parentIno,
       })
       this.requireActive(owner, source.generation, signal)
       if (this.sources.get(source.sourceRef) !== source || this.outputs.get(output.id) !== output) {

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,13 +28,18 @@ _CAPABILITY = re.compile(r"[0-9a-f]{64}\Z")
 _TERMINAL = {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED}
 
 
-class _OutputManifest(BaseModel):
+class _PathManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: int = Field(ge=1, le=1)
     path: str = Field(min_length=1, max_length=32768)
 
 
-class _SourceManifest(_OutputManifest):
+class _OutputManifest(_PathManifest):
+    parent_dev: str = Field(pattern=r"^(0|[1-9][0-9]{0,39})$")
+    parent_ino: str = Field(pattern=r"^(0|[1-9][0-9]{0,39})$")
+
+
+class _SourceManifest(_PathManifest):
     size_bytes: int = Field(ge=0, le=8 * 1024 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     friendly_name: str = Field(min_length=1, max_length=1024)
@@ -68,7 +72,7 @@ class NativeRootsMagicWorkbench:
         self._closed = False
         self._unsubscribe = jobs.manager.subscribe(self._on_job)
 
-    def _manifest(self, capability: str, kind: str) -> _OutputManifest:
+    def _manifest(self, capability: str, kind: str) -> _PathManifest:
         if not _CAPABILITY.fullmatch(capability):
             raise AncestryError("ROOTSMAGIC_CAPABILITY_INVALID", "Invalid native capability.")
         path = self._directory / f"{capability}.rootsmagic-{kind}.json"
@@ -201,12 +205,13 @@ class NativeRootsMagicWorkbench:
         source = self._service.source(source_ref)
         with self._lock:
             manifest = self._manifest(output_capability, "output")
+            assert isinstance(manifest, _OutputManifest)
 
         def work(reporter: JobReporter) -> CommittedJobResult:
             reporter.update("rootsmagic.export")
             with source.lock:
                 source.verify()
-                RootsMagicDirectoryExporter(reader=source.reader).export(
+                exported = RootsMagicDirectoryExporter(reader=source.reader).export(
                     source.path,
                     Path(manifest.path),
                     root_person_id=str(root_person_id),
@@ -217,11 +222,12 @@ class NativeRootsMagicWorkbench:
                     source_fingerprint=source.summary.fingerprint,
                     verify_source=source.verify,
                     publication_guard=source.publication_guard,
+                    expected_parent=(int(manifest.parent_dev), int(manifest.parent_ino)),
                 )
             return CommittedJobResult(
                 {
                     "schema_version": 1,
-                    "artifact_id": "art_" + secrets.token_hex(32),
+                    "artifact_id": exported.manifest.artifact_id,
                     "display_name": Path(manifest.path).name,
                     "source_ref": source_ref,
                     "source_fingerprint": source.summary.fingerprint,

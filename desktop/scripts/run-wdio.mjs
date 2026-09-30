@@ -4,10 +4,15 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
   chmodSync,
+  closeSync,
+  constants,
   copyFileSync,
   cpSync,
+  fstatSync,
   lstatSync,
   mkdtempSync,
+  openSync,
+  readSync,
   renameSync,
   rmSync,
 } from 'node:fs'
@@ -45,6 +50,83 @@ const packagedScenarios = Object.freeze([
   'launches the selected packaged runtime normally without a debugging transport',
   'queries and exports an immutable RootsMagic source through the native workbench',
 ])
+const startupDiagnosticCodes = new Set([
+  'SIDECAR_VERIFICATION_STARTED',
+  'SIDECAR_VERIFICATION_SUCCEEDED',
+  'SIDECAR_VERIFICATION_REJECTED',
+  'SIDECAR_SPAWN_REQUESTED',
+  'SIDECAR_SPAWN_SUCCEEDED',
+  'SIDECAR_SPAWN_FAILED',
+  'SIDECAR_READINESS_ACCEPTED',
+  'SIDECAR_READINESS_REJECTED',
+  'SIDECAR_HEALTH_SUCCEEDED',
+  'SIDECAR_HEALTH_REJECTED',
+  'SIDECAR_STARTUP_TIMEOUT',
+  'SIDECAR_MANUAL_RETRY_REQUESTED',
+  'SIDECAR_MANUAL_RETRY_SUCCEEDED',
+  'SIDECAR_MANUAL_RETRY_FAILED',
+  'PYTHON_CORE_BOOTSTRAP_STARTED',
+  'PYTHON_CORE_READY',
+  'SIDECAR_BOOTSTRAP_STARTED',
+  'SIDECAR_SERVER_READY',
+])
+
+/** Reads only a bounded regular diagnostic file, without following a file symlink. */
+function readStartupDiagnosticFile(path) {
+  const maximumBytes = 512 * 1024
+  let descriptor
+  try {
+    const entry = lstatSync(path)
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.size > maximumBytes) return ''
+    descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    const opened = fstatSync(descriptor)
+    if (!opened.isFile() || opened.size > maximumBytes) return ''
+    const buffer = Buffer.alloc(maximumBytes + 1)
+    const bytes = readSync(descriptor, buffer, 0, buffer.length, 0)
+    return bytes > maximumBytes ? '' : buffer.subarray(0, bytes).toString('utf8')
+  } catch {
+    return ''
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
+  }
+}
+
+/** Emits only known startup stages and canonical timestamps before failed-run profile cleanup. */
+function captureStartupDiagnostics(profile) {
+  try {
+    const directory = join(profile, 'diagnostics')
+    const entry = lstatSync(directory)
+    if (!entry.isDirectory() || entry.isSymbolicLink()) return
+    const events = []
+    for (const component of ['electron-main', 'python-core', 'desktop-sidecar']) {
+      for (const suffix of ['.2', '.1', '']) {
+        const fileEvents = []
+        const content = readStartupDiagnosticFile(join(directory, `${component}.jsonl${suffix}`))
+        for (const line of content.split('\n')) {
+          if (Buffer.byteLength(line, 'utf8') > 4096) continue
+          try {
+            const event = JSON.parse(line)
+            if (event?.schema_version !== 'ancestryllm.desktop-diagnostic/1'
+              || event.component !== component
+              || !startupDiagnosticCodes.has(event.code)
+              || typeof event.timestamp !== 'string'
+              || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(event.timestamp)
+              || new Date(event.timestamp).toISOString() !== event.timestamp) continue
+            fileEvents.push({ timestamp: event.timestamp, component, code: event.code })
+            if (fileEvents.length > 100) fileEvents.shift()
+          } catch {
+            // Malformed or partial diagnostic lines must not hide the original test failure.
+          }
+        }
+        events.push(...fileEvents)
+      }
+    }
+    events.sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    console.info('[packaged-startup-diagnostics]', JSON.stringify({ events: events.slice(-100) }))
+  } catch {
+    // Diagnostic collection must preserve the runner's failure and profile cleanup.
+  }
+}
 
 function selectedScenario(argv, scenarios, mode) {
   const grepIndex = argv.findIndex((argument) => (
@@ -324,6 +406,7 @@ export function runWdio(mode, argv, {
     ?? mkdtempSyncImpl(join(tmpdir(), 'ancestryllm-wdio-'))
   const fixture = scenario === sourceScenarios[2] ? 'degraded' : 'success'
   let preparedPackage = { environment }
+  let failed = true
   try {
     preparedPackage = mode === 'packaged'
       ? preparePackagedScenarioImpl(scenario, environment)
@@ -350,8 +433,10 @@ export function runWdio(mode, argv, {
     const runner = directNormalLaunch ? 'Packaged normal-launch verifier' : `WebdriverIO ${mode} suite`
     assert.equal(result.signal, null, `${runner} terminated by signal ${result.signal}`)
     assert.equal(Number.isInteger(result.status), true, `${runner} did not report an exit status`)
+    failed = result.status !== 0
     return result.status
   } finally {
+    if (mode === 'packaged' && failed) captureStartupDiagnostics(isolatedUserDataDirectory)
     try {
       if (preparedPackage.cleanupPath) {
         rmSyncImpl(preparedPackage.cleanupPath, {

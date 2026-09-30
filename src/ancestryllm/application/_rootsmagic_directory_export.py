@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from ancestryllm.application.dto import ArtifactRef, ArtifactStatus, ServiceResult
 from ancestryllm.application.mutations import MutationState
 from ancestryllm.core.cancellation import cancellation_checkpoint, non_interruptible_section
 from ancestryllm.core.directory_mutation import DirectoryMutation
@@ -25,7 +26,7 @@ from ancestryllm.gedcom.sync_publication import (
     _write_bytes,
 )
 from ancestryllm.gedcom.validator import validate_gedcom_document
-from ancestryllm.rootsmagic.mapping import ExportReport, RootsMagicMapper
+from ancestryllm.rootsmagic.mapping import RootsMagicMapper
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,15 +38,47 @@ _ARTIFACT_NAMES = frozenset({"tree.ged", "report.md", "manifest.json"})
 
 
 @dataclass(frozen=True, slots=True)
-class RootsMagicDirectoryExportResult:
-    """Committed paths and mapping diagnostics for a directory export."""
+class RootsMagicDirectoryExportResult(ServiceResult):
+    """Serializable descriptors of a committed, digest-verified export bundle."""
 
-    target_path: Path
-    gedcom_path: Path
-    report_path: Path
-    manifest_path: Path
-    report: ExportReport
+    manifest: ArtifactRef
+    gedcom: ArtifactRef
+    report: ArtifactRef
     state: MutationState
+
+
+def _verify_parent(target: Path, expected: tuple[int, int] | None) -> tuple[int, int]:
+    """Bind publication to the original canonical directory selected by the caller."""
+
+    try:
+        parent = target.parent
+        info = parent.lstat()
+        identity = (info.st_dev, info.st_ino)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or parent.resolve(strict=True) != parent
+            or (expected is not None and identity != expected)
+        ):
+            raise ValueError("Replaced or noncanonical export parent")
+        return identity
+    except (OSError, ValueError) as exc:
+        raise AncestryError(
+            "ROOTSMAGIC_EXPORT_PARENT_INVALID",
+            "The selected export parent directory is unavailable or changed.",
+            "Select an existing local parent directory again.",
+            exit_code=2,
+        ) from exc
+
+
+def _artifact(payload: bytes, media_type: str, artifact_type: str) -> ArtifactRef:
+    return ArtifactRef(
+        artifact_id=f"art_{uuid4().hex}",
+        media_type=media_type,
+        artifact_type=artifact_type,
+        size_bytes=len(payload),
+        status=ArtifactStatus.READY,
+        sha256=hashlib.sha256(payload).hexdigest(),
+    )
 
 
 def _digest(payload: bytes) -> dict[str, int | str]:
@@ -135,6 +168,7 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
         source_fingerprint: str | None = None,
         verify_source: Callable[[], None] | None = None,
         publication_guard: Callable[[], AbstractContextManager[None]] | None = None,
+        expected_parent: tuple[int, int] | None = None,
     ) -> RootsMagicDirectoryExportResult:
         """Create a validated ``tree.ged``/report/manifest directory atomically."""
 
@@ -175,13 +209,7 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
                 "Choose a new destination directory.",
                 exit_code=2,
             )
-        if not resolved_target.parent.is_dir():
-            raise AncestryError(
-                "ROOTSMAGIC_EXPORT_PARENT_INVALID",
-                "The export parent directory must already exist.",
-                "Choose an existing local parent directory.",
-                exit_code=2,
-            )
+        parent_identity = _verify_parent(resolved_target, expected_parent)
 
         mapped = self._map_snapshot(
             source_tree,
@@ -258,7 +286,6 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
                     resolved_target,
                     mapped.source_path,
                     mapped.source_fingerprint,
-                    mapped.legacy_report,
                     gedcom_payload,
                     report_payload,
                     manifest,
@@ -266,12 +293,12 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
                     owned_coordinator,
                     verify_source,
                     publication_guard,
+                    parent_identity,
                 )
         return self._publish(
             resolved_target,
             mapped.source_path,
             mapped.source_fingerprint,
-            mapped.legacy_report,
             gedcom_payload,
             report_payload,
             manifest,
@@ -279,6 +306,7 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
             coordinator,
             verify_source,
             publication_guard,
+            parent_identity,
         )
 
     def _publish(
@@ -286,7 +314,6 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
         target: Path,
         source_path: Path,
         source_fingerprint: Any,
-        report: ExportReport,
         gedcom_payload: bytes,
         report_payload: bytes,
         manifest: dict[str, Any],
@@ -294,23 +321,27 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
         coordinator: LocalMutationCoordinator,
         verify_source: Callable[[], None] | None,
         publication_guard: Callable[[], AbstractContextManager[None]] | None,
+        parent_identity: tuple[int, int],
     ) -> RootsMagicDirectoryExportResult:
         mutation = DirectoryMutation(target, coordinator)
         stage = target.parent / f".ancestry-export-{uuid4().hex}"
+        manifest_ref = _artifact(manifest_payload, "application/json", "rootsmagic-export-manifest")
+        gedcom_ref = _artifact(gedcom_payload, "text/vnd.familysearch.gedcom", "gedcom")
+        report_ref = _artifact(report_payload, "text/markdown", "rootsmagic-export-report")
 
         def result(state: MutationState) -> RootsMagicDirectoryExportResult:
             return RootsMagicDirectoryExportResult(
-                target_path=target,
-                gedcom_path=target / "tree.ged",
-                report_path=target / "report.md",
-                manifest_path=target / "manifest.json",
-                report=report,
+                manifest=manifest_ref,
+                gedcom=gedcom_ref,
+                report=report_ref,
                 state=state,
             )
 
         try:
+            _verify_parent(target, parent_identity)
             mutation.acquire()
             mutation.plan_staging(stage)
+            _verify_parent(target, parent_identity)
             stage.mkdir(mode=0o700)
             mutation.track_staging(stage)
             _write_bytes(stage / "tree.ged", gedcom_payload, mutation=mutation)
@@ -329,6 +360,7 @@ class RootsMagicDirectoryExporter(RootsMagicMapper):
                 mutation.committing()
                 try:
                     with non_interruptible_section("publish RootsMagic export directory"):
+                        _verify_parent(target, parent_identity)
                         _exclusive_rename_directory(stage, target)
                     state = mutation.finish()
                 except BaseException:

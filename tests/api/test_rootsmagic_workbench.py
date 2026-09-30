@@ -299,7 +299,16 @@ def test_native_http_auth_validation_and_full_query(
     output_capability = "e" * 64
     destination = tmp_path / "Fictional export"
     output_manifest = tmp_path / f"{output_capability}.rootsmagic-output.json"
-    output_manifest.write_text(json.dumps({"schema_version": 1, "path": str(destination)}))
+    output_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "path": str(destination),
+                "parent_dev": str(destination.parent.stat().st_dev),
+                "parent_ino": str(destination.parent.stat().st_ino),
+            }
+        )
+    )
     output_manifest.chmod(0o600)
     before = tree.read_bytes()
     from threading import Event
@@ -307,16 +316,18 @@ def test_native_http_auth_validation_and_full_query(
     from ancestryllm.application._rootsmagic_directory_export import RootsMagicDirectoryExporter
 
     published, release = Event(), Event()
+    artifact_ids: list[str] = []
     original_export = RootsMagicDirectoryExporter.export
 
     def export_then_pause(self, *args, **kwargs):
         result = original_export(self, *args, **kwargs)
-        published.set()
-        assert release.wait(5)
+        artifact_ids.append(result.manifest.artifact_id)
+        if cancel_after_publication:
+            published.set()
+            assert release.wait(5)
         return result
 
-    if cancel_after_publication:
-        monkeypatch.setattr(RootsMagicDirectoryExporter, "export", export_then_pause)
+    monkeypatch.setattr(RootsMagicDirectoryExporter, "export", export_then_pause)
     exported = client.post(
         prefix + "/exports",
         headers=api_headers,
@@ -340,6 +351,7 @@ def test_native_http_auth_validation_and_full_query(
     artifact = client.get(prefix + f"/jobs/{export_id}/result", headers=api_headers).json()
     assert artifact["kind"] == "export"
     assert artifact["result"]["artifact_id"].startswith("art_")
+    assert artifact["result"]["artifact_id"] == artifact_ids[0]
     assert artifact["result"]["display_name"] == destination.name
     assert str(tmp_path) not in json.dumps(artifact)
     assert {file.name for file in destination.iterdir()} == {
@@ -410,7 +422,16 @@ def test_http_discard_waits_for_final_export_publication_guard(
     output_capability = "b" * 64
     destination = tmp_path / "Serialized export"
     output_manifest = tmp_path / f"{output_capability}.rootsmagic-output.json"
-    output_manifest.write_text(json.dumps({"schema_version": 1, "path": str(destination)}))
+    output_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "path": str(destination),
+                "parent_dev": str(destination.parent.stat().st_dev),
+                "parent_ino": str(destination.parent.stat().st_ino),
+            }
+        )
+    )
     output_manifest.chmod(0o600)
 
     publication_entered = Event()
@@ -540,7 +561,16 @@ def test_discard_prevents_export(native_client, api_headers, tmp_path, monkeypat
         output_capability = "f" * 64
         destination = tmp_path / "Revoked export"
         output_manifest = tmp_path / f"{output_capability}.rootsmagic-output.json"
-        output_manifest.write_text(json.dumps({"schema_version": 1, "path": str(destination)}))
+        output_manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "path": str(destination),
+                    "parent_dev": str(destination.parent.stat().st_dev),
+                    "parent_ino": str(destination.parent.stat().st_ino),
+                }
+            )
+        )
         output_manifest.chmod(0o600)
 
         publication_pending = Event()

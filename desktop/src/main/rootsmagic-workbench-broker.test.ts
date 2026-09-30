@@ -178,6 +178,29 @@ describe('native RootsMagic workbench broker', () => {
     await broker.inspect(owner, grant)
   })
 
+  it('carries the selected parent identity through a replacement after broker validation', async () => {
+    const { broker, client, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    const parent = join(directory, 'selected-parent')
+    await mkdir(parent)
+    const identity = await lstat(parent, { bigint: true })
+    native.selectNewOutputDirectory.mockResolvedValueOnce(join(parent, 'Export'))
+    const output = await broker.selectOutput(owner, 'Export')
+    client.export.mockImplementationOnce(async (...args: unknown[]) => {
+      const { output_capability: capability } = args[0] as { output_capability: string }
+      await rename(parent, `${parent}-moved`)
+      await mkdir(parent)
+      const manifest = JSON.parse(await readFile(join(directory, `${capability}.rootsmagic-output.json`), 'utf8'))
+      expect(manifest).toEqual({ schema_version: 1, path: join(parent, 'Export'),
+        parent_dev: identity.dev.toString(), parent_ino: identity.ino.toString() })
+      return snapshot(2)
+    })
+    await broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' })
+    expect(client.export).toHaveBeenCalledOnce()
+  })
+
   it('rejects a destination whose selected parent is replaced before export', async () => {
     const { broker, client, native, owner, directory, inspect } = await fixture()
     await inspect()

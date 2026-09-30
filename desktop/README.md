@@ -127,10 +127,12 @@ pnpm --dir desktop test:visual
 `desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
 locked Electron package, and fails with a stable error if its platform runtime
 is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 39.8.10 remains
-exactly pinned; its installer resolves `extract-zip` to the Electron-maintained
-`@electron-internal/extract-zip` 1.0.5 package through the locked override and
-reviewed compatibility patch.
+shared pnpm store contains stale build-script state. Electron 41.10.6 is exactly
+pinned for the audited runtime security fixes. Its installer uses the maintained
+`@electron-internal/extract-zip` directly, so the former installer compatibility
+patch is no longer needed. Other `extract-zip` consumers retain the locked
+Electron-maintained 1.0.5 override. The URI parser and both Undici major lines
+also retain explicit patched dependency versions.
 
 `desktop-check` runs lint, separated main/preload/renderer type checks, unit
 tests, the presentation-boundary contract, and a source-map-free build

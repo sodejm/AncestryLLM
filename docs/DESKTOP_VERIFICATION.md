@@ -393,10 +393,16 @@ clear actions and their generic failure states without returning a path or
 record content.
 
 Diagnostic files are deliberately excluded from CI and release artifacts and
-there is no export or upload path. The exact stderr shutdown receipt remains a
-separate, authoritative Main-process check; diagnostic JSON and arbitrary
-child output cannot satisfy it. Packaged verification may exercise the
-feature, but it must not collect the local diagnostic directory.
+there is no application export or upload path. Before deleting a failed
+packaged test's isolated profile, the verification runner emits at most 100
+known startup event codes with their component names and canonical timestamps.
+It reads only bounded regular files, rejects symlinks and malformed records,
+and omits all metadata, launch identifiers, paths, and record payloads. This
+sanitized stage receipt helps distinguish executable verification, readiness,
+and health failures; it does not collect the local diagnostic directory.
+The exact stderr shutdown receipt remains a separate, authoritative
+Main-process check; diagnostic JSON and arbitrary child output cannot satisfy
+it. Successful runs emit no startup-stage receipt.
 
 The performance policy is versioned as `desktop-unpacked-v1` and is a hard gate,
 not an informational benchmark:

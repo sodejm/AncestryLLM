@@ -1251,6 +1251,13 @@ commit guard. A committed job result wins over concurrent cancellation; source
 disposal still prevents retrieval of private results. The source-level workspace
 does not establish packaged support without target-matched acceptance evidence.
 
+The private output manifest carries the parent device/inode identity captured by
+Main as exact decimal strings. The worker rechecks that identity at entry, before
+staging, and before publication. The application result contains serializable
+opaque artifact references, sizes, and digests; publication paths remain internal.
+While an export runs, the workspace freezes query and root selection and binds
+the completion receipt to the exported root.
+
 `RootsMagicService` composes an immutable reader, a dedicated query
 orchestrator, and a deterministic mapper/exporter. `rootsmagic/core.py` is the
 public immutable-source and schema boundary. The private

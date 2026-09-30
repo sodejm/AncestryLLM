@@ -65,6 +65,114 @@ def _coordinator(tmp_path: Path) -> LocalMutationCoordinator:
     return LocalMutationCoordinator(tmp_path / "coordination")
 
 
+def test_export_rejects_parent_replaced_while_mapping(
+    tmp_path: Path, fictional_tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "selected-parent"
+    parent.mkdir()
+    moved = tmp_path / "moved-parent"
+    exporter = _exporter(tmp_path)
+    original_map = exporter._map_snapshot
+
+    def replace_parent(*args, **kwargs):
+        mapped = original_map(*args, **kwargs)
+        parent.rename(moved)
+        parent.mkdir()
+        return mapped
+
+    monkeypatch.setattr(exporter, "_map_snapshot", replace_parent)
+    with _coordinator(tmp_path) as coordinator, pytest.raises(AncestryError) as captured:
+        exporter.export(
+            fictional_tree, parent / "export", root_person_id="1", coordinator=coordinator
+        )
+    assert captured.value.code == "ROOTSMAGIC_EXPORT_PARENT_INVALID"
+    assert list(parent.iterdir()) == []
+    assert list(moved.iterdir()) == []
+
+
+def test_export_result_is_serializable_opaque_and_digest_consistent(
+    tmp_path: Path, fictional_tree: Path
+) -> None:
+    target = tmp_path / "opaque-export"
+    with _coordinator(tmp_path) as coordinator:
+        result = _exporter(tmp_path).export(
+            fictional_tree, target, root_person_id="1", coordinator=coordinator
+        )
+    serialized = result.to_json()
+    assert type(result).from_json(serialized) == result
+    payload = json.loads(serialized)["value"]
+    assert set(payload) == {"manifest", "gedcom", "report", "state"}
+    assert payload["state"] == "committed"
+    assert str(tmp_path) not in serialized
+    assert "_path" not in serialized
+    identifiers = set()
+    for field, name in (
+        ("manifest", "manifest.json"),
+        ("gedcom", "tree.ged"),
+        ("report", "report.md"),
+    ):
+        descriptor = payload[field]
+        content = (target / name).read_bytes()
+        assert descriptor["artifact_id"].startswith("art_")
+        identifiers.add(descriptor["artifact_id"])
+        assert descriptor["status"] == "ready"
+        assert descriptor["sha256"] == hashlib.sha256(content).hexdigest()
+        assert descriptor["size_bytes"] == len(content)
+    assert len(identifiers) == 3
+
+
+def test_export_rejects_parent_replaced_before_worker_entry(
+    tmp_path: Path, fictional_tree: Path
+) -> None:
+    parent = tmp_path / "selected-parent"
+    parent.mkdir()
+    original = parent.stat()
+    moved = tmp_path / "moved-parent"
+    parent.rename(moved)
+    parent.mkdir()
+    with _coordinator(tmp_path) as coordinator, pytest.raises(AncestryError) as captured:
+        _exporter(tmp_path).export(
+            fictional_tree,
+            parent / "export",
+            root_person_id="1",
+            coordinator=coordinator,
+            expected_parent=(original.st_dev, original.st_ino),
+        )
+    assert captured.value.code == "ROOTSMAGIC_EXPORT_PARENT_INVALID"
+    assert list(parent.iterdir()) == []
+    assert list(moved.iterdir()) == []
+
+
+@pytest.mark.parametrize("phase", ["plan_staging", "committing"])
+def test_export_rejects_parent_replaced_immediately_before_staging_or_publication(
+    tmp_path: Path, fictional_tree: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    parent = tmp_path / "selected-parent"
+    parent.mkdir()
+    moved = tmp_path / "moved-parent"
+    original = getattr(DirectoryMutation, phase)
+
+    def replace_parent(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        parent.rename(moved)
+        parent.mkdir()
+        (parent / "sentinel").write_text("unrelated replacement directory", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(DirectoryMutation, phase, replace_parent)
+    with _coordinator(tmp_path) as coordinator, pytest.raises(AncestryError) as captured:
+        _exporter(tmp_path).export(
+            fictional_tree, parent / "export", root_person_id="1", coordinator=coordinator
+        )
+    # Recovery must not clean through a changed parent or publish in its replacement.
+    assert captured.value.code == "MUTATION_REAUTHORIZATION_REQUIRED"
+    assert {item.name for item in parent.iterdir()} == {"sentinel"}
+    assert (parent / "sentinel").read_text(encoding="utf-8") == "unrelated replacement directory"
+    assert not (moved / "export").exists()
+    stages = list(moved.glob(".ancestry-export-*"))
+    assert len(stages) == (1 if phase == "committing" else 0)
+
+
 def _open_fictional_wal_tree(tmp_path: Path) -> tuple[Path, sqlite3.Connection]:
     tree = tmp_path / "fictional-active-wal.rmtree"
     writer = sqlite3.connect(tree)
@@ -125,7 +233,7 @@ def test_default_export_is_rooted_private_and_digest_consistent(
         "report.md",
         "manifest.json",
     }
-    gedcom = result.gedcom_path.read_text(encoding="utf-8")
+    gedcom = (target / "tree.ged").read_text(encoding="utf-8")
     assert "0 @I1@ INDI" in gedcom
     assert "0 @I2@ INDI" in gedcom
     assert "0 @I3@ INDI" in gedcom
@@ -134,7 +242,7 @@ def test_default_export_is_rooted_private_and_digest_consistent(
     assert "0 @I4@ INDI" not in gedcom
     assert "0 @I5@ INDI" not in gedcom
     assert "Emery /Elsewhere/" not in gedcom
-    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["source"] == {
         "fingerprint": "aggregate-fingerprint",
         "name": fictional_tree.name,
@@ -147,8 +255,8 @@ def test_default_export_is_rooted_private_and_digest_consistent(
             "bytes": len(payload),
             "sha256": hashlib.sha256(payload).hexdigest(),
         }
-    serialized = result.manifest_path.read_text(encoding="utf-8")
-    report = result.report_path.read_text(encoding="utf-8")
+    serialized = (target / "manifest.json").read_text(encoding="utf-8")
+    report = (target / "report.md").read_text(encoding="utf-8")
     assert str(tmp_path) not in serialized
     assert str(tmp_path) not in report
     assert fictional_tree.name in report
@@ -190,22 +298,24 @@ def test_export_preserves_living_root_under_supported_inclusion_policies(
     tmp_path: Path, fictional_tree: Path, living: str
 ) -> None:
     before = sha256_file(fictional_tree)
+    target = tmp_path / "included-living-root"
     with _coordinator(tmp_path) as coordinator:
         result = _exporter(tmp_path).export(
             fictional_tree,
-            tmp_path / "included-living-root",
+            target,
             root_person_id="3",
             living=living,
             coordinator=coordinator,
         )
-    gedcom = result.gedcom_path.read_text(encoding="utf-8")
+    assert result.state is MutationState.COMMITTED
+    gedcom = (target / "tree.ged").read_text(encoding="utf-8")
     assert "0 @I3@ INDI" in gedcom
     assert ("Linden /Confidential/" in gedcom) is (living == "include")
     assert ("Living /Private/" in gedcom) is (living == "redact")
-    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
     assert (
         manifest["files"]["tree.ged"]["sha256"]
-        == hashlib.sha256(result.gedcom_path.read_bytes()).hexdigest()
+        == hashlib.sha256((target / "tree.ged").read_bytes()).hexdigest()
     )
     assert sha256_file(fictional_tree) == before
 
@@ -226,7 +336,8 @@ def test_descendant_scope_honors_generation_limit_and_living_policy(
             coordinator=coordinator,
         )
 
-    gedcom = result.gedcom_path.read_text(encoding="utf-8")
+    assert result.state is MutationState.COMMITTED
+    gedcom = (target / "tree.ged").read_text(encoding="utf-8")
     assert "0 @I1@ INDI" in gedcom
     assert "0 @I2@ INDI" in gedcom
     assert "Linden /Confidential/" in gedcom
@@ -336,8 +447,9 @@ def test_valid_wal_generation_and_companions_are_unchanged(tmp_path: Path) -> No
                 verify_source=lambda: reader.verify_source(tree, source_fingerprint),
             )
 
-        assert "1 NAME Wal /Example/" in result.gedcom_path.read_text(encoding="utf-8")
-        manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+        assert result.state is MutationState.COMMITTED
+        assert "1 NAME Wal /Example/" in (target / "tree.ged").read_text(encoding="utf-8")
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
         assert manifest["source"] == {
             "fingerprint": aggregate_fingerprint,
             "name": tree.name,
@@ -477,8 +589,7 @@ def test_cancellation_after_rename_returns_committed_result(
         )
 
     assert result.state is MutationState.COMMITTED
-    assert result.target_path == target
-    assert result.gedcom_path.is_file()
+    assert (target / "tree.ged").is_file()
 
 
 def test_failed_publication_is_cleaned_and_same_target_can_retry(

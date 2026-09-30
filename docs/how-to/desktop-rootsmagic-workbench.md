@@ -11,7 +11,8 @@ of **unknown** means the file did not supply reliable version metadata. Schema
 capabilities, rather than a guessed RootsMagic version, determine which queries
 can run. Inspection, queries, and exports appear in Task Center.
 Sources up to 8 GiB are accepted. If discarding a source fails, its access
-remains visible so you can retry.
+remains visible so you can retry. If the sidecar has already revoked inspection
+access, the workspace clears that inspection and allows a new file selection.
 
 Choose **People** to browse names or apply a literal name filter. Select a person
 before using **Family links** or **Events**. Pages contain at most 100 rows;
@@ -26,10 +27,15 @@ descendants scope and any generation limit before exporting. Defaults are
 portable GEDCOM 5.5.5, generic destination, connected scope, and living people
 excluded. The living-person setting can instead include or anonymize them.
 Anonymize applies the exporter's living-person redaction policy.
+While the export runs, query and root selection controls are disabled. The
+completion receipt names the root actually exported; selecting another root
+clears that receipt.
 The immutable-source notice applies to every operation: the original database
 and validated SQLite companions are checked without modifying them.
 
 Choose a destination for **one new folder**. Existing destinations are refused.
+If the selected parent directory is replaced before staging or publication,
+the export fails and requires a fresh destination selection.
 The completed folder contains:
 
 - `tree.ged`: the rooted GEDCOM export.

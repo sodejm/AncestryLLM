@@ -681,7 +681,7 @@ for the acceptance matrix and operational limits.
 | Control | Source and runtime evidence | Residual ownership |
 |---|---|---|
 | `TM-E01`, `TM-D01`, `TM-O01`, `TM-C01` | Strict schema-v1 sanitized snapshots/events use increasing per-job sequences and bounded payloads, history, lists, subscribers, and subscriber queues. SQLCipher persistence admits exactly one terminal event and startup reconciliation converts interrupted non-terminal work to a stable terminal outcome. Replay accepts an exact cursor or returns coded resynchronization; slow subscribers overflow independently and listeners are never called under the manager lock. Cancellation is idempotent and cooperative, distinguishes a request from a pending atomic safe point, and shares resource locks with shutdown. Fixed authenticated routes expose list, status, cancel, SSE, and shutdown assessment only. Electron main presents native **Wait**, **Request cancellation**, and **Stay open** choices; degraded startup is explicit safe-empty only before any authenticated session has been exposed and while the supervisor is `idle`, `starting`, or `unavailable`. Once a session has been exposed, losing it never restores that shortcut. Main invalidates the public active session before using its captured credentials for one hidden, bodyless runtime-shutdown request. A response is not termination proof: Electron must observe the leader exit or use the bounded forced process-tree path. The verified sidecar stop remains mandatory and drains any launch already in flight within a fixed 20-second deadline. A failed or timed-out stop leaves IPC available for recovery. | The change affects the application, SQLCipher storage, internal API, and Electron main-process lifecycle. It adds no application command or CLI surface, renderer job bridge/listener/UI, job submission, provider call/stream, GEDCOM or RootsMagic mutation, or public API. The runtime route is absent without the packaged callback, excluded from OpenAPI, and grants no renderer authority. The #56/#111 source provider-stream transport is implemented; output workers and publication remain #114/#118, and target-matched packaged adversarial evidence remains #131. |
-| `TM-U01` | The high-severity desktop audit rejects the vulnerable `extract-zip` installer dependency. The complete lock instead aliases it to exact Electron-maintained `@electron-internal/extract-zip` 1.0.5, records registry integrity, and applies a reviewed one-line Electron 39 CommonJS compatibility patch with an exact patch digest. The canonical desktop install performs a frozen install, explicitly rebuilds only Electron, and verifies that the active platform runtime exists; contract tests reject direct workflow installs that bypass this path. | Electron remains exactly 39.8.10 rather than taking an unreviewed major upgrade. The alias and compatibility patch affect only Electron's development-time runtime downloader, not application archive extraction or user data. Registry, Electron download hosting, pnpm, and the reviewed lock/patch remain supply-chain trust dependencies; audit, clean-store installation, packaging, and fuse inspection fail closed on drift or missing runtime state. |
+| `TM-U01` | The high-severity desktop audit rejects the vulnerable `extract-zip` installer dependency. The complete lock aliases it to exact Electron-maintained `@electron-internal/extract-zip` 1.0.5 and records registry integrity. Electron 41.10.6 uses the maintained extractor natively, removing the obsolete Electron 39 compatibility patch. The canonical desktop install performs a frozen install, explicitly rebuilds only Electron, and verifies that the active platform runtime exists; contract tests reject direct workflow installs that bypass this path. | Electron is pinned to the audited security remediation baseline 41.10.6; target-matched runtime validation remains required. The alias affects development-time runtime downloading, not application archive extraction or user data. Registry, Electron download hosting, pnpm, and the reviewed lock remain supply-chain trust dependencies; audit, clean-store installation, packaging, and fuse inspection fail closed on drift or missing runtime state. |
 
 ### Issue #109 task-center evidence
 
@@ -1047,11 +1047,20 @@ support. The CLI SQL/question boundary remains separate. Queries and exports
 are deterministic and require no provider or cloud consent.
 
 An output capability authorizes creation of one new folder. Existing destinations
-and source aliases are refused. The durable coordinator owns stage members and
+and source aliases are refused. Main's selected parent device/inode identity is
+carried in the private output manifest and checked by the worker at entry, before
+staging, and before publication. Replacement invalidates that authority; recovery
+preserves the coordinator barrier when ownership becomes ambiguous.
+The durable coordinator owns stage members and
 validates the GEDCOM, report, and manifest before exclusive same-filesystem
 publication. Final source checks and revocation serialize with the short commit
 boundary. Cancellation before commit publishes nothing; successful publication
 wins over concurrent cancellation. Reports/manifests omit private host paths.
+The application result exposes opaque artifact references with sizes and digests,
+without publication paths. The workspace freezes the root and People query during
+export and records the exported root in its receipt. Confirmed inspection
+revocation clears local pending state so a new picker grant can be requested;
+transient disposal failures remain retryable.
 Recovery requires renewed authority and cannot revive expired grants.
 
 Residual risks include hostile same-account processes, original-source changes

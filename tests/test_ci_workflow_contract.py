@@ -260,7 +260,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
 
     assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.11.0"}
     assert desktop_package["packageManager"] == "pnpm@11.11.0"
-    assert desktop_package["devDependencies"]["electron"] == "39.8.10"
+    assert desktop_package["devDependencies"]["electron"] == "41.10.6"
     assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"

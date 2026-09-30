@@ -95,10 +95,6 @@ _CLASSIFICATION_CASES: dict[str, tuple[str, str]] = {
     ),
     "uv-lock": ("uv.lock", "generated-vendor"),
     "pnpm-lock": ("pnpm-lock.yaml", "generated-vendor"),
-    "reviewed-electron-patch": (
-        "desktop/patches/electron@39.8.10.patch",
-        "generated-vendor",
-    ),
     "node-modules-subtree": (
         "desktop/node_modules/foo/index.js",
         "generated-vendor",
@@ -119,9 +115,10 @@ class TestClassify:
         path, expected = _CLASSIFICATION_CASES[case_id]
         assert classify(path) == expected
 
-    def test_unreviewed_patch_raises(self) -> None:
+    @pytest.mark.parametrize("version", ["39.8.10", "39.8.11"])
+    def test_unreviewed_patch_raises(self, version: str) -> None:
         with pytest.raises(ValueError, match="unclassified"):
-            classify("desktop/patches/electron@39.8.11.patch")
+            classify(f"desktop/patches/electron@{version}.patch")
 
     def test_unknown_extension_raises(self) -> None:
         with pytest.raises(ValueError, match="unclassified"):
