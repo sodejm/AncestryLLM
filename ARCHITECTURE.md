@@ -1252,8 +1252,10 @@ disposal still prevents retrieval of private results. The source-level workspace
 does not establish packaged support without target-matched acceptance evidence.
 
 The private output manifest carries the parent device/inode identity captured by
-Main as exact decimal strings. The worker rechecks that identity at entry, before
-staging, and before publication. The application result contains serializable
+Main as exact decimal strings. On Windows, the adapter verifies Node's legacy
+32/64-bit identity and reads Python's full 64/128-bit identity from the same open
+directory handle; it refuses unavailable or mismatched identities. The worker
+rechecks the full identity at entry, before staging, and before publication. The application result contains serializable
 opaque artifact references, sizes, and digests; publication paths remain internal.
 While an export runs, the workspace freezes query and root selection and binds
 the completion receipt to the exported root.

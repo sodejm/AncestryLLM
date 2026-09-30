@@ -20,6 +20,102 @@ class NativeFunction:
         return self.callback(*args)
 
 
+@pytest.mark.parametrize("failure", [None, "unavailable", "zero"])
+def test_export_parent_reads_full_windows_stat_identity(monkeypatch, failure):
+    from ancestryllm.api.rootsmagic_workbench import _windows_stat_identity
+
+    class FileIdInfo(ctypes.Structure):
+        _fields_ = [("volume", ctypes.c_uint64), ("file_id", ctypes.c_ubyte * 16)]
+
+    volume = (1 << 60) + 7
+    inode = (1 << 120) + 11
+    calls = []
+
+    def read_information(handle, information_class, information, size):
+        assert handle == 311
+        assert information_class == 18  # FileIdInfo
+        assert size == ctypes.sizeof(FileIdInfo) == 24
+        info = ctypes.cast(information, ctypes.POINTER(FileIdInfo)).contents
+        info.volume = volume
+        info.file_id[:] = (0 if failure == "zero" else inode).to_bytes(16, "little")
+        calls.append(handle)
+        return failure != "unavailable"
+
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda *a, **kw: SimpleNamespace(
+            GetFileInformationByHandleEx=NativeFunction(read_information)
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 50, raising=False)
+    monkeypatch.setattr(
+        ctypes, "WinError", lambda error: OSError(error, "unavailable"), raising=False
+    )
+    if failure:
+        with pytest.raises(OSError):
+            _windows_stat_identity(311)
+    else:
+        assert _windows_stat_identity(311) == (volume, inode)
+    assert calls == [311]
+
+
+@pytest.mark.parametrize("failure", [None, "open", "legacy", "mismatch", "full"])
+def test_export_parent_translation_checks_broker_identity_and_releases_handle(
+    tmp_path, monkeypatch, failure
+):
+    from ancestryllm.api import rootsmagic_workbench as native
+    from ancestryllm.core.errors import AncestryError
+    from ancestryllm.rootsmagic.source import RootsMagicReader
+
+    calls = []
+    destination = tmp_path / "export"
+
+    def open_directory(path):
+        assert path == tmp_path
+        calls.append("open")
+        if failure == "open":
+            raise OSError("unavailable")
+        return 311
+
+    def read_identity(handle, kind):
+        assert handle == 311
+        calls.append(kind)
+        if failure == kind:
+            raise OSError("unavailable")
+        if kind == "legacy":
+            return (7, 12 if failure == "mismatch" else 11)
+        return ((1 << 60) + 7, (1 << 120) + 11)
+
+    monkeypatch.setattr(native, "_PLATFORM", "win32")
+    monkeypatch.setattr(RootsMagicReader, "_windows_open_directory_handle", open_directory)
+    monkeypatch.setattr(
+        RootsMagicReader, "_windows_handle_identity", lambda handle: read_identity(handle, "legacy")
+    )
+    monkeypatch.setattr(
+        native, "_windows_stat_identity", lambda handle: read_identity(handle, "full")
+    )
+    monkeypatch.setattr(
+        RootsMagicReader, "_windows_close_handle", lambda handle: calls.append(handle)
+    )
+    manifest = native._OutputManifest(
+        schema_version=1, path=str(destination), parent_dev="7", parent_ino="11"
+    )
+    if failure:
+        with pytest.raises(AncestryError) as raised:
+            native._export_parent_identity(manifest)
+        assert raised.value.code == "ROOTSMAGIC_EXPORT_PARENT_INVALID"
+    else:
+        assert native._export_parent_identity(manifest) == ((1 << 60) + 7, (1 << 120) + 11)
+    if failure == "open":
+        assert calls == ["open"]
+    elif failure in {"legacy", "mismatch"}:
+        assert calls == ["open", "legacy", 311]
+    else:
+        assert calls == ["open", "legacy", "full", 311]
+
+
 class RenameInfo(ctypes.Structure):
     _fields_ = [
         ("replace", ctypes.c_ubyte),

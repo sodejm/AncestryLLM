@@ -1050,7 +1050,10 @@ An output capability authorizes creation of one new folder. Existing destination
 and source aliases are refused. Main's selected parent device/inode identity is
 carried in the private output manifest and checked by the worker at entry, before
 staging, and before publication. Replacement invalidates that authority; recovery
-preserves the coordinator barrier when ownership becomes ambiguous.
+preserves the coordinator barrier when ownership becomes ambiguous. On Windows,
+Node's legacy identity is verified against a directory handle that excludes delete
+sharing before reading Python's full identity from that same handle. Failed
+translation refuses the export; identity bits are never truncated to force a match.
 The durable coordinator owns stage members and
 validates the GEDCOM, report, and manifest before exclusive same-filesystem
 publication. Final source checks and revocation serialize with the short commit

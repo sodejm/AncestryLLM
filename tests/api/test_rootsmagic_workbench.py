@@ -42,6 +42,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _broker_parent_identity(path: Path) -> tuple[int, int]:
+    from ancestryllm.rootsmagic.source import RootsMagicReader
+
+    identity = RootsMagicReader._capture_root_identity(path.parent)
+    assert identity is not None
+    return identity
+
+
 def test_native_source_capability_is_single_use_and_results_revoke(tmp_path: Path) -> None:
     from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
 
@@ -232,8 +240,9 @@ def test_native_export_rejects_generation_limit_for_connected_scope(
 
 
 @pytest.mark.parametrize("cancel_after_publication", [False, True])
+@pytest.mark.parametrize("windows_identity", [False, True])
 def test_native_http_auth_validation_and_full_query(
-    native_client, api_headers, tmp_path, monkeypatch, cancel_after_publication
+    native_client, api_headers, tmp_path, monkeypatch, cancel_after_publication, windows_identity
 ):
     client, jobs = native_client
     prefix = "/api/v1/rootsmagic"
@@ -298,14 +307,32 @@ def test_native_http_auth_validation_and_full_query(
     assert page["rows"][0]["values"][0] == 1
     output_capability = "e" * 64
     destination = tmp_path / "Fictional export"
+    parent_identity = (destination.parent.stat().st_dev, destination.parent.stat().st_ino)
+    closed_handles = []
+    if windows_identity:
+        from ancestryllm.api import rootsmagic_workbench as native
+        from ancestryllm.rootsmagic.source import RootsMagicReader
+
+        # Node's legacy Windows IDs need not equal Python's 64/128-bit IDs.
+        broker_identity = (7, 11)
+        assert broker_identity != parent_identity
+        monkeypatch.setattr(native, "_PLATFORM", "win32")
+        monkeypatch.setattr(RootsMagicReader, "_windows_open_directory_handle", lambda path: 311)
+        monkeypatch.setattr(
+            RootsMagicReader, "_windows_handle_identity", lambda handle: broker_identity
+        )
+        monkeypatch.setattr(native, "_windows_stat_identity", lambda handle: parent_identity)
+        monkeypatch.setattr(RootsMagicReader, "_windows_close_handle", closed_handles.append)
+    else:
+        broker_identity = _broker_parent_identity(destination)
     output_manifest = tmp_path / f"{output_capability}.rootsmagic-output.json"
     output_manifest.write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "path": str(destination),
-                "parent_dev": str(destination.parent.stat().st_dev),
-                "parent_ino": str(destination.parent.stat().st_ino),
+                "parent_dev": str(broker_identity[0]),
+                "parent_ino": str(broker_identity[1]),
             }
         )
     )
@@ -348,6 +375,8 @@ def test_native_http_auth_validation_and_full_query(
         finally:
             release.set()
     assert jobs.manager.wait(export_id, timeout=5).state is JobState.COMPLETED
+    if windows_identity:
+        assert closed_handles == [311]
     artifact = client.get(prefix + f"/jobs/{export_id}/result", headers=api_headers).json()
     assert artifact["kind"] == "export"
     assert artifact["result"]["artifact_id"].startswith("art_")
@@ -427,8 +456,8 @@ def test_http_discard_waits_for_final_export_publication_guard(
             {
                 "schema_version": 1,
                 "path": str(destination),
-                "parent_dev": str(destination.parent.stat().st_dev),
-                "parent_ino": str(destination.parent.stat().st_ino),
+                "parent_dev": str(_broker_parent_identity(destination)[0]),
+                "parent_ino": str(_broker_parent_identity(destination)[1]),
             }
         )
     )
@@ -566,8 +595,8 @@ def test_discard_prevents_export(native_client, api_headers, tmp_path, monkeypat
                 {
                     "schema_version": 1,
                     "path": str(destination),
-                    "parent_dev": str(destination.parent.stat().st_dev),
-                    "parent_ino": str(destination.parent.stat().st_ino),
+                    "parent_dev": str(_broker_parent_identity(destination)[0]),
+                    "parent_ino": str(_broker_parent_identity(destination)[1]),
                 }
             )
         )
