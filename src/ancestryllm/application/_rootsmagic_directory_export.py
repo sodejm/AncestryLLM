@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+import sys
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,14 +27,20 @@ from ancestryllm.gedcom.sync_publication import (
     _write_bytes,
 )
 from ancestryllm.gedcom.validator import validate_gedcom_document
+from ancestryllm.rootsmagic.core import RootsMagicReader
 from ancestryllm.rootsmagic.mapping import RootsMagicMapper
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-__all__ = ["RootsMagicDirectoryExportResult", "RootsMagicDirectoryExporter"]
+__all__ = [
+    "RootsMagicDirectoryExportResult",
+    "RootsMagicDirectoryExporter",
+    "export_parent_identity",
+]
 
+_PLATFORM = sys.platform
 _ARTIFACT_NAMES = frozenset({"tree.ged", "report.md", "manifest.json"})
 
 
@@ -45,6 +52,58 @@ class RootsMagicDirectoryExportResult(ServiceResult):
     gedcom: ArtifactRef
     report: ArtifactRef
     state: MutationState
+
+
+def _windows_stat_identity(handle: int) -> tuple[int, int]:
+    """Read Python's full Windows stat identity from an already-held directory."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _FileIdInfo(ctypes.Structure):
+        _fields_ = [("volume", ctypes.c_uint64), ("file_id", ctypes.c_ubyte * 16)]
+
+    information = _FileIdInfo()
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    get_information = kernel32.GetFileInformationByHandleEx
+    get_information.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    get_information.restype = wintypes.BOOL
+    if not get_information(handle, 18, ctypes.byref(information), ctypes.sizeof(information)):
+        error = ctypes.get_last_error()  # type: ignore[attr-defined]
+        raise ctypes.WinError(error)  # type: ignore[attr-defined]
+    inode = int.from_bytes(information.file_id, "little")
+    if inode == 0:
+        raise OSError("The directory handle has no reliable identity.")
+    return int(information.volume), inode
+
+
+def export_parent_identity(target: Path, expected: tuple[int, int]) -> tuple[int, int]:
+    """Verify Node's Windows IDs and translate through the same held handle."""
+    if _PLATFORM != "win32":
+        return expected
+
+    handle: int | None = None
+    try:
+        handle = RootsMagicReader._windows_open_directory_handle(target.parent)
+        if RootsMagicReader._windows_handle_identity(handle) != expected:
+            raise ValueError("Replaced export parent")
+        # libuv uses a 32-bit volume serial and 64-bit file index. Python 3.12+
+        # can use 64/128-bit IDs; truncating them is not valid for every filesystem.
+        return _windows_stat_identity(handle)
+    except (OSError, ValueError) as exc:
+        raise AncestryError(
+            "ROOTSMAGIC_EXPORT_PARENT_INVALID",
+            "The selected export parent directory is unavailable or changed.",
+            "Select an existing local parent directory again.",
+            exit_code=2,
+        ) from exc
+    finally:
+        if handle is not None:
+            RootsMagicReader._windows_close_handle(handle)
 
 
 def _verify_parent(target: Path, expected: tuple[int, int] | None) -> tuple[int, int]:

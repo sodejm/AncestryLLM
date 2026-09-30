@@ -22,7 +22,7 @@ class NativeFunction:
 
 @pytest.mark.parametrize("failure", [None, "unavailable", "zero"])
 def test_export_parent_reads_full_windows_stat_identity(monkeypatch, failure):
-    from ancestryllm.api.rootsmagic_workbench import _windows_stat_identity
+    from ancestryllm.application._rootsmagic_directory_export import _windows_stat_identity
 
     class FileIdInfo(ctypes.Structure):
         _fields_ = [("volume", ctypes.c_uint64), ("file_id", ctypes.c_ubyte * 16)]
@@ -65,7 +65,7 @@ def test_export_parent_reads_full_windows_stat_identity(monkeypatch, failure):
 def test_export_parent_translation_checks_broker_identity_and_releases_handle(
     tmp_path, monkeypatch, failure
 ):
-    from ancestryllm.api import rootsmagic_workbench as native
+    from ancestryllm.application import _rootsmagic_directory_export as native
     from ancestryllm.core.errors import AncestryError
     from ancestryllm.rootsmagic.source import RootsMagicReader
 
@@ -99,15 +99,15 @@ def test_export_parent_translation_checks_broker_identity_and_releases_handle(
     monkeypatch.setattr(
         RootsMagicReader, "_windows_close_handle", lambda handle: calls.append(handle)
     )
-    manifest = native._OutputManifest(
-        schema_version=1, path=str(destination), parent_dev="7", parent_ino="11"
-    )
     if failure:
         with pytest.raises(AncestryError) as raised:
-            native._export_parent_identity(manifest)
+            native.export_parent_identity(destination, (7, 11))
         assert raised.value.code == "ROOTSMAGIC_EXPORT_PARENT_INVALID"
     else:
-        assert native._export_parent_identity(manifest) == ((1 << 60) + 7, (1 << 120) + 11)
+        assert native.export_parent_identity(destination, (7, 11)) == (
+            (1 << 60) + 7,
+            (1 << 120) + 11,
+        )
     if failure == "open":
         assert calls == ["open"]
     elif failure in {"legacy", "mismatch"}:

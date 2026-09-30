@@ -310,7 +310,7 @@ def test_native_http_auth_validation_and_full_query(
     parent_identity = (destination.parent.stat().st_dev, destination.parent.stat().st_ino)
     closed_handles = []
     if windows_identity:
-        from ancestryllm.api import rootsmagic_workbench as native
+        from ancestryllm.application import _rootsmagic_directory_export as native
         from ancestryllm.rootsmagic.source import RootsMagicReader
 
         # Node's legacy Windows IDs need not equal Python's 64/128-bit IDs.

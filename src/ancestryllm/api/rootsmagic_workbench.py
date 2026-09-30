@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import stat
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -13,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ancestryllm.application._rootsmagic_directory_export import export_parent_identity
 from ancestryllm.application._rootsmagic_presets import RootsMagicPresetService
 from ancestryllm.application._rootsmagic_workbench import RootsMagicWorkbench, sanitized_source_name
 from ancestryllm.core.errors import AncestryError
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 _CAPABILITY = re.compile(r"[0-9a-f]{64}\Z")
 _TERMINAL = {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED}
-_PLATFORM = sys.platform
 
 
 class _PathManifest(BaseModel):
@@ -45,60 +44,6 @@ class _SourceManifest(_PathManifest):
     size_bytes: int = Field(ge=0, le=8 * 1024 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     friendly_name: str = Field(min_length=1, max_length=1024)
-
-
-def _windows_stat_identity(handle: int) -> tuple[int, int]:
-    """Read Python's full Windows stat identity from an already-held directory."""
-    import ctypes
-    from ctypes import wintypes
-
-    class _FileIdInfo(ctypes.Structure):
-        _fields_ = [("volume", ctypes.c_uint64), ("file_id", ctypes.c_ubyte * 16)]
-
-    information = _FileIdInfo()
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
-    get_information = kernel32.GetFileInformationByHandleEx
-    get_information.argtypes = [
-        wintypes.HANDLE,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-    ]
-    get_information.restype = wintypes.BOOL
-    if not get_information(handle, 18, ctypes.byref(information), ctypes.sizeof(information)):
-        error = ctypes.get_last_error()  # type: ignore[attr-defined]
-        raise ctypes.WinError(error)  # type: ignore[attr-defined]
-    inode = int.from_bytes(information.file_id, "little")
-    if inode == 0:
-        raise OSError("The directory handle has no reliable identity.")
-    return int(information.volume), inode
-
-
-def _export_parent_identity(manifest: _OutputManifest) -> tuple[int, int]:
-    """Verify Node's Windows IDs and translate through the same held handle."""
-    expected = (int(manifest.parent_dev), int(manifest.parent_ino))
-    if _PLATFORM != "win32":
-        return expected
-    from ancestryllm.rootsmagic.source import RootsMagicReader
-
-    handle: int | None = None
-    try:
-        handle = RootsMagicReader._windows_open_directory_handle(Path(manifest.path).parent)
-        if RootsMagicReader._windows_handle_identity(handle) != expected:
-            raise ValueError("Replaced export parent")
-        # libuv uses a 32-bit volume serial and 64-bit file index. Python 3.12+
-        # can use 64/128-bit IDs; truncating them is not valid for every filesystem.
-        return _windows_stat_identity(handle)
-    except (OSError, ValueError) as exc:
-        raise AncestryError(
-            "ROOTSMAGIC_EXPORT_PARENT_INVALID",
-            "The selected export parent directory is unavailable or changed.",
-            "Select an existing local parent directory again.",
-            exit_code=2,
-        ) from exc
-    finally:
-        if handle is not None:
-            RootsMagicReader._windows_close_handle(handle)
 
 
 def _unavailable() -> AncestryError:
@@ -278,7 +223,9 @@ class NativeRootsMagicWorkbench:
                     source_fingerprint=source.summary.fingerprint,
                     verify_source=source.verify,
                     publication_guard=source.publication_guard,
-                    expected_parent=_export_parent_identity(manifest),
+                    expected_parent=export_parent_identity(
+                        Path(manifest.path), (int(manifest.parent_dev), int(manifest.parent_ino))
+                    ),
                 )
             return CommittedJobResult(
                 {
