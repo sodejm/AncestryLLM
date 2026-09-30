@@ -7,6 +7,7 @@ import type { MainDesktopBridge } from './ipc-handlers'
 import { FilePreferencesStore } from './preferences-store'
 import {
   createGedcomIntakeClient,
+  createRootsMagicWorkbenchClient,
   createSidecarClient,
   requestSidecarRuntimeShutdown,
   type JobShutdownAction,
@@ -24,6 +25,7 @@ import {
 } from './sidecar-supervisor'
 import type { RecordDesktopDiagnostic } from './structured-diagnostics'
 import type { GedcomIntakeClient } from './gedcom-intake-broker'
+import type { RootsMagicWorkbenchClient } from './rootsmagic-workbench-broker'
 
 /**
  * Returns the composed bridge plus the sidecar lifecycle hooks owned by the Electron main process.
@@ -33,6 +35,7 @@ export interface RuntimeBridge {
   supervisor?: SidecarSupervisor
   prepareJobShutdown?: (action: JobShutdownAction) => Promise<void>
   gedcomIntakeClient?: Readonly<GedcomIntakeClient>
+  rootsMagicClient?: Readonly<RootsMagicWorkbenchClient>
 }
 
 /**
@@ -131,6 +134,7 @@ export async function startRuntimeBridge(
     prepareJobShutdown,
     ...(options.gedcomIntakeDirectory === undefined ? {} : {
       gedcomIntakeClient: createGedcomIntakeClient({ session: () => supervisor.session() }),
+      rootsMagicClient: createRootsMagicWorkbenchClient({ session: () => supervisor.session() }),
     }),
   }
 }

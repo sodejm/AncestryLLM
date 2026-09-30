@@ -35,9 +35,15 @@ evidence before a packaged application can claim this Chat destination.
 The desktop portion of `config/release-quality-policy-v1.json` is the only
 release-quality authority for tool versions, coverage, receipt gates,
 performance budgets, and diagnostics policy. Hosted verification uses Python
-3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+3.12, Node.js 26.5.0, pnpm 11.11.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
+
+On Intel macOS, the hosted gate installs pnpm from the isolated
+`desktop/toolchain/pnpm/package.json` manifest with `npm ci`. Its
+`package-lock.json` pins the pnpm 11.11.0 tarball by integrity hash, and the
+workflow verifies the resulting executable version. Application dependencies
+still use only `desktop/pnpm-lock.yaml`.
 
 The source verification matrix is deliberately layered:
 
@@ -275,8 +281,15 @@ specifications deliberately avoid `browser.electron.execute`: renderer state is
 observed through WebDriver, while Main-process and sidecar lifecycle evidence
 comes from bounded native process snapshots. No repository-authored CDP
 endpoint, remote-debugging argument, direct CDP command, or external Chromium
-launch is part of product verification. A separate launch uses a fresh profile
-and the selected packaged runtime without WebDriver: the production package on
+launch is part of product verification. Native snapshots match the isolated
+Main process by executable and profile arguments. On Windows, the native
+executable path supplies identity when the launched command omits the profile
+argument. On Linux, a renderer whose inherited process title
+still says `zygote` is inferred from the largest memory-resident leaf zygote in
+the isolated application tree after WebDriver confirms the renderer DOM is live;
+this is process-observation evidence, not a direct renderer PID API. The
+separate launch uses a fresh profile and the selected packaged runtime without
+WebDriver: the production package on
 Windows and the unpublished verifier package on Linux and macOS. The test
 verifies that neither its process tree nor captured output exposes a debugging
 surface. The normal launch waits for a constant, non-sensitive lifecycle record
@@ -380,10 +393,16 @@ clear actions and their generic failure states without returning a path or
 record content.
 
 Diagnostic files are deliberately excluded from CI and release artifacts and
-there is no export or upload path. The exact stderr shutdown receipt remains a
-separate, authoritative Main-process check; diagnostic JSON and arbitrary
-child output cannot satisfy it. Packaged verification may exercise the
-feature, but it must not collect the local diagnostic directory.
+there is no application export or upload path. Before deleting a failed
+packaged test's isolated profile, the verification runner emits at most 100
+known startup event codes with their component names and canonical timestamps.
+It reads only bounded regular files, rejects symlinks and malformed records,
+and omits all metadata, launch identifiers, paths, and record payloads. This
+sanitized stage receipt helps distinguish executable verification, readiness,
+and health failures; it does not collect the local diagnostic directory.
+The exact stderr shutdown receipt remains a separate, authoritative
+Main-process check; diagnostic JSON and arbitrary child output cannot satisfy
+it. Successful runs emit no startup-stage receipt.
 
 The performance policy is versioned as `desktop-unpacked-v1` and is a hard gate,
 not an informational benchmark:
@@ -429,6 +448,94 @@ exits with it. The integrity-substitution scenario instead proves generic
 consumes no automatic restart. The file-grant scenario proves path-free public
 DTOs and the grant lifecycle against native open/save behavior in a package
 whose verification adapter is excluded from production output.
+
+The 0.7 RootsMagic workbench runs an additional packaged scenario on each native
+row. It exercises a fictional source, paginated presets, person-rooted export,
+digest agreement, source immutability, artifact reveal requests, and keyboard navigation
+with automated WCAG checks. Its `packagedRootsMagicWorkbenchPassed` receipt and
+`rootsmagic-workbench.json` observation document are uploaded beside the core
+evidence. This standalone receipt is outside the core receipt directory and does
+not expand the 0.6 aggregate gate set. A successful local run proves only its
+recorded native target; manual screen-reader acceptance and the remaining hosted
+targets require their own evidence before #119 closes.
+The verification-only dialog adapter supplies the selected fixture paths and
+checks that reveal receives the exact authorized export folder. It does not open
+the operating system's file browser. Native picker interaction and visible file
+browser reveal therefore require separate manual acceptance evidence.
+
+The PR #497 review regressions cover the 8 GiB source boundary, final-page
+offset, control-character normalization, retryable source discard, living-person
+redaction, stable path-free error codes, late inspection disposal, and fresh
+destination grants after failed or cancelled exports. Python regressions check
+database and WAL fingerprints and cancellation around publication. The packaged
+scenario checks the database fingerprint, bounded pages, rooted redacted exports,
+digest agreement, retained source access after Task Center navigation, and
+explicit source disposal. These fixes preserve
+the existing service and desktop authority boundaries in `ARCHITECTURE.md` and
+the RootsMagic threat model; neither boundary changes.
+
+Further review regressions keep source replacement and in-flight export receipts
+retryable after failed disposal, retire superseded completed export authority,
+reject generation limits for connected exports at the HTTP boundary, and retain
+one main landmark in the application shell. The renderer and broker tests cover
+these behaviors with fictional data and opaque capabilities.
+
+Inspection-result regressions cover returned errors and rejected lookups. The
+workspace retains the job until it transfers the source or confirms cleanup,
+shares an in-flight lookup with navigation cleanup, and retries failed cleanup
+before admitting another source selection. Slow Diagnostics retry regressions
+prove recovery after six seconds and cancellation at its dedicated 30-second
+deadline while ordinary requests retain their five-second bound. These fixes
+preserve the existing user workflow, service contracts, architecture, and threat
+model boundaries; no additional user or API documentation changes are required.
+
+The source reader also supports SQLite builds that omit the optional
+`enable_load_extension` API. Database and WAL regressions exercise inspection,
+bounded pagination, disposal, and unchanged database and companion-file bytes
+under that runtime condition. SQL extension loading remains denied by the
+connection authorizer. This compatibility fix addresses the frozen macOS
+inspection failure that occurs before Electron or native dialogs start.
+
+Additional review regressions require a trusted resolved source separately from
+the opaque public source reference, reject an excluded living export root,
+preserve source-session and capacity error codes, and compare the opened file
+descriptor with the picker-approved identity before and after hashing. The
+frozen sidecar smoke test runs fictional GEDCOM intake and RootsMagic inspection,
+paging, and disposal before Electron starts, with bounded polling and path-free
+failure codes. Packaged launch timings end at renderer readiness; process
+identity is still required and its lookup time is measured separately.
+
+If a frozen runtime cannot parse a source schema, the smoke check forwards only
+an allowlisted exception type and, for a missing SQLGlot module, its validated
+module name. Schema validation also reports a fixed inspection, metadata, or
+required-record stage and an allowlisted error type. It excludes source paths,
+vendor SQL, exception messages, and raw
+subprocess output. Packaged settings interactions wait for preference persistence
+to re-enable the controls before changing the next preference.
+
+The #119 acceptance criteria map to the following checks. Passing an automated
+check establishes its stated boundary; it does not substitute for the remaining
+native-target or assistive-technology evidence.
+
+| Acceptance criterion | Automated evidence | Remaining closure evidence |
+|---|---|---|
+| Select, summarize, query, and export an immutable source | `tests/api/test_rootsmagic_workbench.py`; `desktop/e2e/rootsmagic-workbench.packaged.wdio.ts` | Successful packaged receipt for every supported native target; native picker acceptance |
+| Byte-identical source before and after use | WAL and companion-file checks in `tests/modular/test_rootsmagic_workbench.py` and `tests/modular/test_rootsmagic_directory_export.py`; packaged fixture digest | Target-matched packaged receipts |
+| Malformed or unsupported input returns stable errors | Reader, schema-capability, source-session, and HTTP tests | Reconcile any target-specific failures; vendor version metadata may honestly remain unknown |
+| Reject unknown fields, SQL, and invalid parameters | `tests/modular/test_rootsmagic_presets.py`; strict API and desktop contract tests | Required source gates on the final commit |
+| Bound large result sets and keep paging responsive | Large fictional fixture, timeout, payload, literal-filter, and stable-page tests in `tests/modular/test_rootsmagic_presets.py`; renderer and packaged paging | Required source gates and target-matched packaged receipts |
+| Cancellation publishes no partial result | Precommit cancellation, post-rename committed outcome, and both HTTP export/discard orderings | Required source gates on the final commit |
+| Refuse aliases and publish a complete new folder atomically | `tests/modular/test_rootsmagic_directory_export.py`; broker output-grant tests; packaged file/digest assertions | Target-matched packaged receipts |
+| Complete keyboard and screen-reader workflow | Renderer focus/live-region tests, packaged Tab/Enter/Space navigation, and automated WCAG checks | Manual screen-reader, native picker, and visible file-browser reveal acceptance |
+
+Manual acceptance must record the tested commit, native OS/architecture,
+assistive technology and version, and observed result. Cover source selection,
+inspection announcements, each preset and pagination, root selection, export
+scope and immutable-source confirmation, Task Center progress/cancellation,
+errors and focus recovery, artifact reveal, and source disposal. Do not mark the
+screen-reader criterion complete from axe or keyboard automation alone. Signed
+commits, hosted review, and the required final-commit gates remain delivery
+requirements in addition to this behavior evidence.
 
 Every native row also binds `sidecar-process-tree-guard.json` to the
 `sidecarProcessTreeGuardPassed` receipt. On the exact-head Windows ARM64 hosted

@@ -19,6 +19,7 @@ import type {
   ProviderConfiguration,
 } from '../shared-contract/desktop'
 import { desktopChannels, desktopEventChannels } from '../shared-contract/desktop'
+import type { RootsMagicPresetDefinitions } from '../shared-contract/rootsmagic'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
 import { SidecarClientError } from './sidecar-client'
@@ -506,7 +507,73 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(42)
+    expect(handlers.size).toBe(50)
+  })
+
+  it('envelopes RootsMagic preset definitions returned by the native broker', async () => {
+    const presets = Object.freeze({
+      schema_version: 1 as const,
+      queries: Object.freeze([
+        Object.freeze({
+          query_id: 'people' as const,
+          label: 'People',
+          description: 'Browse people.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'family_links' as const,
+          label: 'Family links',
+          description: 'Browse family links.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'events' as const,
+          label: 'Events',
+          description: 'Browse events.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+      ]),
+    }) satisfies RootsMagicPresetDefinitions
+    const rootsMagic = {
+      inspect: vi.fn(),
+      presets: vi.fn().mockResolvedValue(presets),
+      query: vi.fn(),
+      selectOutput: vi.fn(),
+      export: vi.fn(),
+      result: vi.fn(),
+      discard: vi.fn(),
+      reveal: vi.fn(),
+      observeJob: vi.fn(),
+      revokeGrant: vi.fn(),
+      revokeOwner: vi.fn(),
+      revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+
+    await expect(handlers.get(desktopChannels.getRootsMagicPresets)!(event())).resolves.toEqual(
+      result(presets),
+    )
+    expect(rootsMagic.presets).toHaveBeenCalledWith(expect.any(AbortSignal))
+  })
+
+  it.each([
+    'ROOTSMAGIC_CAPABILITY_INVALID', 'ROOTSMAGIC_RESULT_UNAVAILABLE', 'ROOTSMAGIC_SOURCE_UNAVAILABLE',
+    'ROOTSMAGIC_JOB_CAPACITY', 'ROOTSMAGIC_SOURCE_CAPACITY',
+  ] as const)('preserves %s without forwarding private error details', async (code) => {
+    const failure = new SidecarClientError(code)
+    failure.message = '/private/family-tree.rmtree: private payload\u0000'
+    const rootsMagic = {
+      inspect: vi.fn(), presets: vi.fn().mockRejectedValue(failure), query: vi.fn(),
+      selectOutput: vi.fn(), export: vi.fn(), result: vi.fn(), discard: vi.fn(), reveal: vi.fn(),
+      observeJob: vi.fn(), revokeGrant: vi.fn(), revokeOwner: vi.fn(), revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+    const response = await handlers.get(desktopChannels.getRootsMagicPresets)!(event())
+    expect(response).toMatchObject({ ok: false, error: { code } })
+    expect(JSON.stringify(response)).not.toMatch(/family-tree|private payload|\\u0000/)
   })
 
   it('authorizes and bounds GEDCOM intake before entering its native owner port', async () => {
@@ -1290,6 +1357,50 @@ describe('desktop IPC handlers', () => {
       ok: false,
       error: { code: 'UNAUTHORIZED_SENDER' },
     })
+  })
+
+  it('allows sidecar recovery beyond the ordinary request deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      const recovered = await control.retrySidecar()
+      vi.mocked(control.retrySidecar).mockImplementation(() => new Promise((resolve) => {
+        setTimeout(() => resolve(recovered), 6_000)
+      }))
+      vi.mocked(control.getAppInfo).mockImplementation(() => new Promise(() => undefined))
+      const { event, handlers } = harness(control)
+      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
+      const ordinary = handlers.get(desktopChannels.getAppInfo)?.(event())
+      const ordinaryAssertion = expect(ordinary).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+      await vi.advanceTimersByTimeAsync(5_000)
+      await ordinaryAssertion
+      await vi.advanceTimersByTimeAsync(1_000)
+      await expect(retry).resolves.toEqual(recovered)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds stalled sidecar recovery and aborts it at its dedicated deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      let signal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((received) => {
+        signal = received
+        return new Promise(() => undefined)
+      })
+      const { event, handlers } = harness(control)
+      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
+      const assertion = expect(retry).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await assertion
+      expect(signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('returns a stable timeout while the underlying operation remains stalled', async () => {

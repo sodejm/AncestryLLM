@@ -2,7 +2,13 @@
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { StringDecoder } from 'node:string_decoder'
 import type { GedcomIntakeClient } from './gedcom-intake-broker'
+import type { RootsMagicWorkbenchClient } from './rootsmagic-workbench-broker'
 import { parseGedcomRootQuery } from '../shared-contract/gedcom'
+import {
+  parseRootsMagicExportRequest,
+  parseRootsMagicQueryRequest,
+  parseRootsMagicSourceReferenceRequest,
+} from '../shared-contract/rootsmagic'
 import {
   DESKTOP_PROTOCOL_VERSION,
   type ApplicationSettings,
@@ -50,6 +56,9 @@ import {
   parseGedcomInspectionResult,
   parseGedcomRootPageResult,
   parseGedcomDiscardResult,
+  parseRootsMagicAcknowledgementResult,
+  parseRootsMagicJobResultResult,
+  parseRootsMagicPresetDefinitionsResult,
   parseProviderConfigurationResult,
   parseProviderEndpointValidationResult,
   parseSecretStatusResult,
@@ -72,6 +81,7 @@ const RUNTIME_SHUTDOWN_PATH = '/api/v1/runtime/shutdown' as const
 const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
 const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
 const GEDCOM_INTAKE_PATH = '/api/v1/gedcom/intake' as const
+const ROOTSMAGIC_PATH = '/api/v1/rootsmagic' as const
 const MAX_RESPONSE_BYTES = 1_048_576
 const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
@@ -94,7 +104,9 @@ type SidecarPath =
   | typeof CHAT_CAPABILITY_PATH
   | typeof CHAT_SESSIONS_PATH
   | typeof GEDCOM_INTAKE_PATH
+  | typeof ROOTSMAGIC_PATH
   | `/api/v1/gedcom/intake/${string}`
+  | `/api/v1/rootsmagic/${string}`
   | `/api/v1/jobs/${string}`
   | `/api/v1/jobs/${string}/cancel`
   | `/api/v1/jobs/${string}/events`
@@ -146,6 +158,11 @@ export type SidecarClientFailure =
   | 'GEDCOM_INTAKE_CAPACITY'
   | 'GEDCOM_JOB_RESULT_UNAVAILABLE'
   | 'GEDCOM_ROOT_CURSOR_INVALID'
+  | 'ROOTSMAGIC_CAPABILITY_INVALID'
+  | 'ROOTSMAGIC_RESULT_UNAVAILABLE'
+  | 'ROOTSMAGIC_SOURCE_UNAVAILABLE'
+  | 'ROOTSMAGIC_JOB_CAPACITY'
+  | 'ROOTSMAGIC_SOURCE_CAPACITY'
 
 /**
  * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
@@ -494,6 +511,18 @@ function gedcomFailure(response: Readonly<SidecarHttpResponse>): SidecarClientEr
     || code === 'GEDCOM_INTAKE_CAPACITY'
     || code === 'GEDCOM_JOB_RESULT_UNAVAILABLE'
     || code === 'GEDCOM_ROOT_CURSOR_INVALID') {
+    return new SidecarClientError(code)
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function rootsMagicFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'ROOTSMAGIC_CAPABILITY_INVALID'
+    || code === 'ROOTSMAGIC_RESULT_UNAVAILABLE'
+    || code === 'ROOTSMAGIC_SOURCE_UNAVAILABLE'
+    || code === 'ROOTSMAGIC_JOB_CAPACITY'
+    || code === 'ROOTSMAGIC_SOURCE_CAPACITY') {
     return new SidecarClientError(code)
   }
   return new SidecarClientError('request_failed')
@@ -1175,6 +1204,96 @@ export function createGedcomIntakeClient(dependencies: Readonly<{
     },
     async discard(jobId) {
       return perform(`${jobPath(jobId)}/discard`, parseGedcomDiscardResult,
+        undefined, { method: 'POST' })
+    },
+  })
+}
+
+/** Binds the path-free RootsMagic workbench to the current authenticated sidecar session. */
+export function createRootsMagicWorkbenchClient(dependencies: Readonly<{
+  session(): Readonly<AuthenticatedSidecarSession> | undefined
+  request?: SidecarRequest
+}>): Readonly<RootsMagicWorkbenchClient> {
+  const transport = dependencies.request ?? requestFixedRoute
+  const perform = async <T>(path: SidecarPath,
+    parser: (value: unknown) => { ok: boolean; data?: Readonly<T> },
+    signal?: AbortSignal, options?: SidecarRequestOptions,
+    session = dependencies.session()): Promise<Readonly<T>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      const response = await transport(session, path, signal, options)
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (response.statusCode !== 200) throw rootsMagicFailure(response)
+      return parseJson(response, parser)
+    } catch (cause) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (cause instanceof SidecarClientError) throw cause
+      throw new SidecarClientError('request_failed')
+    }
+  }
+  const parseCancellation = (value: unknown): { ok: boolean; data?: { job: Readonly<JobSnapshot> | null } } => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)
+      || !('data' in value)) return { ok: false }
+    const body = value.data
+    if (typeof body !== 'object' || body === null || Array.isArray(body)
+      || Object.keys(body).length !== 2 || !('schema_version' in body)
+      || body.schema_version !== 1 || !('job' in body)) return { ok: false }
+    if (body.job === null) return { ok: true, data: { job: null } }
+    const parsed = parseJobSnapshotResult({ ok: true,
+      protocolVersion: DESKTOP_PROTOCOL_VERSION, data: body.job })
+    return parsed.ok ? { ok: true, data: { job: parsed.data } } : { ok: false }
+  }
+  const submit = async (path: SidecarPath, capability: string, body: unknown,
+    preserveExport: boolean, signal?: AbortSignal): Promise<Readonly<JobSnapshot>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      return await perform(path, parseJobSnapshotResult, signal,
+        { method: 'POST', body: JSON.stringify(body) }, session)
+    } catch (cause) {
+      if (!(cause instanceof SidecarClientError)
+        || !['cancelled', 'request_failed', 'invalid_response'].includes(cause.reason)) throw cause
+      // Cancellation must reach the accepting session even after its caller aborts.
+      const recovered = await perform(`${ROOTSMAGIC_PATH}/submissions/${capability}/cancel`,
+        parseCancellation, undefined,
+        { method: 'POST', body: JSON.stringify({ schema_version: 1 }) }, session)
+      if (preserveExport && recovered.job) return recovered.job
+      throw cause
+    }
+  }
+  const jobId = (value: string) => parseJobRequest({ schema_version: 1, job_id: value }).job_id
+  return Object.freeze<RootsMagicWorkbenchClient>({
+    inspect(sourceCapability, signal) {
+      const capability = parseRootsMagicSourceReferenceRequest({ schema_version: 1,
+        source_ref: sourceCapability }).source_ref
+      return submit(`${ROOTSMAGIC_PATH}/sources`, capability,
+        { schema_version: 1, source_capability: capability }, false, signal)
+    },
+    presets(signal) {
+      return perform(`${ROOTSMAGIC_PATH}/presets`, parseRootsMagicPresetDefinitionsResult, signal)
+    },
+    query(request, signal) {
+      const parsed = parseRootsMagicQueryRequest(request)
+      return perform(`${ROOTSMAGIC_PATH}/queries`, parseJobSnapshotResult, signal, {
+        method: 'POST', body: JSON.stringify(parsed),
+      })
+    },
+    export(request, signal) {
+      const parsed = parseRootsMagicExportRequest(request)
+      return submit(`${ROOTSMAGIC_PATH}/exports`, parsed.output_capability, parsed, true, signal)
+    },
+    result(value, signal) {
+      return perform(`${ROOTSMAGIC_PATH}/jobs/${jobId(value)}/result`, parseRootsMagicJobResultResult, signal)
+    },
+    discard(sourceRef) {
+      const parsed = parseRootsMagicSourceReferenceRequest({ schema_version: 1, source_ref: sourceRef })
+      return perform(`${ROOTSMAGIC_PATH}/sources/${parsed.source_ref}/discard`, parseRootsMagicAcknowledgementResult,
+        undefined, { method: 'POST', body: JSON.stringify({ schema_version: 1 }) })
+    },
+    cancel(value) {
+      return perform(`/api/v1/jobs/${jobId(value)}/cancel`, parseJobSnapshotResult,
         undefined, { method: 'POST' })
     },
   })

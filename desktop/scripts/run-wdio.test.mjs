@@ -1,7 +1,7 @@
 /** Verifies isolated WebdriverIO scenario orchestration. */
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -269,6 +269,93 @@ test('packaged grep resolves one declared scenario before package preparation', 
   )
 })
 
+test('failed packaged retry preserves startup stages before profile cleanup', (context) => {
+  const profile = mkdtempSync(join(tmpdir(), 'ancestryllm-startup-diagnostics-'))
+  const messages = []
+  context.mock.method(console, 'info', (...args) => messages.push(args))
+  mkdirSync(join(profile, 'diagnostics'))
+  const events = [
+    ['SIDECAR_SPAWN_SUCCEEDED', '2026-09-28T17:00:00.000Z'],
+    ['SIDECAR_STARTUP_TIMEOUT', '2026-09-28T17:00:10.000Z'],
+  ].map(([code, timestamp]) => ({
+    schema_version: 'ancestryllm.desktop-diagnostic/1',
+    component: 'electron-main',
+    code,
+    timestamp,
+    run_id: 'private-session',
+    metadata: { private_path: '/private/source.rmtree', payload: 'private genealogy' },
+  }))
+  writeFileSync(join(profile, 'diagnostics', 'electron-main.jsonl'),
+    events.map((event) => JSON.stringify(event)).join('\n'))
+  const options = runnerOptions([])
+  try {
+    assert.equal(runWdio('packaged', ['--grep', 'withholds'], {
+      ...options,
+      mkdtempSyncImpl: () => profile,
+      spawnSyncImpl: () => ({ error: undefined, signal: null, status: 7 }),
+      rmSyncImpl(path) {
+        if (path !== profile) return
+        assert.equal(messages.length, 1, 'startup stages must be emitted before deleting the profile')
+        rmSync(path, { force: true, recursive: true })
+      },
+    }), 7)
+    assert.equal(messages[0][0], '[packaged-startup-diagnostics]')
+    assert.deepEqual(JSON.parse(messages[0][1]), {
+      events: events.map(({ timestamp, component, code }) => ({ timestamp, component, code })),
+    })
+    assert.doesNotMatch(JSON.stringify(messages), /private-session|source\.rmtree|private genealogy/u)
+  } finally {
+    rmSync(profile, { force: true, recursive: true })
+  }
+})
+
+test('packaged failure diagnostics bound events and reject untrusted files and fields', (context) => {
+  const profile = mkdtempSync(join(tmpdir(), 'ancestryllm-startup-bounds-'))
+  const directory = join(profile, 'diagnostics')
+  const messages = []
+  context.mock.method(console, 'info', (...args) => messages.push(args))
+  mkdirSync(directory)
+  const event = {
+    schema_version: 'ancestryllm.desktop-diagnostic/1',
+    component: 'electron-main',
+    code: 'SIDECAR_SPAWN_SUCCEEDED',
+    timestamp: '2026-09-28T17:00:00.000Z',
+  }
+  const rows = Array.from({ length: 120 }, () => JSON.stringify(event))
+  rows.push(
+    '{broken',
+    JSON.stringify({ ...event, code: '/private/unknown-code' }),
+    JSON.stringify({ ...event, component: '/private/unknown-component' }),
+    JSON.stringify({ ...event, timestamp: '/private/unknown-timestamp' }),
+    JSON.stringify({ ...event, schema_version: 'unknown' }),
+    JSON.stringify({ ...event, metadata: { payload: 'private'.repeat(1000) } }),
+  )
+  writeFileSync(join(directory, 'electron-main.jsonl'), rows.join('\n'))
+  writeFileSync(join(directory, 'python-core.jsonl'), 'x'.repeat(512 * 1024 + 1))
+  writeFileSync(join(profile, 'private.jsonl'), JSON.stringify({ ...event, code: 'SIDECAR_HEALTH_REJECTED' }))
+  if (process.platform !== 'win32') {
+    symlinkSync(join(profile, 'private.jsonl'), join(directory, 'electron-main.jsonl.1'))
+  }
+  const options = runnerOptions([])
+  try {
+    assert.equal(runWdio('packaged', ['--grep', 'withholds'], {
+      ...options,
+      mkdtempSyncImpl: () => profile,
+      spawnSyncImpl: () => ({ error: undefined, signal: null, status: 1 }),
+      rmSyncImpl(path) {
+        if (path === profile) rmSync(path, { force: true, recursive: true })
+      },
+    }), 1)
+    assert.equal(messages.length, 1)
+    const captured = JSON.parse(messages[0][1]).events
+    assert.equal(captured.length, 100)
+    assert.equal(captured.every((entry) => entry.code === 'SIDECAR_SPAWN_SUCCEEDED'), true)
+    assert.doesNotMatch(JSON.stringify(messages), /private|unknown|payload/u)
+  } finally {
+    rmSync(profile, { force: true, recursive: true })
+  }
+})
+
 test('packaged grep rejects zero declared scenario matches before preparation', () => {
   const calls = []
 
@@ -393,13 +480,13 @@ test('complete packaged plan prepares and cleans every isolated scenario', () =>
   ))
 
   assert.equal(status, 0)
-  assert.equal(invocations.length, 6)
-  assert.equal(preparations.length, 6)
-  assert.equal(packageCleanups.length, 6)
+  assert.equal(invocations.length, 7)
+  assert.equal(preparations.length, 7)
+  assert.equal(packageCleanups.length, 7)
   assert.equal(invocations.every(({ options }) => (
     options.env.ANCESTRYLLM_PACKAGED_EXECUTABLE === '/repo/release/ancestryllm'
   )), true)
-  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).length, 5)
+  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).length, 6)
   assert.equal(invocations.filter(({ args }) => (
     args.includes('/repo/desktop/scripts/verify-normal-launch.mjs')
   )).length, 1)
@@ -414,11 +501,11 @@ test('non-filter options are forwarded to every isolated packaged scenario', () 
     .map(({ preparation }) => preparation.scenario)
 
   assert.equal(status, 0)
-  assert.equal(invocations.length, 6)
-  assert.equal(preparations.length, 6)
-  assert.equal(new Set(preparations).size, 6)
+  assert.equal(invocations.length, 7)
+  assert.equal(preparations.length, 7)
+  assert.equal(new Set(preparations).size, 7)
   assert.equal(preparations.every((scenario) => scenario.length > 0), true)
-  assert.equal(invocations.slice(0, 5).every(({ args }) => (
+  assert.equal(invocations.filter(({ args }) => args.includes('--suite')).every(({ args }) => (
     args.includes('--mochaOpts.grep')
       && args.includes('--logLevel')
       && args.includes('debug')

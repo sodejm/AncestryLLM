@@ -62,6 +62,15 @@ def _truthy(value: Any) -> bool:
     return str(value).strip().casefold() in {"1", "true", "yes"}
 
 
+def _known_deceased(row: dict[str, Any]) -> bool:
+    """Protect absent, conflicting, or unrecognized living-status values."""
+    values = [value for key, value in row.items() if key.casefold() in {"living", "isliving"}]
+    return bool(values) and all(
+        not isinstance(value, bytes) and str(value).strip().casefold() in {"0", "false", "no"}
+        for value in values
+    )
+
+
 def _tag_name(column: str) -> str:
     clean = re.sub(r"[^A-Za-z0-9_]", "_", column).upper()
     return ("_RM_" + clean)[:31]
@@ -666,8 +675,21 @@ class RootsMagicMapper:
                     "Person identities are missing or duplicated; safe export is unavailable.",
                 )
             people_by_id[person_id] = row
-            if _truthy(_value(row, "Living", "IsLiving", default="0")):
+            if not _known_deceased(row):
                 living_ids.add(person_id)
+
+        if root_person_id is not None and root_person_id not in people_by_id:
+            raise AncestryError(
+                "ROOTSMAGIC_EXPORT_ROOT_NOT_FOUND",
+                "The selected root person is not present in this RootsMagic source.",
+            )
+
+        if living == "exclude" and root_person_id in living_ids:
+            raise AncestryError(
+                "ROOTSMAGIC_EXPORT_ROOT_EXCLUDED",
+                "The selected root person is excluded by the living-person policy.",
+                "Choose anonymize or include, or select a different root person.",
+            )
 
         selected_rows = [
             row
@@ -719,8 +741,10 @@ class RootsMagicMapper:
                 _identifier(row, "MotherID", "WifeID"),
                 *children_by_family.get(family_id, []),
             } - {"", "0", "None"}
-            if living != "include" and members & living_ids:
+            protected_members = living != "include" and bool(members & living_ids)
+            if protected_members or not members.issubset(person_map):
                 unsafe_family_ids.add(family_id)
+            if living == "exclude" and protected_members:
                 continue
             if not any(member in person_map for member in members):
                 continue
@@ -894,7 +918,7 @@ class RootsMagicMapper:
                 for person_id, rows in names_by_person.items()
                 if not (living == "redact" and person_id in living_ids)
             ),
-            "family": len(publishable_families),
+            "family": sum(family_id not in unsafe_family_ids for family_id in family_map),
             "child": sum(
                 1
                 for row in adapter.rows("child")
@@ -1090,6 +1114,8 @@ class RootsMagicMapper:
                 for child_id in children_by_family.get(family_id, [])
                 if child_id in person_map
             )
+            if family_id in unsafe_family_ids:
+                continue
             if profile == "preservation":
                 lines.extend(_extension_lines(row, _KNOWN_COLUMNS["family"], level=1))
             append_owned_payload(

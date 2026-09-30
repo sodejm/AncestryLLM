@@ -10,6 +10,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import ancestryllm.rootsmagic.exporter as exporter_compatibility
 import ancestryllm.rootsmagic.mapping as mapping_implementation
 import ancestryllm.rootsmagic.reader as reader_compatibility
@@ -155,3 +157,34 @@ def test_schema_and_query_dtos_are_deterministic_json_safe_and_immutable(
     json.dumps(dataclasses.asdict(schema), allow_nan=False)
     json.dumps(dataclasses.asdict(result), allow_nan=False)
     assert _sha256(tree) == before
+
+
+@pytest.mark.parametrize("missing_module", ["sqlglot.generators.sqlite", "/private/payload"])
+def test_schema_parser_failure_reports_only_safe_runtime_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    missing_module: str,
+) -> None:
+    tree = tmp_path / "private-fictional.rmtree"
+    connection = sqlite3.connect(tree)
+    try:
+        connection.execute("CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    def fail_parse(*args: object, **kwargs: object) -> None:
+        raise ModuleNotFoundError(f"private SQL and path: {tree}", name=missing_module)
+
+    monkeypatch.setattr(source_implementation, "parse", fail_parse)
+    schema = RootsMagicReader([tmp_path]).inspect_schema(tree)
+
+    assert schema.tables[0].columns == ()
+    assert "ROOTSMAGIC_SCHEMA_PARSE_FAILED: ModuleNotFoundError" in caplog.text
+    if missing_module.startswith("sqlglot."):
+        assert f"module={missing_module}" in caplog.text
+    else:
+        assert "module=" not in caplog.text
+    assert str(tree) not in caplog.text
+    assert "private SQL" not in caplog.text

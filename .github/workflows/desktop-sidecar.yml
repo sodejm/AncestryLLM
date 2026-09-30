@@ -89,7 +89,7 @@ jobs:
           node-version: "26.5.0"
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: "11.9.0"
+          version: "11.11.0"
       - name: Install locked dependencies
         shell: bash
         run: |
@@ -159,6 +159,24 @@ jobs:
           --gate sidecarCompatibilityPassed
           --gate sidecarIntegrityPassed
           -- pnpm --dir desktop run test:coverage
+      - name: Prepare Chromium sandbox for source Linux verification
+        shell: bash
+        run: |
+          electron_binary="$(node -p "require('./desktop/node_modules/electron')")"
+          sandbox_path="$(dirname "$electron_binary")/chrome-sandbox"
+          test ! -L "$sandbox_path"
+          sandbox_path="$(realpath -- "$sandbox_path")"
+          case "$sandbox_path" in
+            "$GITHUB_WORKSPACE/desktop/node_modules/"*) ;;
+            *)
+              echo "::error::Unexpected source Chromium sandbox path"
+              exit 1
+              ;;
+          esac
+          test -f "$sandbox_path"
+          sudo chown root:root -- "$sandbox_path"
+          sudo chmod 4755 -- "$sandbox_path"
+          test "$(stat -c '%U:%G:%a' -- "$sandbox_path")" = "root:root:4755"
       - name: Verify desktop accessibility
         shell: bash
         env:
@@ -437,9 +455,19 @@ jobs:
           if ($nodeArch -ne 'arm64') { throw "expected arm64 Node.js runtime, found $nodeArch" }
           $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
           if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
+      # The action's pnpm 11 self-update requires an Intel native binary absent
+      # from the pnpm 11.11.0 lockfile. npm ci verifies the pinned JS tarball hash.
+      - name: Set up integrity-locked pnpm on Intel macOS
+        if: runner.os == 'macOS' && matrix.runtime_arch == 'x64'
+        shell: bash
+        run: |
+          npm ci --prefix desktop/toolchain/pnpm --ignore-scripts --no-audit --no-fund
+          test "$(desktop/toolchain/pnpm/node_modules/.bin/pnpm --version)" = "11.11.0"
+          echo "$GITHUB_WORKSPACE/desktop/toolchain/pnpm/node_modules/.bin" >> "$GITHUB_PATH"
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: runner.os != 'macOS' || matrix.runtime_arch != 'x64'
         with:
-          version: "11.9.0"
+          version: "11.11.0"
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
@@ -755,6 +783,56 @@ jobs:
             --file-grant-evidence "$ROW_ROOT/file-grant-mediation.json" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
+      - name: Exercise packaged RootsMagic workbench
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
+          mkdir -p "$ROW_ROOT/rootsmagic-fixtures"
+          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
+          export ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1
+          export ANCESTRYLLM_ROOTSMAGIC_VERIFICATION=1
+          export ANCESTRYLLM_FILE_GRANT_OPEN_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree"
+          export ANCESTRYLLM_ROOTSMAGIC_OUTPUT_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/export"
+          export ANCESTRYLLM_ROOTSMAGIC_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-workbench.json"
+          package_launcher=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$ROW_ROOT/rootsmagic-receipt.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
+            --allow-output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-file-grants.json" \
+            --allow-output "$ROW_ROOT/packaged-metrics.json" \
+            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
+            --allow-output "$ROW_ROOT/fuse-inspection.json" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/input.ged" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
+            --allow-output "$ROW_ROOT/file-grant-mediation.json" \
+            --allow-output "$ROW_ROOT/target.json" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/tree.ged" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/report.md" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/manifest.json" \
+            --gate packagedRootsMagicWorkbenchPassed \
+            --artifact rootsMagicEvidence="$ANCESTRYLLM_ROOTSMAGIC_EVIDENCE" \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "queries and exports an immutable RootsMagic source through the native workbench"
       - name: Upload partial native-package diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

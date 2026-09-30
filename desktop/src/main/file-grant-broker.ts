@@ -77,6 +77,11 @@ export interface ResolvedFileGrant {
   readonly maxBytes: number
 }
 
+/** Binds a main-process read to the single-link file approved by the picker. */
+export interface ResolvedReadFileGrant extends ResolvedFileGrant {
+  readonly fingerprint: Readonly<FileFingerprint>
+}
+
 /** Reports a private staged input without exposing its main-process-only path. */
 export interface StagedReadGrant {
   readonly grantId: FileGrantId
@@ -114,7 +119,8 @@ interface PurposePolicy {
   readonly maxBytes: number
 }
 
-interface Fingerprint {
+/** Captures the approved file identity and metadata for later read verification. */
+export interface FileFingerprint {
   readonly dev: number
   readonly ino: number
   readonly mode: number
@@ -123,6 +129,8 @@ interface Fingerprint {
   readonly mtimeMs: number
   readonly ctimeMs: number
 }
+
+type Fingerprint = FileFingerprint
 
 interface Binding {
   readonly owner: object
@@ -961,7 +969,7 @@ export class FileGrantBroker {
     owner: object,
     grantId: FileGrantId,
     purpose: FileReadPurpose,
-  ): Promise<Readonly<ResolvedFileGrant>> {
+  ): Promise<Readonly<ResolvedReadFileGrant>> {
     const binding = this.binding(owner, grantId, purpose, 'read')
     binding.redeemed = true
     try {
@@ -973,7 +981,10 @@ export class FileGrantBroker {
       this.removeBinding(binding)
       throw error
     }
-    return Object.freeze({ grantId, purpose, access: 'read', path: binding.path, maxBytes: binding.maxBytes })
+    // Successful validation above requires the original approved fingerprint.
+    if (binding.fingerprint === null) fail('FILE_GRANT_STALE')
+    return Object.freeze({ grantId, purpose, access: 'read', path: binding.path,
+      maxBytes: binding.maxBytes, fingerprint: Object.freeze({ ...binding.fingerprint }) })
   }
 
   async resolveWriteGrant(

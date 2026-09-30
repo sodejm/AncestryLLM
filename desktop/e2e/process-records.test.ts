@@ -1,9 +1,21 @@
 /** Verifies packaged Electron main-process records match across supported platforms. */
 
 import { describe, expect, it } from 'vitest'
-import { matchesPackagedMainProcess } from './process-records'
+import { matchesPackagedMainProcess, observedRenderer, observedRenderers, parsePosixProcessSnapshot } from './process-records'
 
 describe('packaged process records', () => {
+  it('treats a killed process awaiting reaping as exited while retaining live process records', () => {
+    const output = [
+      '  42   1   256  Z  /opt/AncestryLLM --user-data-dir=/tmp/profile',
+      '  43   1  1024  S+ /opt/AncestryLLM --user-data-dir=/tmp/profile with spaces',
+      '  44  43   512  R  /opt/AncestryLLM --type=renderer',
+    ].join('\n')
+
+    expect(parsePosixProcessSnapshot(output)).toEqual([
+      { pid: 43, ppid: 1, rssBytes: 1024 * 1024, commandLine: '/opt/AncestryLLM --user-data-dir=/tmp/profile with spaces' },
+      { pid: 44, ppid: 43, rssBytes: 512 * 1024, commandLine: '/opt/AncestryLLM --type=renderer' },
+    ])
+  })
   const windowsExecutable = String.raw`C:\a\AncestryLLM\dist\win-unpacked\AncestryLLM.exe`
   const windowsProfile = String.raw`C:\a\_temp\ancestryllm-profile`
 
@@ -14,6 +26,30 @@ describe('packaged process records', () => {
       rssBytes: 1024,
       commandLine: '"c:/A/ANCESTRYLLM/dist/win-unpacked/ancestryllm.exe" --user-data-dir=c:/A/_TEMP/AncestryLLM-Profile',
     }, windowsExecutable, windowsProfile, 'win32')).toBe(true)
+  })
+
+  it('matches a Windows profile argument whose value is quoted by the launcher', () => {
+    expect(matchesPackagedMainProcess({
+      pid: 46,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}" --user-data-dir="${windowsProfile}"`,
+    }, windowsExecutable, windowsProfile, 'win32')).toBe(true)
+  })
+
+  it('identifies a Windows main process from its native executable path when the launcher omits the profile argument', () => {
+    const record = {
+      pid: 47,
+      ppid: 1,
+      rssBytes: 1024,
+      executablePath: windowsExecutable,
+      commandLine: `"${windowsExecutable}" --inspect=0`,
+    }
+    expect(matchesPackagedMainProcess(record, windowsExecutable, windowsProfile, 'win32')).toBe(true)
+    expect(matchesPackagedMainProcess({ ...record, commandLine: '' }, windowsExecutable, windowsProfile, 'win32')).toBe(true)
+    expect(matchesPackagedMainProcess({ ...record, executablePath: String.raw`C:\other.exe` }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
+    expect(matchesPackagedMainProcess({ ...record, commandLine: `${record.commandLine} --type=renderer` }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
+    expect(matchesPackagedMainProcess({ ...record, commandLine: `${record.commandLine} --user-data-dir=C:/other` }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
   })
 
   it('rejects Windows renderer processes and unrelated profiles', () => {
@@ -40,5 +76,39 @@ describe('packaged process records', () => {
       rssBytes: 1024,
       commandLine: '/opt/AncestryLLM --user-data-dir=/tmp/ancestryllm-profile',
     }, '/opt/ancestryllm', '/tmp/ancestryllm-profile', 'linux')).toBe(false)
+  })
+
+  it('identifies an explicit renderer only inside the observed process tree', () => {
+    const records = [
+      { pid: 10, ppid: 1, rssBytes: 1, commandLine: '/app' },
+      { pid: 11, ppid: 10, rssBytes: 1, commandLine: '/app --type=zygote' },
+      { pid: 12, ppid: 11, rssBytes: 1, commandLine: '/app --type=renderer' },
+    ]
+    expect(observedRenderer(records, 10, 'darwin')).toEqual(records[2])
+    expect(observedRenderer([{ ...records[0]!, commandLine: '/app --type=renderer' }], 10, 'darwin')).toBeNull()
+    expect(observedRenderer([{ ...records[2]!, ppid: 99 }, records[0]!], 10, 'darwin')).toBeNull()
+  })
+
+  it('returns every explicit renderer descendant for packaged argument checks', () => {
+    const records = [
+      { pid: 10, ppid: 1, rssBytes: 1, commandLine: '/app' },
+      { pid: 11, ppid: 10, rssBytes: 1, commandLine: '/app --type=renderer' },
+      { pid: 12, ppid: 10, rssBytes: 1, commandLine: '/app --type=renderer --inspect=0' },
+      { pid: 13, ppid: 1, rssBytes: 1, commandLine: '/other --type=renderer' },
+    ]
+    expect(observedRenderers(records, 10, 'darwin')).toEqual([records[1], records[2]])
+  })
+
+  it('identifies a Linux renderer from native nested zygote descendants when its process title is inherited', () => {
+    const records = [
+      { pid: 10, ppid: 1, rssBytes: 40, commandLine: '/app' },
+      { pid: 11, ppid: 10, rssBytes: 30, commandLine: '/app --type=zygote' },
+      { pid: 12, ppid: 11, rssBytes: 10, commandLine: '/app --type=zygote' },
+      { pid: 13, ppid: 12, rssBytes: 140 * 1024 * 1024, commandLine: '/app --type=zygote' },
+      { pid: 14, ppid: 10, rssBytes: 200, commandLine: '/app --type=utility' },
+      { pid: 15, ppid: 1, rssBytes: 300, commandLine: '/other --type=renderer' },
+    ]
+    expect(observedRenderer(records, 10, 'linux')).toEqual(records[3])
+    expect(observedRenderer(records, 10, 'darwin')).toBeNull()
   })
 })

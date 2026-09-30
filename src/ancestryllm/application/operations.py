@@ -295,6 +295,18 @@ class RootsMagicListResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class RootsMagicPresetQueryRequest(ServiceRequest):
+    """Bounded browsing request using a source capability and a fixed preset."""
+
+    source_ref: str
+    query_id: str
+    person_id: int | None
+    name_filter: str
+    offset: int
+    page_size: int
+
+
+@dataclass(frozen=True, slots=True)
 class RootsMagicQueryRequest(ServiceRequest):
     """Run SQL or a provider-assisted question against one immutable tree."""
 
@@ -1146,6 +1158,7 @@ __all__ = [
     "RootsMagicExportResult",
     "RootsMagicListRequest",
     "RootsMagicListResult",
+    "RootsMagicPresetQueryRequest",
     "RootsMagicQueryDefinition",
     "RootsMagicQueryParameterDefinition",
     "RootsMagicQueryRequest",

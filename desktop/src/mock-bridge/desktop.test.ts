@@ -1,9 +1,10 @@
 /** Verifies the development mock bridge mirrors the versioned desktop contract. */
 import { describe, expect, it, vi } from 'vitest'
+import { parseCapabilitiesResult } from '../shared-contract/runtime'
 import { createMockAncestryBridge } from './desktop'
 
 describe('versioned mock bridge', () => {
-  it('exposes exactly forty-four deterministic, deeply frozen methods', async () => {
+  it('exposes exactly fifty-two deterministic, deeply frozen methods', async () => {
     const bridge = createMockAncestryBridge('success')
     expect(Object.keys(bridge).sort()).toEqual([
       'acknowledgeChatStream',
@@ -16,6 +17,8 @@ describe('versioned mock bridge', () => {
       'createProviderProfile',
       'deleteSecret',
       'discardGedcomInspection',
+      'discardRootsMagicSource',
+      'exportRootsMagic',
       'getAppInfo',
       'getCapabilities',
       'getChatCapability',
@@ -24,19 +27,25 @@ describe('versioned mock bridge', () => {
       'getJob',
       'getPreferences',
       'getProviderConfiguration',
+      'getRootsMagicJobResult',
+      'getRootsMagicPresets',
       'getSecretStatus',
       'getSettings',
       'getStartupDiagnostics',
       'inspectGedcom',
+      'inspectRootsMagicSource',
       'queryGedcomRoots',
+      'queryRootsMagic',
       'previewConsent',
       'previewLocalRuntime',
       'listJobs',
       'requestOpenFileGrant',
+      'requestRootsMagicOutput',
       'requestSaveFileGrant',
       'retrySidecar',
       'revokeConsent',
       'revokeFileGrant',
+      'revealRootsMagicArtifact',
       'setSecret',
       'startChatStream',
       'subscribeJobEvents',
@@ -53,6 +62,7 @@ describe('versioned mock bridge', () => {
     ].sort())
     expect(await bridge.getStartupDiagnostics()).toEqual(await bridge.getStartupDiagnostics())
     expect(Object.isFrozen(await bridge.getCapabilities())).toBe(true)
+    expect(parseCapabilitiesResult(await bridge.getCapabilities()).ok).toBe(true)
   })
 
   it('streams safe cancellation states once and retains the terminal backend snapshot', async () => {

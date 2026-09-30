@@ -69,6 +69,17 @@ class JobState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class CommittedJobResult:
+    """Preserve a durable publication outcome despite concurrent cancellation.
+
+    Only trusted workers that have completed their irreversible commit may
+    return this marker. Ordinary results retain the final cancellation check.
+    """
+
+    result: Any
+
+
+@dataclass(frozen=True, slots=True)
 class ProgressEvent:
     """Report a typed progress update for a background job."""
 
@@ -391,7 +402,11 @@ class JobManager:
                     token.raise_if_cancelled()
                     self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
                     result = function(JobReporter(self, job_id))
-                    token.raise_if_cancelled()
+                    committed = isinstance(result, CommittedJobResult)
+                    if isinstance(result, CommittedJobResult):
+                        result = result.result
+                    else:
+                        token.raise_if_cancelled()
                 except CancellationError:
                     self._transition_cancelled(job_id)
                 except BaseException as exc:  # noqa: BLE001 - job boundary normalizes failures
@@ -433,6 +448,7 @@ class JobManager:
                         JobState.COMPLETED,
                         finished_at=_timestamp(),
                         result=result,
+                        committed=committed,
                     )
         finally:
             for lock in reversed(acquired):
@@ -481,11 +497,17 @@ class JobManager:
         bounded = redacted.replace("\x00", "\ufffd")[:maximum]
         return bounded if bounded.strip() else "Sensitive background job detail was removed."
 
-    def _transition(self, job_id: str, state: JobState, **changes: Any) -> None:
+    def _transition(
+        self, job_id: str, state: JobState, *, committed: bool = False, **changes: Any
+    ) -> None:
         with self._lock:
             record = self._records[job_id]
             current = record.snapshot
-            if state is JobState.COMPLETED and record.cancellation_accepted_at is not None:
+            if (
+                state is JobState.COMPLETED
+                and record.cancellation_accepted_at is not None
+                and not committed
+            ):
                 state = JobState.CANCELLED
                 changes.update(
                     result=None,

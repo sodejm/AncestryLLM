@@ -6,6 +6,7 @@ import {
   descendantProcessTree,
   nativeKeyringVerificationArguments,
   normalLaunchArguments,
+  normalLaunchSpawnOptions,
   outputContainsWindowReadyRecord,
 } from './verify-normal-launch.mjs'
 
@@ -65,4 +66,9 @@ test('normal launch arguments isolate data without exposing a debug control swit
     '--crash-dumps-dir=/tmp/profile/crash-dumps',
   ])
   assert.doesNotMatch(args.join('\n'), /--(?:remote-debugging|inspect)/u)
+})
+
+test('Windows packaged launch keeps the app window available for native close verification', () => {
+  assert.equal(normalLaunchSpawnOptions({ A: 'B' }, 'win32').windowsHide, false)
+  assert.equal(normalLaunchSpawnOptions({ A: 'B' }, 'win32').env.A, 'B')
 })

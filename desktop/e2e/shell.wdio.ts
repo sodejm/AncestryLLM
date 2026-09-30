@@ -72,7 +72,7 @@ async function expectProductionNavigation() {
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
   ))
-  assert.deepEqual(labels, ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
+  assert.deepEqual(labels, ['Home', 'Chat', 'Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings'])
 }
 
 async function expectNoUnsupportedSurfaces(allowProviderSettings = false) {
@@ -91,6 +91,17 @@ async function expectNoUnsupportedSurfaces(allowProviderSettings = false) {
 }
 
 async function expectNoAccessibilityViolations() {
+  if (process.env.ANCESTRYLLM_E2E_HEADLESS !== '1') {
+    await browser.waitUntil(async () => browser.electron.execute((electron) => (
+      electron.BrowserWindow.getAllWindows().every((window) => window.isVisible())
+    )), { timeoutMsg: 'The application window must be presented before its accessibility audit' })
+  }
+  // DOM focus can precede the first composited frame; axe's background sampling
+  // needs the presented layout and the locally bundled fonts to be ready.
+  await browser.execute(async () => {
+    await document.fonts.ready
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  })
   await browser.execute(axe.source)
   const violations = await browser.execute(async () => {
     const axeRunner = (globalThis as unknown as {
@@ -268,7 +279,7 @@ describe('source-built desktop shell', () => {
   beforeEach(expectHiddenSourceWindows)
   afterEach(expectHiddenSourceWindows)
 
-  it('built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings surfaces', async () => {
+  it('built shell exposes the bounded production Home, Chat, Tasks, GEDCOM, RootsMagic, Diagnostics, and Settings surfaces', async () => {
     await expectIsolatedUserData()
     await expectFocusedHeading('Welcome to AncestryLLM')
     await expectProductionNavigation()
@@ -509,7 +520,8 @@ describe('source-built desktop shell', () => {
     assert.notEqual(process.env.ANCESTRYLLM_E2E_HEADLESS, '1', 'Native keyboard focus requires a visible Electron window')
     await expectFocusedHeading('Welcome to AncestryLLM')
     const skipLink = await $('a=Skip to workspace')
-    for (let attempt = 0; attempt < 8 && !(await skipLink.isFocused()); attempt += 1) {
+    const stepsToSkipLink = (await $$('nav[aria-label="Primary"] a').length) + 2
+    for (let attempt = 0; attempt < stepsToSkipLink && !(await skipLink.isFocused()); attempt += 1) {
       await browser.keys(['Shift', 'Tab'])
     }
     assert.equal(await skipLink.isFocused(), true)
@@ -537,7 +549,7 @@ describe('source-built desktop shell', () => {
     await expectNoAccessibilityViolations()
     await click('button=Continue to Home')
     await expectNoAccessibilityViolations()
-    for (const destination of ['Tasks', 'GEDCOM', 'Diagnostics', 'Settings']) {
+    for (const destination of ['Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings']) {
       await click(`a=${destination}`)
       await expectFocusedHeading(destination)
       await expectNoAccessibilityViolations()
@@ -557,7 +569,7 @@ describe('source-built desktop shell', () => {
     })
     await browser.waitUntil(async () => (await browser.execute(() => window.innerWidth)) <= 365)
     await expectNoHorizontalClipping()
-    for (const destination of ['Tasks', 'GEDCOM', 'Diagnostics', 'Settings']) {
+    for (const destination of ['Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings']) {
       await click(`a=${destination}`)
       await expectNoHorizontalClipping()
     }

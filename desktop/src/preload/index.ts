@@ -2,6 +2,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { parseGedcomRootQuery, type GedcomRootQuery } from '../shared-contract/gedcom'
 import {
+  parseRootsMagicArtifactRequest,
+  parseRootsMagicExportRequest,
+  parseRootsMagicOutputDisplayName,
+  parseRootsMagicQueryRequest,
+  parseRootsMagicSourceReferenceRequest,
+  type RootsMagicArtifactRequest,
+  type RootsMagicExportRequest,
+  type RootsMagicQueryRequest,
+  type RootsMagicSourceReferenceRequest,
+} from '../shared-contract/rootsmagic'
+import {
   desktopChannels,
   desktopEventChannels,
   type AncestryBridge,
@@ -89,6 +100,10 @@ import {
   parseSettingsPatch,
   parseSettingsResult,
   parseStartupDiagnosticsResult,
+  parseRootsMagicAcknowledgementResult,
+  parseRootsMagicJobResultResult,
+  parseRootsMagicOutputSelectionResult,
+  parseRootsMagicPresetDefinitionsResult,
 } from '../shared-contract/runtime'
 
 const ancestry: AncestryBridge = Object.freeze({
@@ -103,6 +118,30 @@ const ancestry: AncestryBridge = Object.freeze({
   ),
   discardGedcomInspection: async (request: JobRequest) => parseGedcomDiscardResult(
     await ipcRenderer.invoke(desktopChannels.discardGedcomInspection, parseJobRequest(request)),
+  ),
+  inspectRootsMagicSource: async (grantId: FileGrantId) => parseJobSnapshotResult(
+    await ipcRenderer.invoke(desktopChannels.inspectRootsMagicSource, parseFileGrantId(grantId)),
+  ),
+  getRootsMagicPresets: async () => parseRootsMagicPresetDefinitionsResult(
+    await ipcRenderer.invoke(desktopChannels.getRootsMagicPresets),
+  ),
+  queryRootsMagic: async (request: RootsMagicQueryRequest) => parseJobSnapshotResult(
+    await ipcRenderer.invoke(desktopChannels.queryRootsMagic, parseRootsMagicQueryRequest(request)),
+  ),
+  requestRootsMagicOutput: async (displayName: string) => parseRootsMagicOutputSelectionResult(
+    await ipcRenderer.invoke(desktopChannels.requestRootsMagicOutput, parseRootsMagicOutputDisplayName(displayName)),
+  ),
+  exportRootsMagic: async (request: RootsMagicExportRequest) => parseJobSnapshotResult(
+    await ipcRenderer.invoke(desktopChannels.exportRootsMagic, parseRootsMagicExportRequest(request)),
+  ),
+  getRootsMagicJobResult: async (request: JobRequest) => parseRootsMagicJobResultResult(
+    await ipcRenderer.invoke(desktopChannels.getRootsMagicJobResult, parseJobRequest(request)),
+  ),
+  discardRootsMagicSource: async (request: RootsMagicSourceReferenceRequest) => parseRootsMagicAcknowledgementResult(
+    await ipcRenderer.invoke(desktopChannels.discardRootsMagicSource, parseRootsMagicSourceReferenceRequest(request)),
+  ),
+  revealRootsMagicArtifact: async (request: RootsMagicArtifactRequest) => parseRootsMagicAcknowledgementResult(
+    await ipcRenderer.invoke(desktopChannels.revealRootsMagicArtifact, parseRootsMagicArtifactRequest(request)),
   ),
   getAppInfo: async () => parseAppInfoResult(await ipcRenderer.invoke(desktopChannels.getAppInfo)),
   getStartupDiagnostics: async () => parseStartupDiagnosticsResult(await ipcRenderer.invoke(desktopChannels.getStartupDiagnostics)),

@@ -681,7 +681,7 @@ for the acceptance matrix and operational limits.
 | Control | Source and runtime evidence | Residual ownership |
 |---|---|---|
 | `TM-E01`, `TM-D01`, `TM-O01`, `TM-C01` | Strict schema-v1 sanitized snapshots/events use increasing per-job sequences and bounded payloads, history, lists, subscribers, and subscriber queues. SQLCipher persistence admits exactly one terminal event and startup reconciliation converts interrupted non-terminal work to a stable terminal outcome. Replay accepts an exact cursor or returns coded resynchronization; slow subscribers overflow independently and listeners are never called under the manager lock. Cancellation is idempotent and cooperative, distinguishes a request from a pending atomic safe point, and shares resource locks with shutdown. Fixed authenticated routes expose list, status, cancel, SSE, and shutdown assessment only. Electron main presents native **Wait**, **Request cancellation**, and **Stay open** choices; degraded startup is explicit safe-empty only before any authenticated session has been exposed and while the supervisor is `idle`, `starting`, or `unavailable`. Once a session has been exposed, losing it never restores that shortcut. Main invalidates the public active session before using its captured credentials for one hidden, bodyless runtime-shutdown request. A response is not termination proof: Electron must observe the leader exit or use the bounded forced process-tree path. The verified sidecar stop remains mandatory and drains any launch already in flight within a fixed 20-second deadline. A failed or timed-out stop leaves IPC available for recovery. | The change affects the application, SQLCipher storage, internal API, and Electron main-process lifecycle. It adds no application command or CLI surface, renderer job bridge/listener/UI, job submission, provider call/stream, GEDCOM or RootsMagic mutation, or public API. The runtime route is absent without the packaged callback, excluded from OpenAPI, and grants no renderer authority. The #56/#111 source provider-stream transport is implemented; output workers and publication remain #114/#118, and target-matched packaged adversarial evidence remains #131. |
-| `TM-U01` | The high-severity desktop audit rejects the vulnerable `extract-zip` installer dependency. The complete lock instead aliases it to exact Electron-maintained `@electron-internal/extract-zip` 1.0.5, records registry integrity, and applies a reviewed one-line Electron 39 CommonJS compatibility patch with an exact patch digest. The canonical desktop install performs a frozen install, explicitly rebuilds only Electron, and verifies that the active platform runtime exists; contract tests reject direct workflow installs that bypass this path. | Electron remains exactly 39.8.10 rather than taking an unreviewed major upgrade. The alias and compatibility patch affect only Electron's development-time runtime downloader, not application archive extraction or user data. Registry, Electron download hosting, pnpm, and the reviewed lock/patch remain supply-chain trust dependencies; audit, clean-store installation, packaging, and fuse inspection fail closed on drift or missing runtime state. |
+| `TM-U01` | The high-severity desktop audit rejects the vulnerable `extract-zip` installer dependency. The complete lock aliases it to exact Electron-maintained `@electron-internal/extract-zip` 1.0.5 and records registry integrity. Electron 41.10.6 uses the maintained extractor natively, removing the obsolete Electron 39 compatibility patch. The canonical desktop install performs a frozen install, explicitly rebuilds only Electron, and verifies that the active platform runtime exists; contract tests reject direct workflow installs that bypass this path. | Electron is pinned to the audited security remediation baseline 41.10.6; target-matched runtime validation remains required. The alias affects development-time runtime downloading, not application archive extraction or user data. Registry, Electron download hosting, pnpm, and the reviewed lock remain supply-chain trust dependencies; audit, clean-store installation, packaging, and fuse inspection fail closed on drift or missing runtime state. |
 
 ### Issue #109 task-center evidence
 
@@ -1027,3 +1027,76 @@ exceptions must be recorded in release notes. This model does not prove absence
 of vulnerabilities, and passing OWASP/NIST-mapped checks is not such a claim; it
 defines required evidence, accountability, repeatable validation, and
 fail-closed boundaries.
+
+
+## Native RootsMagic workbench (#119)
+
+The workbench crosses the existing renderer → preload → Main → authenticated
+native-sidecar boundary. Main owns picker and output dialogs; opaque capabilities
+replace host paths in IPC and HTTP. The private mediation directory contains
+short-lived manifests with original paths and identity metadata, not database
+copies. Manifests are consumed once. Source sessions are bound to the owning
+window and sidecar lifetime. Restart, discard, and window closure revoke access.
+Container/external connection modes do not receive this native authority.
+
+The private version-2 source manifest binds the picker-approved database and
+present WAL/SHM companions to exact device/inode identities, sizes, and SHA-256
+digests, including explicit companion absence. Sidecar inspection compares the
+immutable snapshot with that approval before reading genealogy data. Windows
+identity translation checks Node's legacy identity and reads Python's full
+identity from the same held file handle. A byte-identical replacement on another
+inode or a different companion generation invalidates the approval.
+
+Lost submission responses trigger one bounded cancellation/recovery request to
+the original sidecar session. Inspection cancellation releases retained source
+authority and capacity; export cancellation returns the accepted job so a
+successful commit remains observable. Pre-acceptance cancellation consumes the
+private manifest, preventing delayed requests from reviving that capability.
+
+Untrusted database content is constrained by immutable SQLite snapshot handling,
+validated companion access, schema allowlists, bound preset parameters, stable
+ordering, pagination, row/text/byte/time limits, and plain-text rendering. Unknown
+vendor versions are reported honestly; tested schema capabilities determine
+support. The CLI SQL/question boundary remains separate. Queries and exports
+are deterministic and require no provider or cloud consent.
+
+Missing, null, conflicting, or invalid living status is protected by the chosen
+living-person policy. Anonymized families retain relationship links without
+family-owned events, notes, citations, media, or extension payload. The same
+payload restriction applies to partially selected families so directional and
+depth-limited exports do not disclose off-scope data. Published manifests use
+the stable source fingerprint rather than the private session capability.
+
+An output capability authorizes creation of one new folder. Existing destinations
+and source aliases are refused. Main's selected parent device/inode identity is
+carried in the private output manifest and checked by the worker at entry, before
+staging, and before publication. Replacement invalidates that authority; recovery
+preserves the coordinator barrier when ownership becomes ambiguous. On Windows,
+Node's legacy identity is verified against a directory handle that excludes delete
+sharing before reading Python's full identity from that same handle. Failed
+translation refuses the export; identity bits are never truncated to force a match.
+The durable coordinator owns stage members and
+validates the GEDCOM, report, and manifest before exclusive same-filesystem
+publication. Final source checks and revocation serialize with the short commit
+boundary. Cancellation before commit publishes nothing; successful publication
+wins over concurrent cancellation. Reports/manifests omit private host paths.
+The application result exposes opaque artifact references with sizes and digests,
+without publication paths. The workspace freezes the root during every query
+or export, freezes queries during export, and records the exported root in its
+receipt. Confirmed inspection
+revocation clears local pending state so a new picker grant can be requested;
+transient disposal failures remain retryable.
+Recovery requires renewed authority and cannot revive expired grants.
+
+Residual risks include hostile same-account processes, original-source changes
+outside this application, filesystem failure, and users sharing unencrypted
+exports. Identity/fingerprint checks detect source changes; ambiguous recovery
+preserves the barrier and unrelated files. A digest manifest establishes byte
+agreement, not the accuracy of genealogy or confidentiality. Process-exit tests
+and source tests do not prove power-loss durability or packaged OS behavior.
+
+Evidence belongs to `test_rootsmagic_workbench.py`,
+`test_rootsmagic_presets.py`, `test_rootsmagic_directory_export.py`, native API
+boundary tests, and desktop broker/workspace tests, together with inherited
+coordinator recovery suites. Target-matched packaged accessibility, source
+revocation, cancellation, and artifact-reveal evidence remains a closure gate.

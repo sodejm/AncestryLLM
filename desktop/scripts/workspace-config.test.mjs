@@ -16,6 +16,16 @@ const runtimePolicyResource = {
   to: 'runtime-policy/macos-arm64-runtime-policy-v1.json',
 }
 
+test('workspace discovery excludes the independent pnpm bootstrap package', async () => {
+  const workspace = await readFile(workspaceUrl, 'utf8')
+  const bootstrap = JSON.parse(
+    await readFile(new URL('../toolchain/pnpm/package.json', import.meta.url), 'utf8'),
+  )
+
+  assert.equal(bootstrap.name, 'ancestryllm-verified-pnpm-bootstrap')
+  assert.match(workspace, /^packages:\n {2}- '\.'\n(?=\S)/m)
+})
+
 test('pnpm 11 controls live in the supported workspace config and lockfile', async () => {
   const workspace = await readFile(workspaceUrl, 'utf8')
   const lockfile = await readFile(lockfileUrl, 'utf8')
@@ -35,20 +45,17 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
   assert.match(
     workspace,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.8$/m,
   )
   assert.match(
     lockfile,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
+    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.8$/m,
   )
-  assert.match(
-    lockfile,
-    /^patchedDependencies:\n {2}electron@39\.8\.10: [0-9a-f]{64}$/m,
-  )
+  assert.doesNotMatch(lockfile, /^patchedDependencies:/m)
   assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
   assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
-  assert.match(lockfile, /^ {2}fast-uri@3\.1\.6:$/m)
-  assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.[45]:$/m)
+  assert.match(lockfile, /^ {2}fast-uri@3\.1\.8:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.[4567]:$/m)
   assert.match(lockfile, /^ {2}js-yaml@4\.3\.2:$/m)
   assert.doesNotMatch(lockfile, /^ {2}js-yaml@4\.3\.[01]:$/m)
   assert.match(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.15':$/m)

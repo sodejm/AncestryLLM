@@ -1,10 +1,13 @@
 /** Supplies deterministic native file selections only for packaged grant verification. */
 import { posix, win32 } from 'node:path'
 import type { NativeFileDialogPort } from '../src/main/file-grant-broker'
+import type { RootsMagicNativePort } from '../src/main/rootsmagic-workbench-broker'
 
 const verificationMarker = 'ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION'
 const openPathVariable = 'ANCESTRYLLM_FILE_GRANT_OPEN_PATH'
 const savePathVariable = 'ANCESTRYLLM_FILE_GRANT_SAVE_PATH'
+const rootsMagicVerificationMarker = 'ANCESTRYLLM_ROOTSMAGIC_VERIFICATION'
+const rootsMagicOutputPathVariable = 'ANCESTRYLLM_ROOTSMAGIC_OUTPUT_PATH'
 
 /** Normalizes an absolute platform path, returning `null` for unsafe or unsupported input. */
 export function normalizeVerificationSelection(
@@ -23,8 +26,8 @@ export function normalizeVerificationSelection(
   return candidate
 }
 
-function selectedPath(variable: string): string {
-  if (process.env[verificationMarker] !== '1') {
+function selectedPath(marker: string, variable: string): string {
+  if (process.env[marker] !== '1') {
     throw new Error('Packaged file-grant verification adapter is disabled.')
   }
   const value = process.env[variable]
@@ -39,16 +42,24 @@ function selectedPath(variable: string): string {
  * Creates the opt-in packaged-test dialog adapter backed by explicit environment selections.
  * Access fails while the verification marker is disabled or a selected path is invalid.
  */
-export function createNativeFileDialogPort(): NativeFileDialogPort {
+export function createNativeFileDialogPort(): NativeFileDialogPort & RootsMagicNativePort {
   return Object.freeze({
     async selectOpenFile() {
-      return selectedPath(openPathVariable)
+      return selectedPath(verificationMarker, openPathVariable)
     },
     async selectSaveFile() {
-      return selectedPath(savePathVariable)
+      return selectedPath(verificationMarker, savePathVariable)
     },
     async confirmReplacement() {
       return true
+    },
+    async selectNewOutputDirectory() {
+      return selectedPath(rootsMagicVerificationMarker, rootsMagicOutputPathVariable)
+    },
+    async reveal(path: string) {
+      if (path !== selectedPath(rootsMagicVerificationMarker, rootsMagicOutputPathVariable)) {
+        throw new Error('Packaged RootsMagic verification reveal target did not match the granted output.')
+      }
     },
   })
 }

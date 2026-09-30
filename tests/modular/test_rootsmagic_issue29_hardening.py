@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -513,3 +514,71 @@ def test_second_artifact_publication_failure_restores_the_complete_prior_pair(
     assert output.read_bytes() == previous_output
     assert report.read_bytes() == previous_report
     assert not list(tmp_path.glob(".ancestry-publish-*"))
+
+
+@pytest.mark.parametrize("living", ["exclude", "redact", "include"])
+@pytest.mark.parametrize("status", [None, "", "invalid", 2, b"0", "missing", 0, "false", "no"])
+@pytest.mark.parametrize("column", ["Living", "IsLiving"])
+def test_unknown_living_status_is_protected(
+    tmp_path: Path, living: str, status: Any, column: str
+) -> None:
+    tree = _create_tree(
+        tmp_path / "unknown.rmtree",
+        f"""
+        CREATE TABLE PersonTable(PersonID INTEGER PRIMARY KEY{"," + column if status != "missing" else ""});
+        INSERT INTO PersonTable(PersonID) VALUES(1);
+        CREATE TABLE NameTable(NameID INTEGER, OwnerID INTEGER, Given TEXT);
+        INSERT INTO NameTable VALUES(1,1,'UNKNOWN-STATUS-CANARY');
+    """,
+    )
+    if status != "missing":
+        with closing(sqlite3.connect(tree)) as connection:
+            statement = (
+                "UPDATE PersonTable SET Living = ?"
+                if column == "Living"
+                else "UPDATE PersonTable SET IsLiving = ?"
+            )
+            connection.execute(statement, (status,))
+            connection.commit()
+    result = _exporter(tmp_path).export(tree, tmp_path / "unknown.ged", living=living)
+    text = result.output_path.read_text()
+    assert ("UNKNOWN-STATUS-CANARY" in text) == (
+        living == "include" or status in (0, "false", "no")
+    )
+
+
+def test_redaction_retains_family_links_without_family_payload(
+    comprehensive_tree: Path, tmp_path: Path
+) -> None:
+    result = _exporter(tmp_path).export(
+        comprehensive_tree, tmp_path / "redacted.ged", living="redact", profile="preservation"
+    )
+    text = result.output_path.read_text()
+    assert "0 @F1@ FAM\n1 HUSB @I2@\n1 WIFE @I1@\n1 CHIL @I3@" in text
+    assert "0 @F2@ FAM\n1 HUSB @I3@" in text
+    assert "Living /Private/" in text
+    assert "Fictional union marker" not in text
+    assert "Fictional marriage detail" not in text
+    assert "PRIVATE-" not in text
+
+
+@pytest.mark.parametrize(
+    "scope,root,depth",
+    [("ancestors", "10", None), ("descendants", "10", None), ("connected", "10", 0)],
+)
+def test_directional_scope_suppresses_partial_family_payload(
+    comprehensive_tree: Path, tmp_path: Path, scope: str, root: str, depth: int | None
+) -> None:
+    result = _exporter(tmp_path).export(
+        comprehensive_tree,
+        tmp_path / "scoped.ged",
+        living="include",
+        profile="preservation",
+        scope=scope,
+        root_person_id=root,
+        generations=depth,
+    )
+    text = result.output_path.read_text()
+    assert "Fictional union marker" not in text
+    assert "Fictional marriage detail" not in text
+    assert "0 @F1@ FAM" in text
