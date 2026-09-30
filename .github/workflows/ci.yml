@@ -256,13 +256,13 @@ jobs:
           sudo apt-get install --no-install-recommends --yes \
             locales=2.39-0ubuntu8.9 \
             xauth=1:1.1.2-1build1 \
-            xvfb=2:21.1.12-1ubuntu1.6
+            xvfb=2:21.1.12-1ubuntu1.8
           sudo locale-gen en_US.UTF-8
           test "$(node --version)" = "v26.5.0"
           test "$(pnpm --version)" = "11.11.0"
           test "$(dpkg-query --showformat='${Version}' --show locales)" = "2.39-0ubuntu8.9"
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
-          test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.6"
+          test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.8"
       - name: Verify deterministic documentation screenshots
         run: ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" xvfb-run --auto-servernum make docs-screenshots-check
       - name: Retain sanitized screenshot drift evidence
