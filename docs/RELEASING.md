@@ -508,8 +508,9 @@ does not authorize a backend change or weaken any release check.
 Release construction uses SHA-pinned `actions/setup-python` with Python 3.12,
 then the verified repository contract requires exactly `uv` 0.12.1, selects
 only that system interpreter, and disables Python downloads. The workflow calls
-the same `make package` and `make sbom` interfaces used locally after its narrow
-locked synchronization.
+the canonical package-build and SBOM commands directly after its narrow locked
+synchronization. This keeps release enforcement independent of candidate-controlled
+Make targets while preserving `make package` and `make sbom` as local interfaces.
 The workflow then attests the combined artifacts and immediately downloads the
 complete distribution artifact into a separate job. Before it may prepare a
 draft GitHub Release, publish to TestPyPI or PyPI, or publish the immutable

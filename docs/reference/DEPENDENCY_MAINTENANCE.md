@@ -121,8 +121,8 @@ Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL.
    CI, security, release, and user installation documentation when the changed
    dependency affects those surfaces.
 
-The lock-check workflow installs no group and runs `make lock-check`, whose
-canonical command is `uv lock --check`.
+The lock-check workflow installs no group and runs `uv lock --check` directly;
+`make lock-check` remains the local interface for that command.
 Stock-`pip` wheel and source-distribution smoke jobs remain intentionally
 outside these repository-tool profiles: they verify supported non-`uv`
 consumer installation and do not build or authorize release artifacts.

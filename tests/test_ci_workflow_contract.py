@@ -123,14 +123,17 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     test_job = _job(workflow, "test")
     quality_job = _job(workflow, "quality")
 
-    assert test_job.count("make test") == 1
+    assert test_job.count("uv run --locked --group test pytest --verbose") == 1
     assert "ruff check" not in test_job
     assert "mypy" not in test_job
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
-    for command in ("make lint", "make typecheck", "make typecheck-ty"):
-        command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
+    for command in (
+        "uv run --locked --group lint ruff check src tests scripts",
+        "uv run --locked --group typecheck mypy src/ancestryllm",
+    ):
+        command_line = re.compile(rf"(?m)^\s*{re.escape(command)}\s*$")
         assert len(command_line.findall(quality_job)) == 1
 
 
@@ -140,21 +143,16 @@ def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
     readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
     evidence_builder = (ROOT / "scripts/create_release_evidence.py").read_text(encoding="utf-8")
 
-    blocking_step = """      - name: Lint, type check, and repository contracts
-        run: |
-          make lint
-          make typecheck
-"""
+    blocking_step = "name: Lint, type check, and repository contracts"
     advisory_step = """      - name: Advisory ty evaluation
         continue-on-error: true
-        run: make typecheck-ty
+        run: uv run --locked --group typecheck ty check src/ancestryllm
 """
 
     assert blocking_step in quality_job
     assert advisory_step in quality_job
     assert quality_job.index(blocking_step) < quality_job.index(advisory_step)
-    assert "make typecheck-ty || true" not in quality_job
-    assert "make typecheck-ty" not in readiness
+    assert "ty check" not in readiness
     assert '"mypy",' in readiness
     assert '"mypy",' in evidence_builder
     assert '"type-check",' not in readiness
@@ -176,8 +174,8 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
     assert security_job.count(dependency_condition) == 4
-    assert security_job.count("make dependency-audit") == 1
-    assert security_job.count("make security-static") == 1
+    assert security_job.count("uv run --locked --group security pip-audit") == 1
+    assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py .") == 1
     assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
 
@@ -187,7 +185,7 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
     lockfile_job = _job(workflow, "lockfile")
 
     assert "name: lockfile consistency" in lockfile_job
-    assert "make lock-check" in lockfile_job
+    assert "uv lock --check" in lockfile_job
     for job in (
         "test",
         "mutation-recovery",
@@ -255,8 +253,10 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
         assert package in job
     assert (
         'ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" '
-        "xvfb-run --auto-servernum make docs-screenshots-check"
-    ) in job
+        in job
+    )
+    assert "xvfb-run --auto-servernum uv run --locked --group lint python" in job
+    assert "scripts/docs_screenshots.py check --manifest" in job
 
     assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
     assert desktop_package["packageManager"] == "pnpm@11.9.0"
@@ -415,8 +415,8 @@ def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
     assert "$(UV_BIN) sync --locked --all-extras --all-groups" in makefile
     audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
     assert f"$(UV_BIN) run --locked --group security {audit_command}" in makefile
-    assert "make workflow-audit" in _job(ci, "workflow-audit")
-    assert "make workflow-audit" in _job(readiness, "security")
+    assert audit_command in _job(ci, "workflow-audit")
+    assert audit_command in _job(readiness, "security")
 
 
 def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
@@ -514,14 +514,23 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
+    assert _job(ci, "quality").count("scripts/check_code_documentation.py") == 1
+    assert _job(readiness, "quality").count("scripts/check_code_documentation.py") == 1
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
     setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
 
     for quality_job in (ci_quality, readiness_quality):
-        assert quality_job.count("make lint") == 1
-        assert quality_job.count("make code-docs-check") == 1
+        assert quality_job.count("python scripts/check_gfm_markdown.py") == 1
+        assert (
+            quality_job.count(
+                "ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419"
+            )
+            == 1
+        )
+        assert quality_job.count("pnpm --dir desktop docs:check") == 1
+        assert quality_job.count("node desktop/scripts/install-locked.mjs") == 1
         assert setup_node in quality_job
         assert 'node-version: "26.5.0"' in quality_job
         assert setup_pnpm in quality_job

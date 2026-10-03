@@ -110,7 +110,7 @@ jobs:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-ci-lockfile
       - name: Check uv lockfile consistency
-        run: make lock-check
+        run: uv lock --check
 
   test:
     name: test (${{ matrix.python }})
@@ -140,7 +140,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Tests
-        run: make test
+        run: uv run --locked --group test pytest --verbose
 
   mutation-recovery:
     name: mutation recovery (${{ matrix.os }})
@@ -212,12 +212,19 @@ jobs:
         run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Lint, type check, and repository contracts
         run: |
-          make lint
-          make typecheck
-          make code-docs-check
+          uv run --locked --group lint ruff check src tests scripts
+          uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_gfm_markdown.py
+          uv run --locked --group lint python scripts/check_architecture_contracts.py
+          ./scripts/check_repository_safety.sh
+          uv run --locked --group lint ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419
+          uv run --locked --group lint python scripts/check_code_documentation.py
+          node desktop/scripts/install-locked.mjs
+          pnpm --dir desktop docs:check
+          uv run --locked --group typecheck mypy src/ancestryllm
       - name: Advisory ty evaluation
         continue-on-error: true
-        run: make typecheck-ty
+        run: uv run --locked --group typecheck ty check src/ancestryllm
 
   docs-screenshots:
     name: documentation screenshot drift
@@ -264,7 +271,11 @@ jobs:
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
           test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.6"
       - name: Verify deterministic documentation screenshots
-        run: ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" xvfb-run --auto-servernum make docs-screenshots-check
+        run: >-
+          ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json"
+          xvfb-run --auto-servernum uv run --locked --group lint python
+          scripts/docs_screenshots.py check --manifest
+          config/docs-screenshot-manifest.json --repository-root .
       - name: Retain sanitized screenshot drift evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
@@ -305,12 +316,12 @@ jobs:
         run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
         if: needs.changes.outputs.dependencies == 'true'
-        run: make dependency-audit
+        run: uv run --locked --group security pip-audit
       - name: Run pinned static security analysis
-        run: make security-static
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Generate CycloneDX SBOM
         if: needs.changes.outputs.dependencies == 'true'
-        run: make sbom
+        run: uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: needs.changes.outputs.dependencies == 'true'
         with:
@@ -341,7 +352,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --group build
       - name: Build reproducible release artifacts
-        run: make package
+        run: uv run --locked --group build python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions
@@ -427,7 +438,35 @@ jobs:
           ANCESTRYLLM_PLATFORM: ${{ matrix.platform }}
           ANCESTRYLLM_WORKER_IMAGE: ghcr.io/sodejm/ancestryllm-worker:ci@sha256:0000000000000000000000000000000000000000000000000000000000000000
         run: |
-          make container-compose-config
+          mkdir -p build/container-policy
+          python3 scripts/container_policy.py \
+            --base containers/compose.yaml \
+            --overlay containers/compose.local.yaml \
+            --dockerfile containers/Dockerfile \
+            --output build/container-policy/local.json
+          python3 scripts/container_policy.py \
+            --base containers/compose.yaml \
+            --overlay containers/compose.remote.yaml \
+            --dockerfile containers/Dockerfile \
+            --output build/container-policy/remote.json
+          python3 scripts/container_policy.py \
+            --base containers/compose.yaml \
+            --overlay containers/compose.local.yaml \
+            --dockerfile containers/Dockerfile \
+            --gateway-image "$ANCESTRYLLM_GATEWAY_IMAGE" \
+            --worker-image "$ANCESTRYLLM_WORKER_IMAGE" \
+            --platform "$ANCESTRYLLM_PLATFORM" \
+            --output build/container-policy/resolved-local.json
+          docker compose --file containers/compose.yaml --file containers/compose.local.yaml config >/dev/null
+          python3 scripts/container_policy.py \
+            --base containers/compose.yaml \
+            --overlay containers/compose.remote.yaml \
+            --dockerfile containers/Dockerfile \
+            --gateway-image "$ANCESTRYLLM_GATEWAY_IMAGE" \
+            --worker-image "$ANCESTRYLLM_WORKER_IMAGE" \
+            --platform "$ANCESTRYLLM_PLATFORM" \
+            --output build/container-policy/resolved-remote.json
+          docker compose --file containers/compose.yaml --file containers/compose.remote.yaml config >/dev/null
       - name: Build exact native images
         id: build
         env:
@@ -492,7 +531,7 @@ jobs:
       - name: Audit workflow security
         run: |
           uv sync --locked --no-default-groups --group security
-          make workflow-audit
+          uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
   timeout-proof-exercise:
     name: timeout proof exercise (expected failure)

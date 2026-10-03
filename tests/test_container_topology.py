@@ -295,7 +295,17 @@ def test_ci_builds_on_native_amd64_and_arm64_runners() -> None:
     assert container_job.count('docker build --platform "$PLATFORM"') == 2
     assert "--target gateway" in container_job
     assert "--target worker" in container_job
-    assert "make container-compose-config" in container_job
+    assert "python3 scripts/container_policy.py" in container_job
+    assert "build/container-policy/resolved-local.json" in container_job
+    assert "build/container-policy/resolved-remote.json" in container_job
+    assert (
+        "docker compose --file containers/compose.yaml --file containers/compose.local.yaml config"
+        in container_job
+    )
+    assert (
+        "docker compose --file containers/compose.yaml --file containers/compose.remote.yaml config"
+        in container_job
+    )
     assert "docker compose \\" not in container_job
     assert "scripts/container_ci_smoke.py" in container_job
     assert "container-policy-evidence-${{ matrix.arch }}" in container_job
