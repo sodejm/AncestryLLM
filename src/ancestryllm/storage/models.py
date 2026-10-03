@@ -10,18 +10,24 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def new_id() -> str:
+    """Generate a new stable identifier for a persistence model."""
     return str(uuid.uuid4())
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
+    """Return the current timezone-aware UTC timestamp."""
+    return dt.datetime.now(dt.UTC).isoformat()
 
 
 class Base(DeclarativeBase):
+    """Provide the declarative base shared by SQLAlchemy persistence models."""
+
     pass
 
 
 class WorkspaceModel(Base):
+    """Map a persisted research workspace and its related people."""
+
     __tablename__ = "workspaces"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -30,6 +36,8 @@ class WorkspaceModel(Base):
 
 
 class PersonModel(Base):
+    """Map a persisted research person and its genealogical records."""
+
     __tablename__ = "people"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -48,6 +56,8 @@ class PersonModel(Base):
 
 
 class PersonIdentifierModel(Base):
+    """Map an external source identifier associated with a persisted person."""
+
     __tablename__ = "person_identifiers"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -64,6 +74,8 @@ class PersonIdentifierModel(Base):
 
 
 class FactModel(Base):
+    """Map a persisted genealogical fact and its provenance fields."""
+
     __tablename__ = "facts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -79,6 +91,8 @@ class FactModel(Base):
 
 
 class RelationshipModel(Base):
+    """Map a persisted relationship between two people."""
+
     __tablename__ = "relationships"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -99,6 +113,8 @@ class RelationshipModel(Base):
 
 
 class PromptTemplateModel(Base):
+    """Map a saved prompt template and its immutable versions."""
+
     __tablename__ = "prompt_templates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -110,6 +126,8 @@ class PromptTemplateModel(Base):
 
 
 class PromptVersionModel(Base):
+    """Map one immutable version of a saved prompt template."""
+
     __tablename__ = "prompt_versions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -126,6 +144,8 @@ class PromptVersionModel(Base):
 
 
 class ProviderProfileModel(Base):
+    """Map a provider profile without storing credential material."""
+
     __tablename__ = "provider_profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -138,6 +158,8 @@ class ProviderProfileModel(Base):
 
 
 class ConsentProfileModel(Base):
+    """Map the explicit data-disclosure consent for a provider profile."""
+
     __tablename__ = "consent_profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -156,6 +178,8 @@ class ConsentProfileModel(Base):
 
 
 class LlmRunModel(Base):
+    """Map sanitized metadata for one LLM generation run."""
+
     __tablename__ = "llm_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -175,3 +199,58 @@ class LlmRunModel(Base):
     error_code: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[str] = mapped_column(String(40), default=utc_now, nullable=False)
     completed_at: Mapped[str | None] = mapped_column(String(40))
+
+
+class JobModel(Base):
+    """Latest sanitized snapshot for one restart-safe background job."""
+
+    __tablename__ = "jobs"
+
+    job_id: Mapped[str] = mapped_column(String(13), primary_key=True)
+    job_number: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("ix_jobs_number", "job_number"),
+        Index("ix_jobs_state", "state"),
+    )
+
+
+class JobEventModel(Base):
+    """One bounded, replayable sanitized event for a background job."""
+
+    __tablename__ = "job_events"
+
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("ix_job_events_replay", "job_id", "sequence"),)
+
+
+class OperationReceiptModel(Base):
+    """Durable privacy-minimal receipt for one logical operation."""
+
+    __tablename__ = "operation_receipts"
+
+    receipt_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    operation_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    completed_at: Mapped[str | None] = mapped_column(String(40))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(String(40))
+
+    __table_args__ = (
+        Index("ix_operation_receipts_started", "started_at"),
+        Index("ix_operation_receipts_expires", "expires_at"),
+    )

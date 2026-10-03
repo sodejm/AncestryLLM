@@ -11,8 +11,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_GROUPS = {
-    "lint": ["ruff>=0.15,<1", "pre-commit>=4.5,<5"],
-    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3"],
+    "lint": ["markdown-it-py>=4,<5", "ruff>=0.15,<1", "pre-commit>=4.5,<5"],
+    "typecheck": ["mypy>=1.19,<3", "types-python-dateutil>=2.9,<3", "ty==0.0.72"],
     "test": [
         "coverage[toml]>=7.12,<8",
         "pytest>=9,<10",
@@ -28,8 +28,9 @@ EXPECTED_GROUPS = {
         "build>=1.3,<2",
         "check-wheel-contents>=0.6.1,<1",
         "packaging>=25,<27",
-        "setuptools>=83,<84",
+        "setuptools>=83,<85",
         "twine>=6.2,<8",
+        "uv_build>=0.12.0,<0.13",
         "wheel>=0.45,<1",
     ],
     "release-verifier": ["pypi-attestations==0.0.30"],
@@ -37,15 +38,15 @@ EXPECTED_GROUPS = {
 
 EXPECTED_EXTRAS = {
     "ollama": ["ollama>=0.6,<1"],
-    "openai": ["openai>=2.45,<3"],
+    "openai": ["openai>=2.45,<4"],
     "anthropic": ["anthropic>=0.71,<1"],
     "gemini": ["google-genai>=2.12,<3"],
-    "openrouter": ["openai>=2.45,<3"],
+    "openrouter": ["openai>=2.45,<4"],
     "all-llm": [
         "anthropic>=0.71,<1",
         "google-genai>=2.12,<3",
         "ollama>=0.6,<1",
-        "openai>=2.45,<3",
+        "openai>=2.45,<4",
     ],
     "desktop-build": ["pyinstaller>=6.17,<7"],
 }
@@ -65,13 +66,16 @@ OLD_DEV_DEPENDENCIES = {
     "pytest-cov>=7,<8",
     "pytest-mock>=3.15,<4",
     "ruff>=0.15,<1",
-    "setuptools>=83,<84",
+    "setuptools>=83,<85",
     "twine>=6.2,<8",
     "types-python-dateutil>=2.9,<3",
     "uv==0.12.1",
     "wheel>=0.45,<1",
     "zizmor==1.29.0",
 }
+NEW_ADVISORY_DEPENDENCIES = {"ty==0.0.72"}
+NEW_BUILD_EVALUATION_DEPENDENCIES = {"uv_build>=0.12.0,<0.13"}
+NEW_DOCS_SCREENSHOT_DEPENDENCIES = {"markdown-it-py>=4,<5"}
 
 
 def _project() -> dict[str, Any]:
@@ -118,7 +122,14 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
     deliberately_removed = {"click>=8.3.3,<9", "uv==0.12.1"}
     retained_as_extra = set(extras["desktop-build"])
 
-    assert moved | deliberately_removed | retained_as_extra == OLD_DEV_DEPENDENCIES
+    assert moved | deliberately_removed | retained_as_extra == (
+        OLD_DEV_DEPENDENCIES
+        | NEW_ADVISORY_DEPENDENCIES
+        | NEW_BUILD_EVALUATION_DEPENDENCIES
+        | NEW_DOCS_SCREENSHOT_DEPENDENCIES
+    )
+    assert moved >= NEW_ADVISORY_DEPENDENCIES
+    assert moved >= NEW_BUILD_EVALUATION_DEPENDENCIES
     assert moved.isdisjoint(deliberately_removed | retained_as_extra)
     assert deliberately_removed.isdisjoint(retained_as_extra)
 
@@ -165,12 +176,18 @@ def test_make_profiles_select_only_their_declared_groups() -> None:
         "test": {"test"},
         "lint": {"lint"},
         "typecheck": {"typecheck"},
+        "typecheck-ty": {"typecheck"},
         "dependency-audit": {"security"},
         "security-static": set(),
         "sbom": {"security"},
         "package": {"build"},
+        "evaluate-uv-build": {"build"},
         "workflow-audit": {"security"},
         "code-docs-check": {"lint"},
+        "docs-cutover": {"test"},
+        "docs-screenshots": {"lint"},
+        "docs-screenshots-check": {"lint"},
+        "docs-terminal-screenshots": {"lint"},
         "hooks": {"lint"},
     }
 
@@ -220,7 +237,8 @@ def test_workflows_install_only_the_groups_required_by_each_job() -> None:
             "uv sync --locked --no-default-groups --group test",
         ),
         (".github/workflows/desktop-sidecar.yml", "native-package"): (
-            "uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build",
+            "uv sync --locked --no-default-groups --extra desktop-build --group test "
+            "--no-install-project --no-build",
         ),
         (".github/workflows/release-project-gate-proof.yml", "validate"): (
             "uv sync --locked --no-default-groups --group test",

@@ -397,10 +397,10 @@ class TestDocumentationContract:
 
     def test_quality_and_provider_flags_are_documented(self) -> None:
         repository = Path(__file__).parents[1]
-        compatibility = (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(
+        compatibility = (repository / "docs" / "reference" / "GEDCOM_COMPATIBILITY.md").read_text(
             encoding="utf-8"
         )
-        cli = (repository / "docs" / "CLI.md").read_text(encoding="utf-8")
+        cli = (repository / "docs" / "reference" / "CLI.md").read_text(encoding="utf-8")
         for flag in ("--quality-report", "--root-person", "--provider"):
             assert flag in compatibility
         for flag in ("--provider", "--model", "--consent"):
@@ -410,7 +410,9 @@ class TestDocumentationContract:
         repository = Path(__file__).parents[1]
         texts = [
             (FIXTURES / "README.md").read_text(encoding="utf-8"),
-            (repository / "docs" / "GEDCOM_COMPATIBILITY.md").read_text(encoding="utf-8"),
+            (repository / "docs" / "reference" / "GEDCOM_COMPATIBILITY.md").read_text(
+                encoding="utf-8"
+            ),
             (repository / "scripts" / "gedcom_merge_quickstart.sh").read_text(encoding="utf-8"),
         ]
         assert all("xref-source-a.ged" in text for text in texts)

@@ -42,6 +42,7 @@ class CancellationToken:
 
     @property
     def state(self) -> CancellationState:
+        """Return the current cooperative-cancellation state."""
         with self._lock:
             return CancellationState(
                 requested_at=self._requested_at,
@@ -51,6 +52,7 @@ class CancellationToken:
 
     @property
     def requested(self) -> bool:
+        """Return whether cooperative cancellation has been requested."""
         return self._event.is_set()
 
     def request(self) -> bool:

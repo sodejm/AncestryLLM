@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, Protocol
@@ -34,7 +34,7 @@ from typing import Any, NoReturn, Protocol
 POLICY_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
 UV_VERSION = "0.12.1"
-GH_VERSION = "2.97.0"
+GH_VERSION = "2.100.0"
 RELEASE_URL_TEMPLATE = "https://github.com/{repository}/releases/download/{tag}/{asset}"
 UV_REPOSITORY = "astral-sh/uv"
 UV_SOURCE_REPOSITORY = "https://github.com/astral-sh/uv"
@@ -80,11 +80,11 @@ UV_ASSET_SHAPE = {
     ),
     "windows-x86_64": (
         "uv-x86_64-pc-windows-msvc.zip",
-        "uv-x86_64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
     "windows-arm64": (
         "uv-aarch64-pc-windows-msvc.zip",
-        "uv-aarch64-pc-windows-msvc/uv.exe",
+        "uv.exe",
     ),
 }
 UV_TARGET_TRIPLES = {
@@ -97,27 +97,27 @@ UV_TARGET_TRIPLES = {
 }
 GH_ASSET_SHAPE = {
     "linux-x86_64": (
-        "gh_2.97.0_linux_amd64.tar.gz",
-        "gh_2.97.0_linux_amd64/bin/gh",
+        "gh_2.100.0_linux_amd64.tar.gz",
+        "gh_2.100.0_linux_amd64/bin/gh",
     ),
     "linux-arm64": (
-        "gh_2.97.0_linux_arm64.tar.gz",
-        "gh_2.97.0_linux_arm64/bin/gh",
+        "gh_2.100.0_linux_arm64.tar.gz",
+        "gh_2.100.0_linux_arm64/bin/gh",
     ),
     "macos-x86_64": (
-        "gh_2.97.0_macOS_amd64.zip",
-        "gh_2.97.0_macOS_amd64/bin/gh",
+        "gh_2.100.0_macOS_amd64.zip",
+        "gh_2.100.0_macOS_amd64/bin/gh",
     ),
     "macos-arm64": (
-        "gh_2.97.0_macOS_arm64.zip",
-        "gh_2.97.0_macOS_arm64/bin/gh",
+        "gh_2.100.0_macOS_arm64.zip",
+        "gh_2.100.0_macOS_arm64/bin/gh",
     ),
     "windows-x86_64": (
-        "gh_2.97.0_windows_amd64.zip",
+        "gh_2.100.0_windows_amd64.zip",
         "bin/gh.exe",
     ),
     "windows-arm64": (
-        "gh_2.97.0_windows_arm64.zip",
+        "gh_2.100.0_windows_arm64.zip",
         "bin/gh.exe",
     ),
 }
@@ -137,6 +137,7 @@ DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 10
 DOWNLOAD_DEADLINE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 ATTESTATION_TIMEOUT_SECONDS = 60
+ATTESTATION_MAX_ATTEMPTS = 3
 POST_PREFLIGHT_FAILURE_CATEGORIES = frozenset(
     {
         "GITHUB_OUTPUT_WRITE_FAILED",
@@ -194,7 +195,9 @@ class Runner(Protocol):
         *,
         env: Mapping[str, str],
         timeout: float | None,
-    ) -> subprocess.CompletedProcess[str]: ...
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one verified executable with the supplied environment and timeout."""
+        ...
 
 
 class BootstrapError(RuntimeError):
@@ -578,10 +581,8 @@ def safe_extract_archive(archive_path: Path, destination: Path) -> None:
 
 
 def _discard_partial_download(destination: Path) -> None:
-    try:
+    with suppress(OSError):
         destination.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _download_deadline_exceeded() -> NoReturn:
@@ -595,10 +596,8 @@ def _close_download_response(response: Any) -> None:
     close_response = getattr(response, "close", None)
     if not callable(close_response):
         return
-    try:
+    with suppress(Exception):
         close_response()
-    except Exception:  # noqa: BLE001,S110 - preserve the coded failure
-        pass
 
 
 def _open_download_response(request: urllib.request.Request, deadline: float) -> Any:
@@ -822,27 +821,46 @@ def _verify_attestation(
     runner: Runner,
     command: Sequence[str],
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        result = runner(
-            command,
-            env=_runner_environment(allow_github_credentials=True),
-            timeout=ATTESTATION_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise BootstrapError(
-            "ATTESTATION_VERIFICATION_TIMEOUT",
-            "GitHub attestation verification exceeded its bounded deadline",
-        ) from exc
-    if result.returncode == 4:
-        _fail(
-            "VERIFIER_AUTHENTICATION_FAILED",
-            "GitHub attestation authentication is required; run "
-            "gh auth login --hostname github.com locally or set GH_TOKEN "
-            "from a secret manager for headless use",
-        )
-    if result.returncode != 0:
-        _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
-    return result
+    deadline = time.monotonic() + ATTESTATION_TIMEOUT_SECONDS
+    for attempt in range(ATTESTATION_MAX_ATTEMPTS):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail(
+                "ATTESTATION_VERIFICATION_TIMEOUT",
+                "GitHub attestation verification exceeded its bounded deadline",
+            )
+        try:
+            result = runner(
+                command,
+                env=_runner_environment(allow_github_credentials=True),
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise BootstrapError(
+                "ATTESTATION_VERIFICATION_TIMEOUT",
+                "GitHub attestation verification exceeded its bounded deadline",
+            ) from exc
+        if result.returncode == 0:
+            return result
+        if result.returncode == 4:
+            _fail(
+                "VERIFIER_AUTHENTICATION_FAILED",
+                "GitHub attestation authentication is required; run "
+                "gh auth login --hostname github.com locally or set GH_TOKEN "
+                "from a secret manager for headless use",
+            )
+        if result.returncode != 1 or not re.search(
+            r"(?m)^Error: (?:HTTP (?:500|502|503|504):|failed to fetch bundle with URL: "
+            r"attestation bundle with URL \S+ returned status code (?:500|502|503|504)\r?$)",
+            result.stderr,
+        ):
+            _fail("ATTESTATION_VERIFICATION_FAILED", "GitHub CLI rejected uv provenance")
+        if attempt + 1 < ATTESTATION_MAX_ATTEMPTS:
+            time.sleep(min(2**attempt, max(0.0, deadline - time.monotonic())))
+    _fail(
+        "ATTESTATION_SERVICE_UNAVAILABLE",
+        "GitHub attestation service is temporarily unavailable; retry setup later",
+    )
 
 
 def _release_url(tool: Mapping[str, Any], asset: Mapping[str, Any]) -> str:
@@ -1056,10 +1074,8 @@ def _open_posix_parent(
                     dir_fd=descriptor,
                 )
             except FileNotFoundError:
-                try:
+                with suppress(FileExistsError):
                     os.mkdir(component, mode=0o755, dir_fd=descriptor)
-                except FileExistsError:
-                    pass
                 try:
                     child_descriptor = os.open(
                         component,
@@ -1077,10 +1093,8 @@ def _open_posix_parent(
         yield descriptor
     finally:
         if descriptor is not None:
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
 
 @contextmanager
@@ -1120,10 +1134,8 @@ def _lock_windows_parent(
         parents = tuple(reversed((destination.parent, *destination.parent.parents)))
         for candidate in parents:
             if not os.path.lexists(candidate):
-                try:
+                with suppress(FileExistsError):
                     candidate.mkdir()
-                except FileExistsError:
-                    pass
             handle = create_file(
                 str(candidate),
                 file_read_attributes,
@@ -1168,7 +1180,9 @@ def _anchored_parent(
     code: str,
     message: str,
 ) -> Iterator[tuple[Path, int | None]]:
-    absolute_destination = Path(os.path.abspath(destination))
+    # Keep the lexical absolute path: resolving symlinks here would hide an unsafe
+    # destination component before the explicit link/reparse-point checks below.
+    absolute_destination = Path(os.path.abspath(destination))  # noqa: PTH100
     if os.name == "nt":
         with _lock_windows_parent(absolute_destination, code=code, message=message):
             yield absolute_destination, None
@@ -1216,7 +1230,7 @@ def _commit_temporary_file(
     parent_fd: int | None,
 ) -> None:
     if parent_fd is None:
-        os.replace(temporary_name, destination)
+        Path(temporary_name).replace(destination)
         return
     os.replace(
         temporary_name,
@@ -1434,10 +1448,8 @@ def record_post_preflight_failure(path: Path, failure_category: str) -> dict[str
 def _discard_install_descriptor(descriptor: int | None) -> None:
     if descriptor is None:
         return
-    try:
+    with suppress(OSError):
         os.close(descriptor)
-    except OSError:
-        pass
 
 
 def _atomic_install(source: Path, destination: Path) -> None:
@@ -1466,8 +1478,10 @@ def _atomic_install(source: Path, destination: Path) -> None:
                     os.fsync(output.fileno())
                 if parent_fd is None:
                     # The verified tool must be directly executable after installation.
-                    os.chmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
-                        temporary_name, 0o700
+                    Path(
+                        temporary_name
+                    ).chmod(  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                        0o700
                     )
                 _commit_temporary_file(temporary_name, anchored_destination, parent_fd)
             finally:
@@ -1496,7 +1510,8 @@ def _assert_path_without_symlinks(
     code: str,
     message: str,
 ) -> None:
-    absolute_destination = Path(os.path.abspath(destination))
+    # Do not resolve links before checking every lexical path component.
+    absolute_destination = Path(os.path.abspath(destination))  # noqa: PTH100
     for candidate in (absolute_destination, *absolute_destination.parents):
         if _is_link_or_reparse_point(candidate, code=code, message=message):
             _fail(code, message)
@@ -1676,14 +1691,26 @@ def verify_installed_uv(
     """Re-hash a setup-uv installation before its first execution."""
 
     policy = load_policy(policy_path)
-    _, _, platform_key, uv_asset, _ = select_platform(policy, platform_id)
+    operating_system, _, platform_key, uv_asset, _ = select_platform(policy, platform_id)
+    installed_uv = uv_path
+    if operating_system == "windows":
+        if uv_path.name.casefold() == "uv":
+            # setup-uv's uv-path output omits PATHEXT even though the installed
+            # archive member is uv.exe. Resolve that exact sibling without
+            # consulting PATH or accepting an alternate executable name.
+            installed_uv = uv_path.with_name("uv.exe")
+        elif uv_path.name.casefold() != "uv.exe":
+            _fail(
+                "INSTALLED_UV_PATH_INVALID",
+                "setup-uv returned an unexpected Windows executable name",
+            )
     _assert_binary(
-        uv_path,
+        installed_uv,
         uv_asset["binary_sha256"],
         "INSTALLED_BINARY_DIGEST_MISMATCH",
     )
     _assert_uv_version(
-        uv_path,
+        installed_uv,
         runner,
         expected_target=UV_TARGET_TRIPLES[platform_key],
         error_code="INSTALLED_VERSION_MISMATCH",
@@ -1751,6 +1778,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the bootstrap uv command and return its exit status."""
     arguments = _parser().parse_args(argv)
     try:
         if arguments.command == "record-failure":

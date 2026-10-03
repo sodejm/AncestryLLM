@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.policy import validate_endpoint
 from ancestryllm.llm.validation import validate_structured_output
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 class OpenAIProvider:
+    """Adapt OpenAI generation and streaming behind the provider contract."""
+
     def __init__(
         self,
         api_key: str,
@@ -32,6 +34,7 @@ class OpenAIProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the OpenAI provider."""
         zdr_enforced = self.provider_id == "openrouter" and self.zero_data_retention
         return ProviderCapabilities(
             provider_id=self.provider_id,
@@ -50,7 +53,7 @@ class OpenAIProvider:
         return OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=timeout_seconds,
             max_retries=0,
         )
 
@@ -78,12 +81,13 @@ class OpenAIProvider:
         }
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the OpenAI provider."""
         kwargs: dict[str, object] = {
             "model": request.model,
             "messages": [message.model_dump() for message in request.messages],
             "max_completion_tokens": request.max_output_tokens,
             "temperature": request.temperature,
-            "timeout": httpx.Timeout(request.timeout_seconds),
+            "timeout": request.timeout_seconds,
         }
         response_format = self._response_format(request)
         if response_format:
@@ -111,6 +115,7 @@ class OpenAIProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the OpenAI provider."""
         stream_started = False
         kwargs: dict[str, object] = {
             "model": request.model,
@@ -118,7 +123,7 @@ class OpenAIProvider:
             "max_completion_tokens": request.max_output_tokens,
             "temperature": request.temperature,
             "stream": True,
-            "timeout": httpx.Timeout(request.timeout_seconds),
+            "timeout": request.timeout_seconds,
         }
         response_format = self._response_format(request)
         if response_format:

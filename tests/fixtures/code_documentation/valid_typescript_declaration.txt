@@ -1,0 +1,2 @@
+/** Defines the representative ambient desktop contract fixture. */
+export interface ExampleBridge {}

@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import types
+from contextlib import contextmanager
 from dataclasses import MISSING, fields
 from enum import StrEnum
 from pathlib import Path
@@ -17,7 +18,10 @@ import pytest
 from ancestryllm.application import dto as dto_module
 from ancestryllm.application import operations as operations_module
 from ancestryllm.application._artifacts import _ArtifactRegistry
-from ancestryllm.application._compat import _CurrentCancellationAdapter
+from ancestryllm.application._compat import (
+    _CurrentCancellationAdapter,
+    _CurrentProgressAdapter,
+)
 from ancestryllm.application.dto import (
     CONTRACT_VERSION,
     ArtifactAccess,
@@ -27,6 +31,10 @@ from ancestryllm.application.dto import (
     BoundaryDTO,
     FailureDetail,
     IdentityResolutionResult,
+    MediatedOperationCleanupStatus,
+    MediatedOperationRequest,
+    MediatedOperationResult,
+    MediationTransport,
     ProgressUpdate,
     ProviderSelection,
     QualityResolutionResult,
@@ -93,7 +101,7 @@ def _sample(annotation: object) -> object:
     if isinstance(annotation, type) and issubclass(annotation, BoundaryDTO):
         hints = get_type_hints(annotation)
         values: dict[str, object] = {}
-        for field in fields(cast(Any, annotation)):
+        for field in fields(cast("Any", annotation)):
             if field.default is not MISSING or field.default_factory is not MISSING:
                 continue
             values[field.name] = _sample(hints[field.name])
@@ -145,8 +153,19 @@ def test_operation_contracts_cover_every_command_route_exactly() -> None:
     }
 
     assert set(OPERATION_CONTRACTS) == command_keys
-    assert len(OPERATION_CONTRACTS) == 26
+    assert len(OPERATION_CONTRACTS) == 32
     assert all(contract.key == key for key, contract in OPERATION_CONTRACTS.items())
+
+
+def test_application_contract_inventory_lists_every_deployment_operation() -> None:
+    documentation = (
+        Path(__file__).parents[2] / "docs" / "reference" / "APPLICATION_CONTRACTS.md"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "| Deployment | `deployment.modes`, `deployment.status`, `deployment.preview`, "
+        "`deployment.switch`, `deployment.diagnose`, `deployment.metadata` |" in documentation
+    )
 
 
 def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> None:
@@ -194,7 +213,7 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
             next_offset=None,
         ),
         operations_module.RootsMagicExportArtifact(
-            artifact=cast(ArtifactRef, _sample(ArtifactRef)),
+            artifact=cast("ArtifactRef", _sample(ArtifactRef)),
             source_ref="grant_rm_fixture",
             source_fingerprint="a" * 64,
             profile_code="portable",
@@ -209,8 +228,8 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
         assert "C:\\\\" not in encoded
         assert "SourceFingerprint" not in encoded
 
-    source_summary = cast(operations_module.RootsMagicSourceSummary, values[0])
-    export_artifact = cast(operations_module.RootsMagicExportArtifact, values[3])
+    source_summary = cast("operations_module.RootsMagicSourceSummary", values[0])
+    export_artifact = cast("operations_module.RootsMagicExportArtifact", values[3])
     assert type(source_summary.fingerprint) is str
     assert type(export_artifact.source_fingerprint) is str
     assert get_type_hints(operations_module.RootsMagicSourceSummary)["fingerprint"] is str
@@ -230,6 +249,76 @@ def test_rootsmagic_workbench_dtos_are_public_stable_and_transport_neutral() -> 
         "question",
         "provider",
     )
+
+
+def test_gedcom_operation_dtos_use_public_names_safe_defaults_and_legacy_aliases() -> None:
+    public_names = {
+        "GedcomSourceSummary",
+        "GedcomValidationFinding",
+        "MergeDecisionRequest",
+        "MergeRequest",
+        "MergeResult",
+        "QualityRequest",
+        "QualityResult",
+        "RootCandidate",
+        "SubtreeRequest",
+        "SubtreeResult",
+        "SyncRequest",
+        "SyncResult",
+    }
+    assert public_names <= set(operations_module.__all__)
+
+    read_grant = ArtifactGrantRef(
+        f"grt_{'a' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.READ,
+    )
+    output_grant = ArtifactGrantRef(
+        f"grt_{'b' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.WRITE,
+    )
+    report_grant = ArtifactGrantRef(
+        f"grt_{'c' * 64}",
+        "gedcom.merge",
+        ArtifactAccess.WRITE,
+    )
+    merge = operations_module.MergeRequest(
+        inputs=(read_grant,),
+        output=output_grant,
+        quality_report=report_grant,
+        root_person_ref="person:root",
+        provider=ProviderSelection(),
+        similarity_threshold=70,
+    )
+    decision = operations_module.MergeDecisionRequest(
+        decision_id="merge-duplicate-1",
+        left_person_ref="person:left",
+        right_person_ref="person:right",
+        evidence_codes=("possible-duplicate",),
+    )
+
+    assert type(merge).__name__ == "GedcomMergeRequest"
+    assert merge.gedcom_version == "5.5.5"
+    assert json.loads(merge.to_json())["type"] == "GedcomMergeRequest"
+    assert operations_module.MergeRequest.from_json(merge.to_json()) == merge
+    assert operations_module.GedcomMergeRequest is operations_module.MergeRequest
+    assert decision.default_option_id == "retain-both"
+    assert tuple(option.option_id for option in decision.options) == (
+        "retain-both",
+        "merge",
+    )
+    assert decision.options[1].destructive
+    assert operations_module.MergeDecisionRequest.from_json(decision.to_json()) == decision
+
+    assert operations_module.GedcomMergeRequest is operations_module.MergeRequest
+    assert operations_module.GedcomMergeResult is operations_module.MergeResult
+    assert operations_module.GedcomQualityRequest is operations_module.QualityRequest
+    assert operations_module.GedcomQualityResult is operations_module.QualityResult
+    assert operations_module.GedcomSubtreeRequest is operations_module.SubtreeRequest
+    assert operations_module.GedcomSubtreeResult is operations_module.SubtreeResult
+    assert operations_module.GedcomSyncRequest is operations_module.SyncRequest
+    assert operations_module.GedcomSyncResult is operations_module.SyncResult
 
 
 @pytest.mark.parametrize(
@@ -256,7 +345,7 @@ def test_every_operation_request_and_result_has_canonical_json(
 def test_boundary_types_are_frozen_slotted_and_use_only_safe_annotations(
     contract_type: type[BoundaryDTO],
 ) -> None:
-    assert cast(Any, contract_type).__dataclass_params__.frozen
+    assert cast("Any", contract_type).__dataclass_params__.frozen
     assert "__slots__" in contract_type.__dict__
 
     forbidden_types = {
@@ -486,6 +575,17 @@ def test_existing_domain_failure_is_preserved_by_current_exception_mapping() -> 
     assert domain_failure_from_exception(failure) is failure
 
 
+def test_domain_failure_can_cross_context_manager_boundary() -> None:
+    @contextmanager
+    def application_boundary() -> Any:
+        yield
+
+    with pytest.raises(DomainFailure) as caught, application_boundary():
+        raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
+
+    assert caught.value.code is DomainFailureCode.INVALID_REQUEST
+
+
 def test_current_cancellation_adapter_maps_legacy_signal_without_detail() -> None:
     class LegacyCancellation:
         def check_cancelled(self) -> None:
@@ -496,6 +596,32 @@ def test_current_cancellation_adapter_maps_legacy_signal_without_detail() -> Non
 
     assert caught.value.code is DomainFailureCode.CANCELLED
     assert str(caught.value) == "CANCELLED"
+
+
+def test_current_progress_adapter_accepts_protocol_keyword_and_preserves_counts() -> None:
+    class LegacyReporter:
+        def __init__(self) -> None:
+            self.updates: list[tuple[str, int | None, int | None]] = []
+
+        def check_cancelled(self) -> None:
+            return
+
+        def update(
+            self,
+            operation: str,
+            *,
+            completed: int | None = None,
+            total: int | None = None,
+        ) -> None:
+            self.updates.append((operation, completed, total))
+
+    reporter = LegacyReporter()
+
+    _CurrentProgressAdapter(reporter).emit(
+        event=ProgressUpdate("gedcom.merge", "write", 1, completed=2, total=3),
+    )
+
+    assert reporter.updates == [("gedcom.merge.write", 2, 3)]
 
 
 def test_artifact_grants_are_opaque_operation_scoped_and_revocable(tmp_path: Path) -> None:
@@ -534,6 +660,20 @@ def test_artifact_grants_are_opaque_operation_scoped_and_revocable(tmp_path: Pat
     assert revoked.value.code is DomainFailureCode.ARTIFACT_FORBIDDEN
 
 
+@pytest.mark.parametrize(
+    "grant_id",
+    [
+        f"grt_{'a' * 32}",
+        f"grt_{'a' * 65}",
+        f"grt_{'A' * 64}",
+        f"grt_{'g' * 64}",
+    ],
+)
+def test_artifact_grant_ids_match_the_desktop_broker_contract(grant_id: str) -> None:
+    with pytest.raises(ValueError, match="grant_id"):
+        ArtifactGrantRef(grant_id, "gedcom.merge", ArtifactAccess.READ)
+
+
 def test_artifact_read_grant_rejects_replaced_input(tmp_path: Path) -> None:
     source = tmp_path / "fictional.ged"
     source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
@@ -552,6 +692,146 @@ def test_artifact_read_grant_rejects_replaced_input(tmp_path: Path) -> None:
         registry.describe_input(grant, operation="gedcom.merge")
 
     assert changed.value.code is DomainFailureCode.ARTIFACT_INVALID
+
+
+@pytest.mark.parametrize("alias_kind", ["symlink", "hardlink"])
+def test_artifact_read_grant_rejects_linked_input(
+    tmp_path: Path,
+    alias_kind: str,
+) -> None:
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    selected = tmp_path / "selected.ged"
+    if alias_kind == "symlink":
+        selected.symlink_to(source)
+    else:
+        selected.hardlink_to(source)
+
+    with pytest.raises(DomainFailure) as rejected:
+        _ArtifactRegistry().grant_input(
+            selected,
+            operation="gedcom.merge",
+            media_type="text/vnd.gedcom",
+            artifact_type="gedcom",
+        )
+
+    assert rejected.value.code is DomainFailureCode.ARTIFACT_INVALID
+
+
+def test_mediated_operation_request_is_path_free_and_transport_neutral() -> None:
+    operation = "gedcom.merge"
+    request = MediatedOperationRequest(
+        operation_id=f"op_{'a' * 64}",
+        operation=operation,
+        transport=MediationTransport.LOCAL_CONTAINER,
+        inputs=(ArtifactGrantRef(f"grt_{'b' * 64}", operation, ArtifactAccess.READ),),
+        outputs=(
+            ArtifactGrantRef(f"grt_{'c' * 64}", operation, ArtifactAccess.WRITE),
+            ArtifactGrantRef(f"grt_{'d' * 64}", operation, ArtifactAccess.WRITE),
+        ),
+    )
+
+    serialized = request.to_json()
+
+    assert MediatedOperationRequest.from_json(serialized) == request
+    assert request.transport is MediationTransport.LOCAL_CONTAINER
+    assert "/Users/" not in serialized
+    assert "\\\\" not in serialized
+
+
+def test_mediated_operation_request_rejects_mismatched_or_reused_grants() -> None:
+    operation = "gedcom.subtree"
+    shared = ArtifactGrantRef(f"grt_{'e' * 64}", operation, ArtifactAccess.READ)
+
+    with pytest.raises(ValueError, match="unique"):
+        MediatedOperationRequest(
+            operation_id=f"op_{'f' * 64}",
+            operation=operation,
+            transport=MediationTransport.REMOTE_SERVICE,
+            inputs=(shared, shared),
+            outputs=(ArtifactGrantRef(f"grt_{'1' * 64}", operation, ArtifactAccess.WRITE),),
+        )
+
+    with pytest.raises(ValueError, match="operation"):
+        MediatedOperationRequest(
+            operation_id=f"op_{'2' * 64}",
+            operation=operation,
+            transport=MediationTransport.LOCAL_CONTAINER,
+            inputs=(
+                ArtifactGrantRef(
+                    f"grt_{'3' * 64}",
+                    "gedcom.quality",
+                    ArtifactAccess.READ,
+                ),
+            ),
+            outputs=(ArtifactGrantRef(f"grt_{'4' * 64}", operation, ArtifactAccess.WRITE),),
+        )
+
+
+@pytest.mark.parametrize(
+    "operation_id",
+    [
+        f"op_{'A' * 64}",
+        f"op_{'a' * 63}",
+        f"op_{'a' * 65}",
+        f"op_{'g' * 64}",
+    ],
+)
+def test_mediated_operation_ids_use_exact_lowercase_hex_contract(
+    operation_id: str,
+) -> None:
+    operation = "gedcom.quality"
+    input_grant = ArtifactGrantRef(
+        f"grt_{'8' * 64}",
+        operation,
+        ArtifactAccess.READ,
+    )
+    output_grant = ArtifactGrantRef(
+        f"grt_{'9' * 64}",
+        operation,
+        ArtifactAccess.WRITE,
+    )
+    artifact = ArtifactRef(
+        f"art_{'a' * 64}",
+        "text/markdown",
+        "quality_report",
+        17,
+        ArtifactStatus.READY,
+        "b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="operation_id"):
+        MediatedOperationRequest(
+            operation_id=operation_id,
+            operation=operation,
+            transport=MediationTransport.REMOTE_SERVICE,
+            inputs=(input_grant,),
+            outputs=(output_grant,),
+        )
+    with pytest.raises(ValueError, match="operation_id"):
+        MediatedOperationResult(
+            operation_id=operation_id,
+            outputs=(artifact,),
+            cleanup_status=MediatedOperationCleanupStatus.COMPLETE,
+        )
+
+
+def test_mediated_operation_result_rejects_duplicate_artifact_ids() -> None:
+    artifact = ArtifactRef(
+        f"art_{'5' * 64}",
+        "text/vnd.familysearch.gedcom",
+        "gedcom_export",
+        17,
+        ArtifactStatus.READY,
+        "6" * 64,
+    )
+
+    with pytest.raises(ValueError, match="unique"):
+        MediatedOperationResult(
+            operation_id=f"op_{'7' * 64}",
+            outputs=(artifact, artifact),
+            cleanup_status=MediatedOperationCleanupStatus.COMPLETE,
+        )
 
 
 def test_artifact_publication_is_atomic_and_returns_no_host_path(tmp_path: Path) -> None:

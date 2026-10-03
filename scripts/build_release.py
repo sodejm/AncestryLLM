@@ -35,14 +35,14 @@ ALLOWED_SDIST_FILES = {
     "MANIFEST.in",
     "PKG-INFO",
     "README.md",
-    "docs/CLI.md",
+    "docs/reference/CLI.md",
     "docs/CONSOLE.md",
-    "docs/FILE_INGRESS.md",
-    "docs/GEDCOM_COMPATIBILITY.md",
-    "docs/PROVIDERS.md",
+    "docs/reference/FILE_INGRESS.md",
+    "docs/reference/GEDCOM_COMPATIBILITY.md",
+    "docs/reference/PROVIDERS.md",
     "docs/RELEASING.md",
     "docs/SETUP_DIAGNOSTICS.md",
-    "docs/VERSIONING.md",
+    "docs/reference/VERSIONING.md",
     "docs/release-evidence/README.md",
     "docs/release-evidence/issue-10-import-smoke-tests.md",
     "pyproject.toml",
@@ -53,20 +53,21 @@ REQUIRED_SDIST_PATHS = {
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
-    "docs/CLI.md",
+    "docs/reference/CLI.md",
     "docs/CONSOLE.md",
-    "docs/FILE_INGRESS.md",
-    "docs/GEDCOM_COMPATIBILITY.md",
-    "docs/PROVIDERS.md",
+    "docs/reference/FILE_INGRESS.md",
+    "docs/reference/GEDCOM_COMPATIBILITY.md",
+    "docs/reference/PROVIDERS.md",
     "docs/RELEASING.md",
     "docs/SETUP_DIAGNOSTICS.md",
-    "docs/VERSIONING.md",
+    "docs/reference/VERSIONING.md",
     "docs/release-evidence/README.md",
     "docs/release-evidence/issue-10-import-smoke-tests.md",
     "pyproject.toml",
     "src/ancestryllm/__init__.py",
     "src/ancestryllm/cli.py",
     "src/ancestryllm/storage/migrations/versions/0001_initial.py",
+    "src/ancestryllm/storage/migrations/versions/0002_job_persistence.py",
 }
 
 
@@ -87,6 +88,7 @@ def _run(*command: str, env: dict[str, str] | None = None) -> str:
 
 
 def project_version() -> str:
+    """Read the project version from the canonical package metadata."""
     with (ROOT / "pyproject.toml").open("rb") as handle:
         value = str(tomllib.load(handle)["project"]["version"])
     if not SEMVER.fullmatch(value):
@@ -95,6 +97,7 @@ def project_version() -> str:
 
 
 def require_clean_checkout() -> None:
+    """Reject a release build when the checkout contains uncommitted changes."""
     status = _run("git", "status", "--porcelain=v1", "--untracked-files=all")
     if status:
         raise RuntimeError(f"release builds require a clean checkout:\n{status}")
@@ -155,6 +158,7 @@ def _wheel_metadata(path: Path) -> tuple[str, str]:
 
 
 def validate_artifacts(directory: Path, version: str) -> dict[str, str]:
+    """Validate release artifacts against the accepted package contract."""
     wheel = directory / f"ancestryllm-{version}-py3-none-any.whl"
     sdist = directory / f"ancestryllm-{version}.tar.gz"
     actual = {item.name for item in directory.iterdir() if item.is_file()}
@@ -222,26 +226,33 @@ def _normalize_sdist(path: Path, *, epoch: int) -> None:
             members.append((member, data))
 
     normalized = io.BytesIO()
-    with gzip.GzipFile(
-        filename="",
-        mode="wb",
-        compresslevel=9,
-        fileobj=normalized,
-        mtime=epoch,
-    ) as compressed:
-        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as output:
-            for member, data in members:
-                member.mtime = epoch
-                member.uid = 0
-                member.gid = 0
-                member.uname = ""
-                member.gname = ""
-                member.pax_headers = {}
-                output.addfile(member, io.BytesIO(data) if data is not None else None)
+    with (
+        gzip.GzipFile(
+            filename="",
+            mode="wb",
+            compresslevel=9,
+            fileobj=normalized,
+            mtime=epoch,
+        ) as compressed,
+        tarfile.open(
+            fileobj=compressed,
+            mode="w",
+            format=tarfile.PAX_FORMAT,
+        ) as output,
+    ):
+        for member, data in members:
+            member.mtime = epoch
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.pax_headers = {}
+            output.addfile(member, io.BytesIO(data) if data is not None else None)
     path.write_bytes(normalized.getvalue())
 
 
 def build_release(output: Path) -> dict[str, str]:
+    """Build and verify the complete Python release artifact set."""
     require_clean_checkout()
     version = project_version()
     epoch = _run("git", "show", "-s", "--format=%ct", "HEAD")
@@ -250,21 +261,23 @@ def build_release(output: Path) -> dict[str, str]:
     if any(output.iterdir()):
         raise RuntimeError(f"release output directory must be empty: {output}")
 
-    with tempfile.TemporaryDirectory(prefix="ancestryllm-build-a-") as first_name:
-        with tempfile.TemporaryDirectory(prefix="ancestryllm-build-b-") as second_name:
-            first = Path(first_name)
-            second = Path(second_name)
-            _build(first, epoch)
-            first_hashes = validate_artifacts(first, version)
-            _build(second, epoch)
-            second_hashes = validate_artifacts(second, version)
-            if first_hashes != second_hashes:
-                raise RuntimeError(
-                    "release builds are not reproducible:\n"
-                    f"first={first_hashes}\nsecond={second_hashes}"
-                )
-            for name in sorted(first_hashes):
-                shutil.copy2(first / name, output / name)
+    with (
+        tempfile.TemporaryDirectory(prefix="ancestryllm-build-a-") as first_name,
+        tempfile.TemporaryDirectory(prefix="ancestryllm-build-b-") as second_name,
+    ):
+        first = Path(first_name)
+        second = Path(second_name)
+        _build(first, epoch)
+        first_hashes = validate_artifacts(first, version)
+        _build(second, epoch)
+        second_hashes = validate_artifacts(second, version)
+        if first_hashes != second_hashes:
+            raise RuntimeError(
+                "release builds are not reproducible:\n"
+                f"first={first_hashes}\nsecond={second_hashes}"
+            )
+        for name in sorted(first_hashes):
+            shutil.copy2(first / name, output / name)
 
     checksum_path = output / "SHA256SUMS"
     checksum_path.write_text(
@@ -275,6 +288,7 @@ def build_release(output: Path) -> dict[str, str]:
 
 
 def main() -> int:
+    """Run the build release command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()

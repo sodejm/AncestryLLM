@@ -9,27 +9,25 @@ directory cannot safely be synchronized.
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
 import re
 import sys
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
-from docs_linking import DocumentationLinkError, SourceIndex, split_destination
+from docs_linking import DocumentationLinkError, SourceIndex, source_anchors, split_destination
 from rewrite_wiki_links import rewrite_markdown_link_destinations
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 _WIKI_LINK = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
 _MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
-_ATX_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(?P<title>.*?)[ \t]*#*[ \t]*$")
-_SETEXT_HEADING = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
-_EXPLICIT_HEADING_ID = re.compile(r"[ \t]+\{#(?P<identifier>[^}]+)\}[ \t]*$")
-_HTML_ANCHOR = re.compile(r"\b(?:id|name)=[\"'](?P<identifier>[^\"']+)[\"']", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -156,9 +154,11 @@ def _navigation_errors(source: Path, pages: Sequence[Path]) -> list[ValidationEr
         target_name = _normalize_target(target)
         # Wiki-style links address the flat Wiki namespace. Markdown links are
         # validated by the canonical path-aware pass below.
-        if style == "wiki" and ("/" in target_name or _unsafe_target(target_name)):
-            errors.append(ValidationError(f"unsafe sidebar target: {target}"))
-        elif target.startswith(("../", "/")) or _WINDOWS_DRIVE.match(target):
+        if (
+            (style == "wiki" and ("/" in target_name or _unsafe_target(target_name)))
+            or target.startswith(("../", "/"))
+            or _WINDOWS_DRIVE.match(target)
+        ):
             errors.append(ValidationError(f"unsafe sidebar target: {target}"))
         elif style == "wiki" and target_name not in known_pages:
             errors.append(ValidationError(f"broken sidebar target: {target}"))
@@ -178,7 +178,7 @@ def _link_errors(source: Path, pages: Sequence[Path]) -> list[ValidationError]:
         return [ValidationError(str(error))]
 
     anchors = {
-        PurePosixPath(page.relative_to(source).as_posix()): _source_anchors(
+        PurePosixPath(page.relative_to(source).as_posix()): source_anchors(
             page.read_text(encoding="utf-8")
         )
         for page in pages
@@ -214,56 +214,6 @@ def _link_errors(source: Path, pages: Sequence[Path]) -> list[ValidationError]:
             page.read_text(encoding="utf-8"), validate, include_images=True
         )
     return errors
-
-
-def _source_anchors(markdown: str) -> set[str]:
-    """Return deterministic Kramdown-style heading and explicit HTML anchors."""
-    anchors: set[str] = set()
-    counts: dict[str, int] = {}
-    fence: str | None = None
-    previous_line: str | None = None
-
-    def add_heading(title: str) -> None:
-        explicit = _EXPLICIT_HEADING_ID.search(title)
-        if explicit is not None:
-            anchors.add(explicit.group("identifier"))
-            return
-        title = re.sub(r"!?(?:\[([^]]*)\])\([^)]*\)", r"\1", title)
-        title = re.sub(r"<[^>]+>", "", title)
-        title = re.sub(r"[`*_~]", "", html.unescape(title)).casefold().strip()
-        identifier = re.sub(r"[^\w -]", "", title, flags=re.UNICODE)
-        identifier = re.sub(r"[ _]+", "-", identifier)
-        if not identifier:
-            return
-        occurrence = counts.get(identifier, 0)
-        counts[identifier] = occurrence + 1
-        anchors.add(identifier if occurrence == 0 else f"{identifier}-{occurrence}")
-
-    for line in markdown.splitlines():
-        stripped = line.lstrip()
-        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
-        if fence_match is not None:
-            marker = fence_match.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif fence == marker:
-                fence = None
-            previous_line = None
-            continue
-        if fence is not None:
-            continue
-        anchors.update(match.group("identifier") for match in _HTML_ANCHOR.finditer(line))
-        if _SETEXT_HEADING.match(line) is not None and previous_line and previous_line.strip():
-            add_heading(previous_line)
-            previous_line = None
-            continue
-        heading = _ATX_HEADING.match(line)
-        if heading is not None:
-            add_heading(heading.group("title"))
-            previous_line = None
-            continue
-        previous_line = line
-    return anchors
 
 
 def _metadata_errors(source: Path, pages: Sequence[Path]) -> list[ValidationError]:
@@ -331,6 +281,7 @@ def validate_wiki_source(source: Path) -> list[ValidationError]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the validate wiki docs command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
@@ -342,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the validate wiki docs command and return its exit status."""
     args = build_parser().parse_args(argv)
     errors = validate_wiki_source(args.source)
     if errors:

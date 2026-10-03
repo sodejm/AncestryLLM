@@ -7,10 +7,13 @@ import argparse
 import re
 import sys
 import time
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _PRODUCTION_HOST = "sodejm.github.io"
 _MARKER = re.compile(
@@ -68,14 +71,14 @@ def smoke(base_url: str, expected_source_sha: str) -> list[str]:
     if parsed.scheme != "https" or parsed.hostname != _PRODUCTION_HOST:
         return [f"refusing non-production Pages URL: {base_url}"]
     errors: list[str] = []
-    for path in ("", "CLI.html", "robots.txt", "sitemap.xml"):
+    for path in ("", "reference/CLI.html", "robots.txt", "sitemap.xml"):
         url = urljoin(base_url.rstrip("/") + "/", path)
         try:
             content = _fetch(url)
         except RuntimeError as error:
             errors.append(str(error))
             continue
-        if path in {"", "CLI.html"}:
+        if path in {"", "reference/CLI.html"}:
             match = _MARKER.search(content)
             actual = match.group("sha") if match else "<missing>"
             if actual != expected_source_sha:
@@ -84,6 +87,7 @@ def smoke(base_url: str, expected_source_sha: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the smoke pages deployment command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="https://sodejm.github.io/AncestryLLM/")
     parser.add_argument("--expected-source-sha", required=True)
@@ -91,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the smoke pages deployment command and return its exit status."""
     args = build_parser().parse_args(argv)
     errors = smoke(args.base_url, args.expected_source_sha)
     if errors:

@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import base64
 import dataclasses
-import os
 import sqlite3
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -20,6 +18,9 @@ from ancestryllm.core.errors import AncestryError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.rootsmagic.exporter import RootsMagicExporter
 from ancestryllm.rootsmagic.reader import RootsMagicReader
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _tree(path: Path, script: str) -> Path:
@@ -74,7 +75,7 @@ def test_invalid_database_families_fail_stably_without_artifacts_or_source_chang
 ) -> None:
     source = tmp_path / "fictional-private-corrupt.rmtree"
     source.write_bytes(payload)
-    os.chmod(source, 0o600)
+    source.chmod(0o600)
     before = _identity(source)
     output = tmp_path / "existing.ged"
     report = tmp_path / "existing.md"

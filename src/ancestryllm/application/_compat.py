@@ -7,11 +7,13 @@ objects while those implementations remain in ``core``.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from ancestryllm.application.events import ProgressEvent
 from ancestryllm.core.cancellation import CancellationError
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
+
+if TYPE_CHECKING:
+    from ancestryllm.application.events import ProgressEvent
 
 
 class _LegacyCancellation(Protocol):
@@ -37,6 +39,7 @@ class _CurrentCancellationAdapter:
         self._source = source
 
     def check_cancelled(self) -> None:
+        """Translate legacy cancellation into the stable coded domain failure."""
         try:
             self._source.check_cancelled()
         except CancellationError as exc:
@@ -51,11 +54,12 @@ class _CurrentProgressAdapter:
     def __init__(self, reporter: _LegacyReporter) -> None:
         self._reporter = reporter
 
-    def emit(self, update: ProgressEvent) -> None:
+    def emit(self, event: ProgressEvent) -> None:
+        """Forward bounded progress through the legacy reporter contract."""
         self._reporter.update(
-            f"{update.operation}.{update.stage}",
-            completed=update.completed,
-            total=update.total,
+            f"{event.operation}.{event.stage}",
+            completed=event.completed,
+            total=event.total,
         )
 
 

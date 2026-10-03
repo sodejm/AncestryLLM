@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.secrets import MemorySecretStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture

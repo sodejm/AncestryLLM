@@ -1,0 +1,58 @@
+{
+  "architecture": "arm64",
+  "docker_context": "colima-ancestryllm-363-evidence",
+  "endpoint": {
+    "mode": "0600",
+    "owner_match": true,
+    "scheme": "unix",
+    "stable": true
+  },
+  "engine": {
+    "api_version": "1.54",
+    "architecture": "arm64",
+    "identity_match": true,
+    "operating_system": "linux",
+    "security_options": [
+      "cgroupns",
+      "name=apparmor",
+      "seccomp"
+    ],
+    "server_version": "29.5.2"
+  },
+  "hardening": {
+    "capabilities_dropped": true,
+    "digest_pinned_image": true,
+    "named_volume_only": true,
+    "no_new_privileges": true,
+    "non_root_user": true,
+    "published_ports": 0,
+    "read_only_root": true,
+    "resource_limits": {
+      "cpus": "1.0",
+      "log_driver": "local",
+      "log_max_files": 3,
+      "log_max_size": "10m",
+      "memory": "256m",
+      "pids": 128
+    }
+  },
+  "isolation": {
+    "ambient_selection_ignored": true,
+    "app_owned_context": true,
+    "internal_network_only": true,
+    "renderer_or_container_socket_access": false
+  },
+  "lifecycle_resource_counts": {
+    "initial": 0,
+    "repaired": 3,
+    "restarted": 3,
+    "started": 3,
+    "stopped": 3,
+    "uninstalled_deleting_data": 0,
+    "uninstalled_preserving_data": 1
+  },
+  "platform": "darwin",
+  "runtime_profile": "ancestryllm-363-evidence",
+  "schema_version": 1,
+  "status": "verified"
+}

@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from ancestryllm.api import ApiLifecycle, ApiSettings, create_app
 from ancestryllm.application.executor import CommandExecutor
+from ancestryllm.application.secret_management import SecretManagementService
+from ancestryllm.application.settings import SettingsService
+from ancestryllm.core.config import AppConfig
+from ancestryllm.core.secrets import MemorySecretStore
 
 from .conftest import FixtureRegistry
 
@@ -21,7 +30,7 @@ class RecordingLifecycle(ApiLifecycle):
         self.events.append("shutdown")
 
 
-def test_adapter_exposes_supervisor_lifecycle_hooks() -> None:
+def test_adapter_exposes_supervisor_lifecycle_hooks(tmp_path: Path) -> None:
     lifecycle = RecordingLifecycle()
     app = create_app(
         settings=ApiSettings(
@@ -32,6 +41,10 @@ def test_adapter_exposes_supervisor_lifecycle_hooks() -> None:
         ),
         registry=FixtureRegistry(()),
         executor=CommandExecutor(()),
+        settings_service=SettingsService(
+            AppConfig(config_path=tmp_path / "config.toml", data_dir=tmp_path / "data")
+        ),
+        secret_service=SecretManagementService(MemorySecretStore({})),
         lifecycle=lifecycle,
     )
 

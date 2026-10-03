@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -65,12 +67,17 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         "test",
         "lint",
         "typecheck",
+        "typecheck-ty",
         "dependency-audit",
         "security-static",
         "sbom",
         "package",
         "workflow-audit",
         "code-docs-check",
+        "docs-cutover",
+        "docs-screenshots",
+        "docs-screenshots-check",
+        "docs-terminal-screenshots",
         "hooks",
     ):
         declaration = re.search(
@@ -81,6 +88,223 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         assert "verified-uv" in declaration.group("prerequisites"), target_name
 
 
+def test_make_pins_uv_to_selected_system_python() -> None:
+    selected_python = Path(sys.executable)
+    environment = os.environ.copy()
+    environment["PATH"] = os.pathsep.join(
+        (str(selected_python.parent), environment.get("PATH", ""))
+    )
+    probe_makefile = """\
+.PHONY: probe-selected-uv-python
+probe-selected-uv-python:
+\t@"$(PYTHON)" -c 'import os, pathlib, sys; selected = pathlib.Path(os.environ["UV_PYTHON"]); assert selected.is_absolute(), selected; assert selected.samefile(sys.executable), (selected, sys.executable)'
+"""
+
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-f",
+            str(ROOT / "Makefile"),
+            "-f",
+            "-",
+            "probe-selected-uv-python",
+            f"PYTHON={selected_python.name}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        input=probe_makefile,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual-environment layout")
+def test_make_setup_repairs_an_unstartable_checkout_environment(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    (venv_dir / "pyvenv.cfg").write_text(
+        "home = /deleted/python\nuv = 0.12.1\n",
+        encoding="utf-8",
+    )
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    calls = call_log.read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        " ".join(
+            (
+                "venv --clear --python",
+                str(Path(sys.executable).resolve()),
+                str(venv_dir),
+            )
+        ),
+        "sync --locked --all-extras --all-groups",
+    ]
+    assert "UVENV_VENV_RECREATED" in completed.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual-environment layout")
+def test_make_setup_refuses_to_recreate_an_environment_not_owned_by_uv(
+    tmp_path: Path,
+) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    (venv_dir / "pyvenv.cfg").write_text(
+        "home = /deleted/python\n",
+        encoding="utf-8",
+    )
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link semantics")
+def test_make_setup_refuses_to_replace_a_dangling_environment_symlink(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_dir.symlink_to(tmp_path / "missing-environment", target_is_directory=True)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_dir / 'bin' / 'python'}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link semantics")
+def test_make_setup_refuses_symlinked_uv_ownership_metadata(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    ownership_metadata = tmp_path / "untrusted-pyvenv.cfg"
+    ownership_metadata.write_text(
+        "home = /deleted/python\nuv = 0.12.1\n",
+        encoding="utf-8",
+    )
+    (venv_dir / "pyvenv.cfg").symlink_to(ownership_metadata)
+    venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    call_log = tmp_path / "uv-calls.txt"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_CALL_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["UV_CALL_LOG"] = str(call_log)
+    completed = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "setup",
+            f"PYTHON={sys.executable}",
+            f"UV_BIN={fake_uv}",
+            f"VENV_DIR={venv_dir}",
+            f"VENV_PYTHON={venv_python}",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "UVENV_VENV_REPAIR_REFUSED" in completed.stderr
+    assert not call_log.exists()
+
+
 def test_make_exposes_the_exact_canonical_uv_commands() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     expected_commands = {
@@ -89,7 +313,11 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
         "lock-check": "$(UV_BIN) lock --check",
         "test": "$(UV_BIN) run --locked --group test pytest --verbose",
         "typecheck": "$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm",
-        "dependency-audit": "$(UV_BIN) run --locked --group security pip-audit",
+        "typecheck-ty": ("$(UV_BIN) run --locked --group typecheck ty check src/ancestryllm"),
+        "dependency-audit": (
+            "$(UV_BIN) run --locked --group security python "
+            "scripts/run_dependency_audit.py --uv $(UV_BIN)"
+        ),
         "security-static": ("$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py ."),
         "package": (
             "$(UV_BIN) run --locked --group build python "
@@ -99,9 +327,33 @@ def test_make_exposes_the_exact_canonical_uv_commands() -> None:
             "$(UV_BIN) run --locked --group security zizmor --persona=pedantic "
             ".github/workflows .github/actions"
         ),
+        "docs-cutover": (
+            "$(UV_BIN) run --locked --group test python "
+            "scripts/verify_documentation_cutover.py --repository-root . --source docs "
+            '--source-sha "$$(git rev-parse HEAD)" '
+            "--exceptions docs/_data/external_link_exceptions.json"
+        ),
+        "docs-screenshots": (
+            "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture "
+            "--manifest config/docs-screenshot-manifest.json --repository-root . "
+            '"$${selection[@]}"'
+        ),
+        "docs-screenshots-check": (
+            "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py check "
+            "--manifest config/docs-screenshot-manifest.json --repository-root ."
+        ),
+        "docs-terminal-screenshots": (
+            "$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture "
+            "--manifest config/docs-screenshot-manifest.json --repository-root . "
+            "--surface terminal"
+        ),
         "hooks": (
             "$(UV_BIN) run --locked --group lint pre-commit install "
             "--hook-type pre-commit --hook-type pre-push"
+        ),
+        "code-docs-check": (
+            "$(UV_BIN) run --locked --group lint ruff check src tests scripts "
+            "--select D100,D101,D102,D103,D104,D418,D419"
         ),
     }
 
@@ -151,42 +403,58 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
 def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     expected_commands = {
         (".github/workflows/ci.yml", "lockfile"): ("uv lock --check",),
-        (".github/workflows/ci.yml", "test"): ("pytest --verbose",),
+        (".github/workflows/ci.yml", "test"): (
+            "uv run --locked --group test pytest --verbose",
+        ),
         (".github/workflows/ci.yml", "quality"): (
-            "ruff check src tests scripts",
-            "mypy src/ancestryllm",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
+            "uv run --locked --group typecheck ty check src/ancestryllm",
         ),
         (".github/workflows/ci.yml", "security"): (
-            "pip-audit",
-            "scripts/run_pinned_semgrep.py .",
-            "cyclonedx-py environment",
+            "uv run --locked --group security pip-audit",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file sbom.json .venv/bin/python",
         ),
-        (".github/workflows/ci.yml", "package"): ("scripts/build_release.py --output-dir dist",),
-        (".github/workflows/ci.yml", "workflow-audit"): ("zizmor --persona=pedantic",),
+        (".github/workflows/ci.yml", "package"): (
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+        ),
+        (".github/workflows/ci.yml", "workflow-audit"): (
+            "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
+        ),
         (".github/workflows/release-readiness.yml", "quality"): (
-            "pytest --verbose",
-            "ruff check src tests scripts",
-            "mypy src/ancestryllm",
+            "uv run --locked --group test pytest --verbose",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/release-readiness.yml", "security"): (
-            "pip-audit",
-            "scripts/run_pinned_semgrep.py .",
-            "zizmor --persona=pedantic",
-            "cyclonedx-py environment",
+            "uv run --locked --group security pip-audit",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security zizmor --persona=pedantic "
+            ".github/workflows .github/actions",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file sbom.json .venv/bin/python",
         ),
         (".github/workflows/release-readiness.yml", "package"): (
-            "scripts/build_release.py --output-dir dist",
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
         ),
         (".github/workflows/release.yml", "build"): (
-            "scripts/build_release.py --output-dir dist",
-            "cyclonedx-py environment --output-file dist/sbom.json",
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file dist/sbom.json .venv/bin/python",
         ),
     }
 
     for (relative_path, job_name), commands in expected_commands.items():
         job = _workflow_job(relative_path, job_name)
         for command in commands:
-            assert job.count(command) == 1, (relative_path, job_name, command)
+            command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
+            assert len(command_line.findall(job)) == 1, (
+                relative_path,
+                job_name,
+                command,
+            )
 
     canonical_workflows = (
         ROOT / ".github/workflows/ci.yml",
@@ -197,10 +465,7 @@ def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     for workflow_path in canonical_workflows:
         workflow = workflow_path.read_text(encoding="utf-8")
         assert all(command not in workflow for command in forbidden), workflow_path
-        assert not re.search(
-            r"(?m)^\s+make (?:lock-check|test|lint|typecheck|dependency-audit|security-static|sbom|package|workflow-audit)(?:\s|$)",
-            workflow,
-        )
+        assert not re.search(r"(?m)^\s*[^#\n]*\bmake(?:\s|$)", workflow), workflow_path
 
 
 def test_python_matrix_remains_system_supplied_and_supported() -> None:

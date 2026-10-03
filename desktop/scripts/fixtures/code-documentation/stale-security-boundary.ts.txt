@@ -1,0 +1,5 @@
+/** Defines a fixture security policy whose reviewed boundary inventory is stale. */
+/** Adds deny-by-default response headers before protocol content reaches the renderer. */
+const responseHeaders = (): Record<string, string> => ({
+  'Content-Security-Policy': "default-src 'none'",
+})

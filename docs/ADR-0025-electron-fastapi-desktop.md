@@ -57,7 +57,7 @@ implemented 0.5.0 profile is intentionally narrower: Home, Diagnostics, a
 sanitized capability summary, and local visual Settings only. It has no
 genealogy, file or folder, GEDCOM or RootsMagic, job, chat, provider or
 credential, cloud or account, domain-dispatch, updater, or background-channel
-surface. See the [desktop shell guide](DESKTOP_SHELL.md) for the supported
+surface. See the [desktop shell guide](explanation/DESKTOP_SHELL.md) for the supported
 surface and recovery contract.
 
 The 0.5.0 preload bridge exposes exactly `getAppInfo`,
@@ -65,7 +65,12 @@ The 0.5.0 preload bridge exposes exactly `getAppInfo`,
 and `updatePreferences`. The renderer never receives the sidecar port, bearer,
 endpoint, executable or preference-file path, stderr, raw sidecar or bridge
 errors, or stack traces. Electron main is the sole authenticated sidecar
-client.
+client. Main reauthorizes the exact registered `WebContents`, current main
+frame, and trusted application URL on every call; validates strict schemas and
+structured-clone bounds in both directions; and owns fixed concurrency, queue,
+coalescing, deadline, cancellation, and lifecycle-cleanup limits. There is no
+renderer-selected channel or endpoint. Saturation, timeout, cancellation, and
+internal failure cross the bridge only as stable redacted error codes.
 
 Supported 0.5.0 distribution uses manually installed installers after the
 platform-specific release gates pass. The official 0.x release workflow
@@ -192,9 +197,16 @@ untrusted even when they originated locally.
 
 ### Sidecar and internal API
 
-- Package a signed, manifest-verified Python sidecar. Spawn it directly with no
-  shell, a minimal allowlisted environment, an isolated working directory, and
-  no inherited provider secrets in packaged mode.
+- Package a Python sidecar with a deterministic, target/build-specific full
+  payload manifest bound to the built Electron main by an embedded digest.
+  Verify it before token generation or process spawn. This detects payload
+  substitution relative to that main process; it is not publisher signing or
+  whole-bundle protection. Project-produced 0.x binaries remain unsigned, and
+  Issue #132 owns publisher signing and notarization.
+- Spawn the sidecar directly with no shell, a minimal allowlisted environment,
+  an isolated working directory, and no inherited provider secrets in packaged
+  mode. Verification and spawn are separate filesystem operations, leaving a
+  narrow local time-of-check/time-of-use replacement residual.
 - Bind one worker to `127.0.0.1` on an OS-selected ephemeral port. Supply a
   fresh 256-bit per-launch bearer through a private stdin frame, never through
   arguments, environment, files, logs, or the renderer.
@@ -208,6 +220,18 @@ untrusted even when they originated locally.
 - Use a token-derived readiness proof and exact app/sidecar build and protocol
   handshake. Keep the port and bearer only in Electron main memory. Disable
   access logs and use privacy-minimal structural stderr.
+- Invalidate the public active session, then use captured Main-only credentials
+  for one exact authenticated, bodyless, hidden request that asks Uvicorn to
+  begin its graceful lifespan drain. Independently observe process exit; the
+  HTTP response is not termination proof.
+- Terminate the full isolated POSIX process group or Windows process tree with
+  bounded graceful/forced escalation when the request fails or exit is not
+  observed, and fail closed when termination cannot be verified. The current
+  lifespan drains the Uvicorn listener/server, stdio,
+  process tree, temporary launch directory, and Issue #104's application job
+  admission, cooperative cancellation or bounded wait, and encrypted event
+  repository. Future provider streams and other database sessions must register
+  their own drains before their routes ship.
 
 ## Internal contract principles
 
@@ -235,11 +259,48 @@ mock, migration, and rollback plan. A version is removed only after every
 supported packaged application using it is outside the support window. There
 is no public compatibility promise and no renderer-configurable API URL.
 
+Issue #104 implements this event contract in the UI-neutral Python application
+layer with strict schema-v1 snapshots, bounded SQLCipher persistence and replay,
+increasing per-job sequences, cooperative safe-point cancellation, and exactly
+one terminal result after ordinary completion or restart reconciliation. Fixed
+authenticated list, status, cancel, SSE, and shutdown-assessment routes adapt
+that lifecycle. Electron main alone calls shutdown assessment and presents the
+native **Wait**, **Request cancellation**, or **Stay open** choice.
+
+Issue #109 separately implements the target Tasks presentation through five
+fixed request methods and one validated event listener. Main owns the
+authenticated SSE connection and sender-scoped subscription lifecycle; the
+renderer reconstructs state from backend snapshots after reload, resynchronizes
+on event gaps, and receives path-free artifact metadata only. It adds no job
+producer, submission route, direct artifact action, provider stream, GEDCOM or
+RootsMagic operation, or other domain authority.
+
 File payloads are not copied wholesale through JSON or IPC. Electron main
 resolves a grant to a path only for the declared operation; Python rechecks
 regular-file type, realpath/fingerprint, size, source/output aliasing, and
 immutability at use time. Large parsing and publication occur in bounded
 workers and app-owned scratch/output locations.
+
+Issue #115 adds four fixed read-only intake requests through Main and the
+private native sidecar. Native file grants become immutable staged copies;
+Python verifies the expected size and SHA-256 while applying the shared
+GEDCOM parser limits. At most eight inspections are retained, including
+pending submissions. A streaming preflight rejects more than 250,000
+individual records before full-tree and root-candidate materialization;
+findings retain at most 100 entries with an exact total. Filtered root requests
+scan at most 4,096 candidates and carry an unknown total plus continuation when
+more bounded work remains. Exact person references never degrade to fuzzy
+matching. Summaries and paged root queries are separate bounded contracts;
+source order and explicit root/no-root choices are transient.
+The renderer receives bounded genealogy labels but never original paths,
+complete records, a parser, or an unbounded search endpoint. Disposal revokes
+ownership and drops private results. Removing a pending native selection also
+cancels its owner-scoped request and revokes any matching unsubmitted grant;
+late completion is ignored. Terminal staging cleanup repairs owner write
+permission before unlinking read-only Windows files. This source-level
+addition does not
+activate mutation, output publication, container execution, remote upload,
+provider calls, or a packaged-support claim.
 
 ## Secure-development and assurance gates
 
@@ -287,12 +348,14 @@ The foundation sequence is:
 | `EL-01` / #98 | This ADR, threat/control/risk ledgers, scope, overlap, and ownership. | None. |
 | `EL-02` / #99 | Reproducible desktop workspace, strict TypeScript, accessible shell, and deterministic mock bridge. | #98 merged. |
 | `EL-03` / #11 | Authenticated internal API bootstrap and deterministic OpenAPI contract. | #98 merged. |
-| `EL-04` / #102 | Signed sidecar packaging, private bootstrap, supervision, and shutdown. | #11 merged. |
+| `EL-04` / #102 | Manifest-bound sidecar packaging, private bootstrap, supervision, and full-process-tree shutdown. Publisher signing remains owned by #132. | #11 merged. |
 | `EL-05` / #100 | Electron sandbox, CSP, protocol, navigation, permissions, and fuse policy. | #98 and #99 merged. |
 | `EL-06` / #101 | Typed context bridge and main-process API proxy. | #99, #11, #102, and #100 merged. |
 | `EL-07` / #103 | Opaque grants and bounded file mediation. | Privileged bridge/runtime prerequisites merged. |
-| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Internal API and bridge prerequisites merged. |
-| `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. | Internal API and bridge prerequisites merged. |
+| `EL-08` / #104 | Jobs, bounded events, backpressure, cancellation, and safe shutdown. | Source implementation adds the UI-neutral lifecycle, encrypted persistence, fixed authenticated routes, and main-only shutdown preflight. The #56/#111 source provider-stream transport is implemented; target-matched packaged evidence remains #131. |
+| `EL-09` / #105 | Atomic settings and write-only OS-keyring operations. Source API, fixed bridge, status-only mock, and renderer controls implemented; packaged-runtime proof remains with #131. | Internal API and bridge prerequisites merged. |
+| `EL-10` / #106 | Responsive accessible design-system shell and presentation-only interaction contracts. | Renderer foundation and fixed bridge prerequisites merged. |
+| `EL-13` / #109 | Bounded Tasks presentation, main-owned event subscriptions, cancellation UX, coded failures, and safe artifact metadata. | #103, #104, and #106 merged; packaged and adversarial evidence remains #131. |
 | `EL-36` / #131 | Desktop contract, security, accessibility, E2E, and performance evidence. | Begins with #99/#11; gates the MVP. |
 
 ## Exclusive ownership and coordination
@@ -300,6 +363,7 @@ The foundation sequence is:
 | Path or shared surface | Exclusive owner |
 |---|---|
 | `desktop/` package manifest, lockfile, build/test configuration, initial root Make targets | #99 (`EL-02`) until scaffolding merges; later renderer, preload, main, and contract subtrees follow their published issue ownership. |
+| `desktop/src/renderer/src/design-system/`, shell integration, and fictional development gallery | #106 (`EL-10`). |
 | `src/ancestryllm/api/`, FastAPI dependencies, deterministic OpenAPI artifact | #11 (`EL-03`) for foundation; later domain routers stay with their published issues. |
 | `pyproject.toml` and `uv.lock` | The issue introducing the Python dependency, coordinated serially; #11 owns initial FastAPI/Uvicorn additions. |
 | Root JavaScript dependency and lock files | Not permitted. `desktop/pnpm-lock.yaml` is the sole JavaScript lockfile and #99 owns it initially. |

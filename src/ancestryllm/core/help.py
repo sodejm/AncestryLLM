@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.commands import (
     ActionSpec,
@@ -11,6 +11,9 @@ from ancestryllm.core.commands import (
     ArgumentSpec,
     CommandSpec,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "argument_help",
@@ -35,7 +38,7 @@ def render_root_help() -> str:
 
 
 def argument_metavar(specification: ArgumentSpec) -> str:
-    """Return the stable, non-sensitive placeholder for an argument."""
+    """Return the stable, non-sensitive metavar label for an argument."""
 
     return specification.metavar or specification.name.upper()
 

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from pytest import MonkeyPatch
 
 from ancestryllm.api import API_NAMESPACE
 from ancestryllm.api.openapi import OPENAPI_ARTIFACT, canonical_openapi, contract_app
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+    from pytest import MonkeyPatch
 
 
 def test_runtime_openapi_version_is_explicitly_pinned_to_3_1_0(
@@ -35,10 +37,52 @@ def test_committed_openapi_artifact_matches_authoritative_models_exactly() -> No
     assert committed.endswith("\n")
     assert json.loads(committed)["paths"].keys() == {
         f"{API_NAMESPACE}/capabilities",
+        f"{API_NAMESPACE}/chat/capability",
+        f"{API_NAMESPACE}/chat/sessions",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/runs",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams/{{run_id}}/cancel",
+        f"{API_NAMESPACE}/chat/sessions/{{session_id}}/streams/{{run_id}}/events",
+        f"{API_NAMESPACE}/consents",
+        f"{API_NAMESPACE}/consents/preview",
+        f"{API_NAMESPACE}/consents/{{name}}/revoke",
+        f"{API_NAMESPACE}/gedcom/inspect",
+        f"{API_NAMESPACE}/gedcom/intake",
+        f"{API_NAMESPACE}/gedcom/intake/{{job_id}}",
+        f"{API_NAMESPACE}/gedcom/intake/{{job_id}}/roots",
+        f"{API_NAMESPACE}/gedcom/intake/{{job_id}}/discard",
+        f"{API_NAMESPACE}/gedcom/jobs/{{job_id}}/result",
+        f"{API_NAMESPACE}/gedcom/jobs/{{job_id}}/root-candidates",
+        f"{API_NAMESPACE}/gedcom/merge",
+        f"{API_NAMESPACE}/gedcom/quality",
+        f"{API_NAMESPACE}/gedcom/subtree",
+        f"{API_NAMESPACE}/gedcom/sync",
         f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/jobs",
+        f"{API_NAMESPACE}/jobs/shutdown",
+        f"{API_NAMESPACE}/jobs/{{job_id}}",
+        f"{API_NAMESPACE}/jobs/{{job_id}}/cancel",
+        f"{API_NAMESPACE}/jobs/{{job_id}}/events",
+        f"{API_NAMESPACE}/provider-configuration",
+        f"{API_NAMESPACE}/provider-endpoints/validate",
+        f"{API_NAMESPACE}/provider-profiles",
+        f"{API_NAMESPACE}/settings",
+        f"{API_NAMESPACE}/secrets/{{reference}}/delete",
+        f"{API_NAMESPACE}/secrets/{{reference}}/set",
+        f"{API_NAMESPACE}/secrets/{{reference}}/status",
+        f"{API_NAMESPACE}/startup-diagnostics",
     }
     schemas = json.loads(committed)["components"]["schemas"]
-    assert {"PaginationRequest", "PageMetadata"} <= schemas.keys()
+    assert {
+        "ChatCapability",
+        "ChatRunRequest",
+        "ChatRunSummary",
+        "ChatSession",
+        "ChatSessionCreateRequest",
+        "PageMetadata",
+        "PaginationRequest",
+    } <= schemas.keys()
 
 
 def test_runtime_schema_and_docs_are_not_exposed(

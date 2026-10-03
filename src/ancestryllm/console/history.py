@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import stat
-from collections.abc import Callable, Iterable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.history import History
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+    from pathlib import Path
 
 
 class SecureHistory(History):
@@ -49,10 +52,12 @@ class SecureHistory(History):
                 os.close(descriptor)
 
     def append_string(self, string: str) -> None:
+        """Append a command to in-memory history after secret redaction."""
         if not self.is_sensitive(string):
             super().append_string(string)
 
     def load_history_strings(self) -> Iterable[str]:
+        """Load persisted history entries into the interactive console."""
         if not self.persistent:
             return ()
         descriptor: int | None = None
@@ -82,6 +87,7 @@ class SecureHistory(History):
         return reversed(loaded)
 
     def store_string(self, string: str) -> None:
+        """Persist a history entry only after secret redaction."""
         if not self.persistent or self.is_sensitive(string):
             return
         descriptor: int | None = None

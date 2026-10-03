@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _LINE_RE = re.compile(
     r"^(?P<level>[0-9]{1,2})(?:\s+(?P<xref>@[^@\s]+@))?\s+"
@@ -64,6 +67,7 @@ class GedcomRecord:
     lines: list[str]
     source_file: str
     sequence: int
+    encoding: str = "utf-8"
 
     @property
     def header(self) -> GedcomLine:
@@ -88,6 +92,8 @@ class ParsedSource:
     path: Path
     records: list[GedcomRecord]
     pointer_map: dict[str, str]
+    normalized_dates: bool = False
+    preserved_extensions: bool = False
 
 
 __all__ = [

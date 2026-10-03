@@ -49,7 +49,7 @@ class DomainFailureDetail:
             raise ValueError("domain failure detail numbers must be finite")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class DomainFailure(Exception):
     """A safe domain failure identified by code and allowlisted scalar metadata."""
 

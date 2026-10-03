@@ -1,0 +1,276 @@
+# Application-service contracts
+
+Status: implemented for the current source release line. These contracts are
+the framework-independent boundary shared by the current terminal adapters and
+the FastAPI/Electron foundations. `ARCHITECTURE.md` owns the repository-wide
+dependency graph and current-versus-target status.
+
+## Public boundary
+
+The public boundary is intentionally small:
+
+| Module | Ownership |
+|---|---|
+| `ancestryllm.application.dto` | Strict, immutable, deterministic JSON DTOs, opaque artifact and secret capabilities, and decision/progress records. |
+| `ancestryllm.application.operations` | Exact command request/result pairs plus reusable transport-neutral GEDCOM inspection and decision DTOs. |
+| `ancestryllm.application.gedcom_jobs` | The bounded asynchronous façade shared by GEDCOM transports. |
+| `ancestryllm.application.ports` | Cancellation, progress, decision, identity-resolution, quality-resolution, and mutation-coordination protocols. |
+| `ancestryllm.application.mutations` | Strict path-free resource, request, lease, transition, and outcome DTOs for durable mutation ownership. |
+| `ancestryllm.application.errors` | Complete mapping from pure domain failures to stable coded application errors and transport envelopes. |
+| `ancestryllm.domain.errors` | Framework-independent failure categories and bounded safe detail values. |
+
+The private modules `application._artifacts`, `application._compat`,
+`application._rootsmagic`, and `application._rootsmagic_export` belong to
+application composition. `application._rootsmagic` owns RootsMagic query
+runtime orchestration behind the public operation DTOs and the
+`rootsmagic.query.RootsMagicQueryService` compatibility façade.
+`application._rootsmagic_export` owns export validation, staging, and recoverable
+publication behind the public export boundary and legacy exporter compatibility
+façade. These modules are not alternate service APIs or operation registries.
+
+Every boundary dataclass is frozen and slotted. `BoundaryDTO.to_json()` emits a
+versioned envelope with sorted keys, finite JSON numbers, and a one-megabyte
+limit. `BoundaryDTO.from_json()` requires the exact DTO type and rejects
+unknown, missing, or incorrectly typed fields. Requests and results contain no
+Click, prompt-toolkit, Rich, FastAPI/Pydantic, Electron, provider-SDK,
+database-session, callback, exception, or host-filesystem objects.
+
+## Operation inventory
+
+`OPERATION_CONTRACTS` pairs each command dispatch identity with one request and
+one result. Import-time and test-time drift checks require exact equality with
+the shared command specifications:
+
+| Command | Operations |
+|---|---|
+| Modules | `modules.list`, `modules.enable`, `modules.disable` |
+| RootsMagic | `rootsmagic.list`, `rootsmagic.query`, `rootsmagic.export` |
+| GEDCOM | `gedcom.merge`, `gedcom.subtree`, `gedcom.quality`, `gedcom.sync` |
+| Prompts | `prompts.list`, `prompts.save`, `prompts.show`, `prompts.render` |
+| People | `people.list`, `people.add` |
+| Providers | `providers.list`, `providers.create`, `providers.consent`, `providers.revoke` |
+| Secrets | `secrets.set`, `secrets.delete`, `secrets.status` |
+| OCR | `ocr.extract` |
+| Deployment | `deployment.modes`, `deployment.status`, `deployment.preview`, `deployment.switch`, `deployment.diagnose`, `deployment.metadata` |
+| Database | `database.backup`, `database.diagnose` |
+
+This inventory is the only application-operation registry. Terminal, HTTP, and
+desktop adapters may translate their inputs into these requests but must not
+create a second UI-specific registry or redefine result semantics.
+
+`GedcomInspectRequest` and `GedcomInspectResult` are reusable façade contracts,
+not command routes. Their presence does not create a second operation registry.
+
+`RootsMagicQueryRequest` admits exactly one non-empty direct SQL statement or
+natural-language question. Direct SQL is deterministic and provider-free even
+when credentials are present. Questions require an explicit non-`none`
+provider and model, then reuse the same immutable reader, SQL validator,
+authorizer, row bound, timeout, and source-fingerprint checks. The serialized
+`RootsMagicQueryResult` contains canonical scalar rows and coded execution
+metadata, while progress contains only operation/stage codes and counters.
+
+The reusable RootsMagic consumer surface also exposes sanitized
+`RootsMagicSourceSummary`, `RootsMagicQueryDefinition`,
+`RootsMagicResultPage`, and `RootsMagicExportArtifact` DTOs. Together with
+`RootsMagicQueryRequest`, these are the stable application-owned values for a
+future workbench adapter: opaque source references replace host paths, query
+definitions carry a finite parameter schema, pages are explicitly bounded,
+and exports return artifact references rather than destinations. The current
+CLI/REPL direct-SQL behavior remains an application-service compatibility
+contract. A future renderer must expose only allowlisted query definitions and
+must translate schema-validated parameters to that trusted service request at
+the adapter/application composition boundary; it must not expose raw SQL or
+interpret file grants in the reusable RootsMagic core.
+
+## GEDCOM operation façade
+
+The public GEDCOM boundary exposes `GedcomInspectRequest` and
+`GedcomInspectResult`, `MergeRequest` and `MergeResult`, `SubtreeRequest` and
+`SubtreeResult`, `QualityRequest` and `QualityResult`, `SyncRequest` and
+`SyncResult`, and `MergeDecisionRequest`. File authority is carried only by
+purpose-bound `ArtifactGrantRef` values, alongside explicit typed operation
+options. Results, progress, and coded failures are bounded,
+serializable, and path-free; they never contain whole genealogy trees or
+arbitrary callbacks.
+
+GEDCOM 5.5.5 is the default output format. Callers may deliberately request
+5.5.1 compatibility, and publication never overwrites an input artifact. The
+merge decision contract declares `retain-both` as its conservative default, so
+a missing or cancelled decision preserves conflicting evidence. Optional AI
+adjudication requires an explicit `ProviderSelection`, the modular
+`LLMService`, and the existing policy and consent checks. `provider=none`
+remains deterministic and network-free even when ambient credentials exist.
+
+`GedcomJobFacade` submits all five operations through the shared bounded job
+lifecycle. Purpose-grant IDs become resource-lock keys; progress and
+cooperative cancellation pass through the application ports; domain failures
+retain their stable public codes; and cancellation becomes the lifecycle's
+cancelled state. A typed operation result is available only after completion.
+
+Inspection reports physical encoding, the header's `HEAD/GEDC/VERS` declaration,
+source fingerprint, record counts, at most 100 coded findings, and total finding
+and root-candidate counts. It does not eagerly serialize every candidate.
+`RootCandidatePage` separately exposes at most 100 bounded person labels per
+query (25 by default); names, source identifiers, dates, and relationship
+summaries are genealogy content held transiently for explicit root selection.
+Search is limited to 128 characters, and authenticated continuation cursors bind
+the inspection job, source fingerprint, and query. Progress, job persistence,
+and logs do not contain these labels or search text.
+
+With an explicitly supplied artifact registry, the authenticated FastAPI
+adapter exposes the fixed
+`POST /api/v1/gedcom/inspect`, `/merge`, `/subtree`, `/quality`, and `/sync`
+routes, `GET /api/v1/gedcom/jobs/{job_id}/result`, and
+`POST /api/v1/gedcom/jobs/{job_id}/root-candidates`. It translates strict
+transport payloads into the same application services used by the CLI and REPL.
+The private native intake composition supplies four separate fixed routes for
+staged inspection, result retrieval, bounded root queries, and discard under
+`/api/v1/gedcom/intake`. Electron Main consumes a native file grant into private
+immutable staging; only its opaque stage identifier, size, and SHA-256 reach
+that adapter. This read-only composition does not grant the renderer merge,
+publication, or provider authority. Neither composition exposes private GEDCOM
+engines, a generic command registry, renderer paths, or record trees.
+
+## Ports and adapter responsibilities
+
+Services depend on narrow structural protocols:
+
+- `MutationCoordinator` acquires and renews fenced ownership, validates owners,
+  records transitions, and returns recorded terminal outcomes for matching retries.
+- `CancellationPort` checks for cooperative cancellation at safe boundaries.
+- `ProgressPort` emits operation/stage codes, bounded counters, sequence
+  numbers, and optional opaque artifact IDs. It cannot carry genealogy
+  content, SQL, credentials, host paths, or arbitrary messages.
+- `DecisionPort` returns one declared coded option or explicit cancellation.
+- `IdentityResolutionPort` resolves only opaque source/candidate references.
+- `QualityResolutionPort` returns one declared coded resolution or
+  cancellation.
+
+The current job and cancellation objects are translated by private
+compatibility adapters. Future FastAPI and Electron code must implement the
+same protocols at their adapter boundary. A port implementation may collect
+user input or update presentation state; it does not acquire genealogy,
+provider, persistence, or publication ownership.
+
+## Artifact and secret capabilities
+
+Host paths never cross the public application boundary. A trusted adapter
+registers a selected input or destination with the private artifact registry
+and passes an `ArtifactGrantRef` to a request. Each unpredictable grant is
+scoped to one operation and one access mode, can be revoked, and resolves to a
+path only inside the owning process. Results return an `ArtifactRef` containing
+an unpredictable identity, media type, artifact type, status, bounded size,
+and optional digest—not a path.
+
+Command results preserve that rule: tabular artifact listings contain only
+`ArtifactRef` fields, and file-producing commands return a primary artifact
+plus any related artifacts as opaque references. Terminal adapters render
+those references but do not recover or expose their adapter-owned paths.
+
+Output publication is staged, claimed, and cancellation-checked through the
+hardened publication helpers and shared durable coordinator. A single file or
+complete directory uses atomic filesystem publication. Legacy CLI outputs at
+separate filenames are installed individually under one journaled operation;
+recovery restores the old complete set or finishes the verified new set. They
+are not simultaneously visible through one filesystem operation, and an
+incomplete set is never recorded committed. Cancellation before publication
+preserves the previous destination. Publication failures map to sanitized
+codes; raw exception details are not returned.
+
+Mutation requests bind opaque canonical resource IDs and expected revisions to
+an operation ID, intent digest, idempotency key, owner, session, deadline, bounded
+lease, and existing artifact references. Matching retries return a recorded
+terminal outcome or require recovery; changed intent under the same key is
+rejected. OS ownership locks remain held after lease expiry, while token and
+fence checks reject stale owners. Recovery requires fresh private resource
+resolution and parent identity validation. An expired grant supplies no recovery
+authority. See [mutation recovery](MUTATION_RECOVERY.md) for the operational
+contract, stable failures, and acceptance evidence.
+
+`MediatedOperationRequest` and `MediatedOperationResult` extend this capability
+model without adding an operation registry. A request binds one unpredictable
+operation ID, one allowlisted operation code, `local-container` or
+`remote-service` transport, 1-16 unique read grants, and 1-8 unique write
+grants. Every grant must name that same operation and exact access mode. The
+result returns only ready `ArtifactRef` values for the same operation ID.
+Both DTOs are strict, immutable, deterministic, serializable, and path-free.
+
+Electron Main uses the corresponding shared desktop shape to select one of two
+trusted adapters. The local adapter may receive only private staged paths,
+fixed container paths, and an exact mount plan; those implementation objects do
+not enter the application DTO. The remote adapter may receive only bounded
+single-use streams with verified byte counts and digests, never host paths.
+This is adapter composition around the existing application inventory, not a
+second desktop or transport-specific API. The private artifact registry also
+rejects non-canonical paths, symbolic links, hard-link aliases, and identity
+changes before resolving a capability.
+
+Secrets use a separate write-only `SecretGrantRef`. Secret values remain in the
+owning adapter/secret-store boundary and never enter a request, result, error,
+progress event, or deterministic JSON envelope. Secret results expose presence
+only.
+
+## Provider and genealogy safety
+
+`ProviderSelection` contains identifiers only. The explicit `none` provider is
+network-disabled even when credentials or provider SDKs are present. A cloud
+selection is not authorization: existing provider policy must still require a
+matching explicit consent grant before any disclosure or network call.
+
+The operation DTOs expose deterministic change, conflict, quality, and
+provenance records. The implemented service-owned genealogy aggregate owns the
+rules that produce those records. Adapters only translate and render them.
+RootsMagic inputs remain immutable and RootsMagic/GEDCOM outputs remain
+loss-visible and atomically published.
+
+## Stable failure contract
+
+`DomainFailureCode` is complete for the application boundary. Every member has
+one `DOMAIN_ERROR_MAPPINGS` entry defining its stable public code, sanitized
+message, optional remediation, and exit status. Mapping ignores raw exception
+text and admits only allowlisted, bounded, path-free scalar details. Unknown
+exceptions are caught at the owning boundary and converted to the generic
+internal category before transport rendering.
+
+CLI and REPL compatibility continues to use the existing coded-error rendering.
+Future transports serialize the corresponding `ErrorEnvelope`; they must not
+invent transport-specific domain codes or expose tracebacks, filesystem
+locations, SQL, provider payloads, credentials, or genealogy content.
+
+## Contract validation
+
+`tests/modular/test_application_contracts.py` proves:
+
+- exact operation coverage and deterministic round trips for every request and
+  result;
+- immutable DTOs and forbidden dependency/type exclusion;
+- framework-free imports in an isolated interpreter;
+- structural port conformance and legacy cancellation mapping;
+- strict JSON, finite-number, bounded-value, and path/content rejection;
+- complete stable failure mapping with sanitized envelopes;
+- scoped, revocable, opaque artifact grants, including link and replacement
+  rejection at resolution;
+- strict, deterministic, path-free mediated-operation request/result round
+  trips with local/remote transport selection and access-bound grant checks;
+- atomic publication, cancellation preservation, and absence of partial
+  external output;
+- write-only secret capability use.
+
+The GEDCOM façade evidence adds:
+
+- `tests/modular/test_gedcom_service_contracts.py` for purpose-grant execution,
+  version selection, non-overwrite rules, conservative merge decisions,
+  explicit provider policy, offline socket denial, cancellation, and atomic
+  publication;
+- `tests/modular/test_gedcom_job_facade.py` for bounded lifecycle submission,
+  resource exclusion, progress, stable coded failures, cancellation state, and
+  completed-only typed results;
+- `tests/api/test_gedcom_operations.py` for authenticated fixed-route DTO
+  translation and path-free job/result envelopes; and
+- the CLI/REPL boundary suites for parity with the same typed service requests
+  and stable coded errors.
+
+The core-contract characterization suite remains the compatibility authority
+for shipped CLI/REPL behavior, JSON, errors, consent, network-free `none`,
+RootsMagic immutability, rooted/loss-minimal GEDCOM behavior, and existing
+artifact/report behavior.

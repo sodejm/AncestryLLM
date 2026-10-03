@@ -1,3 +1,5 @@
+"""Verify a release milestone is closed with no incomplete project work."""
+
 from __future__ import annotations
 
 import importlib.util

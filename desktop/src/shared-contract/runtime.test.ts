@@ -1,11 +1,32 @@
+/** Verifies runtime guards accept contract fixtures and reject malformed bridge data. */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { settingsFixture } from '../mock-bridge/fixtures'
 import {
   parseAppInfoResult,
+  parseArtifactRef,
+  parseMediatedOperationRequest,
+  parseMediatedOperationResult,
   parseCapabilitiesResult,
+  parseFileGrantId,
+  parseFileGrantResult,
+  parseFileGrantRevocationResult,
+  parseLocalRuntimePreviewResult,
+  parseJobEventDelivery,
+  parseJobEventSubscriptionRequest,
+  parseJobListResult,
+  parseJobSnapshotResult,
+  parseOpenFileGrantRequest,
+  parseProviderProfileCreateRequest,
+  parseSecretReferenceRequest,
+  parseSecretSetRequest,
+  parseSecretStatusResult,
+  parseSettingsPatch,
+  parseSettingsResult,
   parsePreferenceUpdate,
   parsePreferencesResult,
+  parseSaveFileGrantRequest,
   parseStartupDiagnosticsResult,
 } from './runtime'
 
@@ -82,13 +103,476 @@ const firstAction = (manifest: MutableManifest): MutableAction => {
 }
 
 const capabilityResult = (data: MutableManifest) => ({ ok: true, protocolVersion: '1', data })
+const grantId = `grt_${'a'.repeat(64)}`
+const fileGrantResult = {
+  ok: true,
+  protocolVersion: '1',
+  data: {
+    grantId,
+    purpose: 'gedcom-read',
+    access: 'read',
+    scope: {
+      originatingWindow: 'requesting-window',
+      lifetime: 'app-session',
+      redemption: 'single-use',
+    },
+    metadata: {
+      displayName: 'fictional.ged',
+      format: 'gedcom',
+      sizeBytes: 26,
+      validation: 'validated-input',
+    },
+  },
+} as const
+
+const startupReport = {
+  schema_version: 1,
+  status: 'ready',
+  platform: { operating_system: 'macos', architecture: 'arm64' },
+  components: [
+    {
+      component: 'configuration',
+      status: 'ready',
+      code: 'CONFIGURATION_READY',
+      message: 'The desktop configuration is ready.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'sqlcipher',
+      status: 'ready',
+      code: 'SQLCIPHER_READY',
+      message: 'SQLCipher encryption support is available.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'keyring',
+      status: 'ready',
+      code: 'KEYRING_READY',
+      message: 'The configured credential-store backend can be queried without writing a secret.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+    {
+      component: 'workspace',
+      status: 'ready',
+      code: 'DATABASE_DIRECTORY_READY',
+      message: 'Workspace directory is writable.',
+      remediation: null,
+      restart_required: false,
+      blocks_mutations: false,
+    },
+  ],
+} as const
+
+const jobSnapshot = {
+  schema_version: 1,
+  sequence: 1,
+  job_id: 'j123456',
+  name: 'Export fictional tree',
+  state: 'running',
+  submitted_at: '2026-08-12T12:00:00+00:00',
+  started_at: '2026-08-12T12:00:01+00:00',
+  finished_at: null,
+  resource_refs: [`resource_${'a'.repeat(64)}`],
+  artifact: null,
+  outcome_summary: null,
+  next_action: null,
+  error_code: null,
+  error_message: null,
+  error_remediation: null,
+  progress: {
+    schema_version: 1,
+    operation: 'Preparing export',
+    timestamp: '2026-08-12T12:00:02+00:00',
+    completed: 1,
+    total: 4,
+  },
+  cancellation_requested_at: null,
+  cancellation_deferred_by: null,
+} as const
+
+const localRuntimeStatus = {
+  schema_version: 1,
+  state: 'not-installed',
+  code: 'RUNTIME_NOT_INSTALLED',
+  supported: true,
+  host: {
+    operating_system: 'macos',
+    architecture: 'arm64',
+    macos_major: 15,
+    virtualization: 'available',
+    free_space: 'sufficient',
+    existing_docker_contexts: 1,
+  },
+  allocation: { cpus: 4, memory_gib: 8, disk_gib: 20 },
+  components: [
+    { name: 'colima', version: '0.10.3', installed: false },
+    { name: 'lima', version: '2.2.0', installed: false },
+    { name: 'docker-cli', version: '29.7.2', installed: false },
+    { name: 'docker-buildx', version: '0.36.1', installed: false },
+    { name: 'docker-compose', version: '5.4.0', installed: false },
+  ],
+  vm_image: { version: '0.10.4', installed: false },
+} as const
+
+const localRuntimePreview = {
+  schema_version: 1,
+  operation: 'setup',
+  offline: false,
+  actions: [{ code: 'VERIFY_HOST' }, { code: 'DOWNLOAD_PINNED_COMPONENTS' }],
+  confirmation_phrase: 'SET UP LOCAL RUNTIME',
+  preserves_data: true,
+  deletes_data: false,
+  plan_revision: 'a'.repeat(64),
+  status: localRuntimeStatus,
+  review: {
+    artifacts: [
+      {
+        name: 'colima',
+        version: '0.10.3',
+        repository: 'abiosoft/colima',
+        asset_name: 'colima-Darwin-arm64',
+        source_url: 'https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64',
+        sha256: '1'.repeat(64),
+        size_bytes: 15_656_320,
+        license: 'MIT',
+        license_url: 'https://raw.githubusercontent.com/abiosoft/colima/v0.10.3/LICENSE',
+        license_sha256: '2'.repeat(64),
+      },
+      {
+        name: 'lima',
+        version: '2.2.0',
+        repository: 'lima-vm/lima',
+        asset_name: 'lima-2.2.0-Darwin-arm64.tar.gz',
+        source_url: 'https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz',
+        sha256: '3'.repeat(64),
+        size_bytes: 37_586_365,
+        license: 'Apache-2.0',
+        license_url: 'https://raw.githubusercontent.com/lima-vm/lima/v2.2.0/LICENSE',
+        license_sha256: '4'.repeat(64),
+      },
+      {
+        name: 'docker-cli',
+        version: '29.7.2',
+        repository: 'docker/cli',
+        asset_name: 'docker-29.7.2.tgz',
+        source_url: 'https://download.docker.com/mac/static/stable/aarch64/docker-29.7.2.tgz',
+        sha256: '5'.repeat(64),
+        size_bytes: 18_920_558,
+        license: 'Apache-2.0',
+        license_url: 'https://raw.githubusercontent.com/docker/cli/v29.7.2/LICENSE',
+        license_sha256: '6'.repeat(64),
+      },
+      {
+        name: 'docker-buildx',
+        version: '0.36.1',
+        repository: 'docker/buildx',
+        asset_name: 'buildx-v0.36.1.darwin-arm64',
+        source_url: 'https://github.com/docker/buildx/releases/download/v0.36.1/buildx-v0.36.1.darwin-arm64',
+        sha256: '7'.repeat(64),
+        size_bytes: 62_541_920,
+        license: 'Apache-2.0',
+        license_url: 'https://raw.githubusercontent.com/docker/buildx/v0.36.1/LICENSE',
+        license_sha256: '8'.repeat(64),
+      },
+      {
+        name: 'docker-compose',
+        version: '5.4.0',
+        repository: 'docker/compose',
+        asset_name: 'docker-compose-darwin-aarch64',
+        source_url: 'https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-darwin-aarch64',
+        sha256: '9'.repeat(64),
+        size_bytes: 46_852_962,
+        license: 'Apache-2.0',
+        license_url: 'https://raw.githubusercontent.com/docker/compose/v5.4.0/LICENSE',
+        license_sha256: 'a'.repeat(64),
+      },
+    ],
+    vm_image: {
+      version: '0.10.4',
+      repository: 'abiosoft/colima-core',
+      asset_name: 'ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+      source_url: 'https://github.com/abiosoft/colima-core/releases/download/v0.10.4/ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz',
+      sha256: 'b'.repeat(64),
+      size_bytes: 332_354_401,
+    },
+    ownership: {
+      profile: 'ancestryllm-local-arm64',
+      context: 'colima-ancestryllm-local-arm64',
+    },
+    isolation: {
+      loopback_only: true,
+      kubernetes: false,
+      privileged_containers: false,
+      renderer_socket_access: false,
+      container_socket_access: false,
+      cross_profile_socket_access: false,
+    },
+  },
+} as const
 
 describe('runtime bridge validation', () => {
+  it('accepts exact job list, snapshot, subscription, and event contracts', () => {
+    expect(parseJobListResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { schema_version: 1, jobs: [jobSnapshot] },
+    })).toMatchObject({ ok: true, data: { jobs: [{ job_id: 'j123456', sequence: 1 }] } })
+    expect(parseJobSnapshotResult({
+      ok: true,
+      protocolVersion: '1',
+      data: jobSnapshot,
+    })).toMatchObject({ ok: true, data: { progress: { completed: 1, total: 4 } } })
+    expect(parseJobEventSubscriptionRequest({
+      schema_version: 1,
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      after: 1,
+    })).toMatchObject({ job_id: 'j123456', after: 1 })
+    expect(parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: {
+        schema_version: 1,
+        sequence: 2,
+        kind: 'progress',
+        created_at: '2026-08-12T12:00:03+00:00',
+        snapshot: { ...jobSnapshot, sequence: 2 },
+      },
+      error: null,
+    })).toMatchObject({ kind: 'event', event: { sequence: 2 } })
+  })
+
+  it('accepts slash characters allowed by the public job text contract', () => {
+    expect(parseJobSnapshotResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        ...jobSnapshot,
+        name: 'Import GEDCOM/5.5 from a fictional C:\\archive',
+        outcome_summary: 'Reviewed branch A/B.',
+        next_action: 'Save to C:\\fictional\\exports.',
+        error_message: 'Could not read A/B.',
+        error_remediation: 'Choose C:\\fictional\\input.',
+        cancellation_deferred_by: 'Parser stage A/B',
+        progress: {
+          ...jobSnapshot.progress,
+          operation: 'Reading C:\\fictional\\tree.ged',
+        },
+      },
+    })).toMatchObject({
+      ok: true,
+      data: {
+        name: 'Import GEDCOM/5.5 from a fictional C:\\archive',
+        progress: { operation: 'Reading C:\\fictional\\tree.ged' },
+      },
+    })
+  })
+
+  it('fails closed on unsafe or incoherent job data', () => {
+    const result = (snapshot: unknown) => ({ ok: true, protocolVersion: '1', data: snapshot })
+    expect(() => parseJobSnapshotResult(result({ ...jobSnapshot, name: 'unsafe\u0000name' }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      progress: { ...jobSnapshot.progress, completed: 2, total: null },
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      state: 'completed',
+      finished_at: null,
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobSnapshotResult(result({
+      ...jobSnapshot,
+      artifact: {
+        artifact_id: `art_${'b'.repeat(31)}..c`,
+        media_type: 'text/vnd.gedcom',
+        artifact_type: 'gedcom_export',
+        size_bytes: 42,
+        status: 'ready',
+        sha256: 'c'.repeat(64),
+      },
+    }))).toThrow('Invalid bridge response')
+    expect(() => parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'event',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: {
+        schema_version: 1,
+        sequence: 2,
+        kind: 'progress',
+        created_at: '2026-08-12T12:00:03+00:00',
+        snapshot: { ...jobSnapshot, sequence: 3 },
+      },
+      error: null,
+    })).toThrow('Invalid bridge response')
+    expect(() => parseJobEventDelivery({
+      schema_version: 1,
+      kind: 'failure',
+      subscription_id: `sub_${'b'.repeat(32)}`,
+      job_id: 'j123456',
+      event: null,
+      error: {
+        code: 'JOB_EVENT_STREAM_FAILED',
+        message: 'Read /Users/example/private.log',
+        remediation: 'Inspect the private path.',
+      },
+    })).toThrow('Invalid bridge response')
+  })
+
+  it('accepts an exact local-runtime artifact, ownership, and isolation review', () => {
+    expect(parseLocalRuntimePreviewResult({
+      ok: true,
+      protocolVersion: '1',
+      data: localRuntimePreview,
+    })).toMatchObject({ ok: true, data: { review: { ownership: localRuntimePreview.review.ownership } } })
+  })
+
+  it('rejects local-runtime review drift and weakened isolation', () => {
+    expect(() => parseLocalRuntimePreviewResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        ...localRuntimePreview,
+        review: {
+          ...localRuntimePreview.review,
+          artifacts: localRuntimePreview.review.artifacts.slice(0, -1),
+        },
+      },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseLocalRuntimePreviewResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        ...localRuntimePreview,
+        review: {
+          ...localRuntimePreview.review,
+          isolation: { ...localRuntimePreview.review.isolation, loopback_only: false },
+        },
+      },
+    })).toThrow('Invalid bridge response')
+  })
+
+  it('accepts exact settings and write-only secret contracts', () => {
+    expect(parseSettingsPatch({
+      schema_version: 1,
+      expected_revision: 3,
+      changes: { 'providers.default': 'openai' },
+    })).toMatchObject({ expected_revision: 3 })
+    expect(parseSettingsResult(settingsFixture)).toMatchObject({
+      ok: true,
+      data: { revision: 0 },
+    })
+    expect(parseSecretReferenceRequest({ reference: 'openai.api_key' })).toEqual({ reference: 'openai.api_key' })
+    expect(parseSecretSetRequest({ reference: 'openai.api_key', value: 'private-test-value' })).toEqual({
+      reference: 'openai.api_key',
+      value: 'private-test-value',
+    })
+    expect(parseSecretStatusResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { reference: 'openai.api_key', status: 'present' },
+    })).toMatchObject({ ok: true, data: { status: 'present' } })
+  })
+
+  it('rejects unknown settings, secret references, readback fields, and unbounded secret input', () => {
+    expect(() => parseSettingsPatch({
+      schema_version: 1,
+      expected_revision: 0,
+      changes: { 'providers.api_key': 'secret' },
+    })).toThrow('Invalid settings patch')
+    expect(() => parseSecretReferenceRequest({ reference: 'attacker.controlled' })).toThrow('Invalid secret reference request')
+    expect(() => parseSecretSetRequest({ reference: 'openai.api_key', value: '' })).toThrow('Invalid secret set request')
+    expect(() => parseSecretSetRequest({ reference: 'openai.api_key', value: 'x'.repeat(65_537) })).toThrow('Invalid secret set request')
+    expect(() => parseSecretStatusResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { reference: 'openai.api_key', status: 'present', value: 'must-not-cross-bridge' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseSettingsResult({
+      ...settingsFixture,
+      data: { ...settingsFixture.data, fields: settingsFixture.data.fields.slice(0, -1) },
+    })).toThrow('Invalid bridge response')
+    const providerField = settingsFixture.data.fields[0]!
+    expect(() => parseSettingsResult({
+      ...settingsFixture,
+      data: {
+        ...settingsFixture.data,
+        fields: [
+          {
+            ...providerField,
+            validation: {
+              ...providerField.validation,
+              allowed_values: providerField.validation.allowed_values.slice(0, -1),
+            },
+          },
+          ...settingsFixture.data.fields.slice(1),
+        ],
+      },
+    })).toThrow('Invalid bridge response')
+  })
+
+  it('requires an exact tested endpoint identity for provider profile creation', () => {
+    const request = {
+      schema_version: 1,
+      expected_revision: '0'.repeat(64),
+      name: 'local-default',
+      provider_id: 'ollama',
+      model: 'llama3.2',
+      endpoint: 'http://127.0.0.1:11434',
+      endpoint_identity_sha256: 'a'.repeat(64),
+    }
+
+    expect(parseProviderProfileCreateRequest(request)).toEqual(request)
+    expect(() => parseProviderProfileCreateRequest({
+      ...request,
+      endpoint_identity_sha256: 'not-a-digest',
+    })).toThrow('Invalid provider profile request')
+    const withoutIdentity = {
+      schema_version: request.schema_version,
+      expected_revision: request.expected_revision,
+      name: request.name,
+      provider_id: request.provider_id,
+      model: request.model,
+      endpoint: request.endpoint,
+    }
+    expect(() => parseProviderProfileCreateRequest(withoutIdentity)).toThrow('Invalid provider profile request')
+    expect(() => parseProviderProfileCreateRequest({ ...request, destination_address: '127.0.0.1' }))
+      .toThrow('Invalid provider profile request')
+  })
+
   it('accepts exact versioned results for each renderer-safe response', () => {
     expect(parseAppInfoResult({ ok: true, protocolVersion: '1', data: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' } }).ok).toBe(true)
-    expect(parseStartupDiagnosticsResult({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'startup_failed', automaticRestartsRemaining: 0, manualRetriesRemaining: 1 } }).ok).toBe(true)
+    expect(parseStartupDiagnosticsResult({ ok: true, protocolVersion: '1', data: { state: 'ready', failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 1, report: startupReport } }).ok).toBe(true)
     expect(parseCapabilitiesResult({ ok: true, protocolVersion: '1', data: capabilityManifest }).ok).toBe(true)
     expect(parsePreferencesResult({ ok: true, protocolVersion: '1', data: { colorScheme: 'system', reducedMotion: false, onboardingCompleted: false, schemaVersion: 1, revision: 0 } }).ok).toBe(true)
+  })
+
+  it('rejects startup diagnostic fields that could disclose local paths', () => {
+    const unsafe = {
+      ...startupReport,
+      components: startupReport.components.map((component, index) => index === 0
+        ? { ...component, message: '/Users/example/config.toml could not be read' }
+        : component),
+    }
+    expect(() => parseStartupDiagnosticsResult({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        state: 'degraded',
+        failure: null,
+        automaticRestartsRemaining: 0,
+        manualRetriesRemaining: 1,
+        report: unsafe,
+      },
+    })).toThrow('Invalid bridge response')
   })
 
   it('rejects invalid requests, unknown fields, and unbounded errors', () => {
@@ -101,6 +585,119 @@ describe('runtime bridge validation', () => {
     expect(() => parsePreferenceUpdate({})).toThrow('Invalid preference update')
     expect(() => parseAppInfoResult({ ok: true, protocolVersion: '1', data: {}, surprise: true })).toThrow('Invalid bridge response')
     expect(() => parseAppInfoResult({ ok: false, protocolVersion: '1', error: { code: 'INTERNAL_ERROR', message: 'x'.repeat(241), remediation: 'Restart AncestryLLM.' } })).toThrow('Invalid bridge response')
+  })
+
+  it('accepts exact path-free file-grant requests, results, revocations, and artifact references', () => {
+    expect(parseOpenFileGrantRequest({ purpose: 'gedcom-read' })).toEqual({ purpose: 'gedcom-read' })
+    expect(parseSaveFileGrantRequest({ purpose: 'markdown-write', suggestedName: 'family-summary.md' })).toEqual({
+      purpose: 'markdown-write',
+      suggestedName: 'family-summary.md',
+    })
+    expect(parseFileGrantId(grantId)).toBe(grantId)
+    expect(parseFileGrantResult(fileGrantResult)).toEqual(fileGrantResult)
+    expect(parseFileGrantResult({ ok: true, protocolVersion: '1', data: null })).toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: null,
+    })
+    expect(parseFileGrantRevocationResult({
+      ok: true,
+      protocolVersion: '1',
+      data: { revoked: true },
+    }).ok).toBe(true)
+    const artifact = {
+      artifact_id: `art_${'b'.repeat(64)}`,
+      artifact_type: 'gedcom_export',
+      media_type: 'text/vnd.gedcom',
+      sha256: 'c'.repeat(64),
+      size_bytes: 42,
+      status: 'ready',
+    } as const
+    expect(parseArtifactRef(artifact)).toMatchObject({ artifact_type: 'gedcom_export', status: 'ready' })
+    expect(parseArtifactRef({ ...artifact, sha256: null, status: 'pending' }))
+      .toMatchObject({ sha256: null, status: 'pending' })
+
+    const request = {
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'local-container',
+      inputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'read' }],
+      outputs: [{ grant_id: `grt_${'f'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
+    } as const
+    expect(parseMediatedOperationRequest(request)).toEqual(request)
+    expect(parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+      cleanup_status: 'complete',
+    })).toMatchObject({
+      operation_id: request.operation_id,
+      outputs: [{ status: 'ready' }],
+      cleanup_status: 'complete',
+    })
+    expect(() => parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+    })).toThrow('Invalid bridge response')
+    expect(() => parseMediatedOperationResult({
+      operation_id: request.operation_id,
+      outputs: [artifact],
+      cleanup_status: 'failed',
+    })).toThrow('Invalid bridge response')
+  })
+
+  it('rejects renderer paths, malformed IDs, unknown fields, and incoherent grant metadata', () => {
+    expect(() => parseOpenFileGrantRequest({ purpose: 'gedcom-read', path: '/private/tree.ged' })).toThrow('Invalid open-file grant request')
+    expect(() => parseSaveFileGrantRequest({ purpose: 'gedcom-write', suggestedName: '../tree.ged' })).toThrow('Invalid save-file grant request')
+    expect(() => parseFileGrantId('grt_predictable')).toThrow('Invalid file-grant ID')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, path: '/private/tree.ged' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, access: 'write' },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: { ...fileGrantResult.data, scope: { ...fileGrantResult.data.scope, lifetime: 'forever' } },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseFileGrantResult({
+      ...fileGrantResult,
+      data: {
+        ...fileGrantResult.data,
+        metadata: { ...fileGrantResult.data.metadata, validation: 'replacement-confirmed' },
+      },
+    })).toThrow('Invalid bridge response')
+    expect(() => parseArtifactRef({
+      artifact_id: `art_${'b'.repeat(64)}`,
+      artifact_type: 'gedcom_export',
+      media_type: 'text/vnd.gedcom',
+      sha256: 'c'.repeat(64),
+      size_bytes: 42,
+      status: 'ready',
+      path: '/private/tree.ged',
+    })).toThrow('Invalid bridge response')
+
+    expect(() => parseMediatedOperationRequest({
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'remote-service',
+      inputs: [{
+        grant_id: `grt_${'e'.repeat(64)}`,
+        operation: 'gedcom.merge',
+        access: 'read',
+        path: '/private/tree.ged',
+      }],
+      outputs: [{ grant_id: `grt_${'f'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
+    })).toThrow('Invalid bridge response')
+
+    expect(() => parseMediatedOperationRequest({
+      operation_id: `op_${'d'.repeat(64)}`,
+      operation: 'gedcom.merge',
+      transport: 'remote-service',
+      inputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'read' }],
+      outputs: [{ grant_id: `grt_${'e'.repeat(64)}`, operation: 'gedcom.merge', access: 'write' }],
+    })).toThrow('Invalid bridge response')
   })
 
   it('rejects OpenAPI capability drift and unsafe extra fields', () => {

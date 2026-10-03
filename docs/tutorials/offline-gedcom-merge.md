@@ -6,6 +6,11 @@ one-shot CLI through the checked-in helper; `provider=none` is fixed in every
 merge, so the workflow makes no provider or network call even if credentials
 are present in your environment.
 
+Issue #56's internal asynchronous provider adapter does not change this
+workflow. With `provider=none`, authorization fails before any provider worker
+or stream queue starts, so installed SDKs and ambient credentials cannot turn
+the tutorial into a network operation.
+
 ## What you will do
 
 You will set up AncestryLLM, merge two deliberately fictional Aster records,
@@ -57,8 +62,8 @@ provider SDK happens to be installed.
 
 Do not add a cloud provider flag to this command. A cloud workflow requires an
 explicit provider selection and the corresponding recorded consent before it
-can send any genealogy-derived content. See [privacy and consent](../PRIVACY_AND_CONSENT.md)
-and the [provider guide](../PROVIDERS.md) before choosing one.
+can send any genealogy-derived content. See [privacy and consent](../explanation/PRIVACY_AND_CONSENT.md)
+and the [provider guide](../reference/PROVIDERS.md) before choosing one.
 
 ## 3. Verify the result
 
@@ -78,7 +83,7 @@ quality report should appear for rejected input.
 
 Open the two reported paths with a local text editor. Their fixtures exercise
 the supported GEDCOM 5.5.5 workflow; see [GEDCOM compatibility and release
-checks](../GEDCOM_COMPATIBILITY.md) for compatibility limits and release
+checks](../reference/GEDCOM_COMPATIBILITY.md) for compatibility limits and release
 evidence.
 
 ## Recovery and cleanup

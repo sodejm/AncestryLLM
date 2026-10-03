@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 import ancestryllm.ocr.service as ocr_module
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.jobs import JobManager, JobState
 from ancestryllm.ocr.service import OcrService
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class _NeverCalledLlm:

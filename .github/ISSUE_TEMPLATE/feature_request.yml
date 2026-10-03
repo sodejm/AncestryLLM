@@ -1,3 +1,4 @@
+# Collects testable feature proposals together with their safety constraints.
 name: Feature request
 description: Propose a testable enhancement with explicit safety constraints
 title: "[Feature]: "

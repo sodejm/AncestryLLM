@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ancestryllm.core.context import AppContext
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def run_repl(context: AppContext) -> int:

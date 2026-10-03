@@ -10,10 +10,13 @@ _ADR = _ROOT / "docs" / "ADR-0025-electron-fastapi-desktop.md"
 _DEPLOYMENT_ADR = _ROOT / "docs" / "ADR-0026-local-first-container-remote-deployment.md"
 _THREAT_MODEL = _ROOT / "docs" / "THREAT_MODEL.md"
 _ARCHITECTURE = _ROOT / "ARCHITECTURE.md"
-_PRIVACY = _ROOT / "docs" / "PRIVACY_AND_CONSENT.md"
+_PRIVACY = _ROOT / "docs" / "explanation" / "PRIVACY_AND_CONSENT.md"
 _RELEASING = _ROOT / "docs" / "RELEASING.md"
 _CONTRIBUTING = _ROOT / "CONTRIBUTING.md"
 _SIDEBAR = _ROOT / "docs" / "_Sidebar.md"
+_FILE_INGRESS = _ROOT / "docs" / "reference" / "FILE_INGRESS.md"
+_DESKTOP_README = _ROOT / "desktop" / "README.md"
+_DESKTOP_SHELL = _ROOT / "docs" / "explanation" / "DESKTOP_SHELL.md"
 
 
 def _read(path: Path) -> str:
@@ -137,7 +140,7 @@ def test_every_desktop_abuse_case_has_owner_gate_and_negative_test() -> None:
         )
     }
 
-    assert set(rows) == {f"AB-{number:02}" for number in range(1, 22)}
+    assert set(rows) == {f"AB-{number:02}" for number in range(1, 24)}
     for abuse_case, row in rows.items():
         assert "TM-" in row, abuse_case
         assert "#" in row, abuse_case
@@ -187,6 +190,8 @@ def test_every_stride_boundary_threat_has_control_owner_gate_and_test() -> None:
             "STR-X-I",
             "STR-B-S",
             "STR-B-T",
+            "STR-B-R",
+            "STR-B-D",
         }
     )
 
@@ -284,3 +289,117 @@ def test_desktop_policy_is_aligned_across_normative_guidance() -> None:
         assert "provider=none" in text
 
     assert "ADR-0025-electron-fastapi-desktop.md" in sidebar
+
+
+def test_issue_103_opaque_file_grant_boundary_is_documented() -> None:
+    architecture = _read(_ARCHITECTURE)
+    desktop_readme = _read(_DESKTOP_README)
+    desktop_shell = _read(_DESKTOP_SHELL)
+    file_ingress = _read(_FILE_INGRESS)
+    threat_model = _read(_THREAT_MODEL)
+    contributing = _read(_CONTRIBUTING)
+    documents = (
+        architecture,
+        desktop_readme,
+        desktop_shell,
+        file_ingress,
+        threat_model,
+        contributing,
+    )
+    combined = "\n".join(documents)
+
+    for interface in (
+        "requestOpenFileGrant",
+        "requestSaveFileGrant",
+        "revokeFileGrant",
+        "resolveReadGrant",
+        "resolveWriteGrant",
+    ):
+        assert f"`{interface}`" in combined
+
+    for text in documents:
+        assert "Issue #103" in text
+
+    for phrase in ("path-free", "single-use", "native", "revocation"):
+        assert phrase in combined
+
+    normalized_file_ingress = " ".join(file_ingress.casefold().split())
+    assert "renderer cannot invoke either resolver" in normalized_file_ingress
+    assert "raw host path" in normalized_file_ingress
+    assert "#114/#118/#131" in threat_model
+
+
+def _core_40_section() -> str:
+    heading = "## CORE-40 multi-adapter façade consumption and extraction evaluation"
+    architecture = _read(_ARCHITECTURE)
+    assert heading in architecture
+    return heading + architecture.split(heading, 1)[1].split("\n## ", 1)[0]
+
+
+def test_core_40_documents_shared_adapter_contract_consumption_and_extraction_decision() -> None:
+    architecture = _core_40_section()
+    normalized = " ".join(architecture.split())
+
+    assert "## CORE-40 multi-adapter façade consumption and extraction evaluation" in architecture
+    assert (
+        "CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and "
+        "`CommandExecutor` boundaries" in normalized
+    )
+    assert "authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes" in normalized
+    assert "translate strict OpenAPI/Pydantic payloads" in normalized
+    assert "OpenAPI/Pydantic ownership remains adapter local." in normalized
+    assert "packaged Electron 0.6 support boundary is narrower" in normalized
+    assert "Home, Diagnostics, Settings, and onboarding form the supported core" in normalized
+    assert "provider, Tasks, and Chat surfaces remain source-level gates" in normalized
+    assert "target-matched packaged evidence passes" in normalized
+    assert "bounded Electron control shell keeps file grants, sidecar lifecycle" in normalized
+    assert "those surfaces require target-matched evidence before a support claim" in normalized
+    assert "#131" in normalized
+    assert (
+        "must not delay or redefine signing and notarization scope tracked by `#132`." in normalized
+    )
+
+
+def test_core_40_qualifies_terminal_facade_coverage() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "Typed application façade coverage varies by operation" in normalized
+    assert (
+        "RootsMagic terminal commands still use path-based service convenience methods"
+        in normalized
+    )
+
+
+def test_core_40_keeps_rootsmagic_http_adapter_future() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "The RootsMagic HTTP adapter tracked by `#119` remains future work." in normalized
+
+
+def test_core_40_keeps_renderer_presentation_separate_from_privileged_authority() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert "The sandboxed renderer owns presentation only." in normalized
+    assert "settings/keyring authority in Main/application layers" in normalized
+
+
+def test_core_40_distinguishes_source_gedcom_intake_from_future_domain_adapters() -> None:
+    normalized = " ".join(_core_40_section().split())
+
+    assert (
+        "Read-only GEDCOM intake and root selection (`#115`) are implemented source-level gates"
+        in normalized
+    )
+    assert "Genealogy mutation and RootsMagic desktop adapters remain future work" in normalized
+
+
+def test_core_40_preserves_separate_accepted_extraction_dispositions() -> None:
+    section = _core_40_section()
+    assert "- GEDCOM:" in section
+    assert "- RootsMagic:" in section
+    gedcom = " ".join(section.split("- GEDCOM:", 1)[1].split("- RootsMagic:", 1)[0].split())
+    rootsmagic = " ".join(section.split("- RootsMagic:", 1)[1].split())
+
+    assert "keep internal now (defer extraction)" in gedcom
+    assert "first extraction candidate" in gedcom
+    assert "keep internal (decline extraction)" in rootsmagic

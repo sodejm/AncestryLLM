@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Runs the documented GEDCOM merge quickstart in a disposable, privacy-safe workspace.
 set -Eeuo pipefail
 
 umask 077

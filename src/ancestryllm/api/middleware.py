@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import hmac
-from typing import Final, cast
-
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from ancestryllm.api.contracts import (
     API_BUILD_HEADER,
@@ -19,9 +19,41 @@ from ancestryllm.api.errors import (
     new_correlation_ref,
     request_error,
 )
-from ancestryllm.api.settings import ApiSettings
 
-_ALLOWED_ROUTES: Final = frozenset({f"{API_NAMESPACE}/health", f"{API_NAMESPACE}/capabilities"})
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+    from ancestryllm.api.settings import ApiSettings
+
+_SECRET_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/secrets/[a-z0-9_.-]{{1,96}}/(status|set|delete)$"
+)
+_CONSENT_REVOKE_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/consents/[A-Za-z0-9][A-Za-z0-9._~-]{{0,199}}/revoke$"
+)
+_JOB_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/jobs/[A-Za-z0-9][A-Za-z0-9._~-]{{0,31}}"
+    r"(?P<operation>/cancel|/events)?$"
+)
+_GEDCOM_RESULT_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/gedcom/jobs/"
+    r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}/result$"
+)
+_GEDCOM_INTAKE_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/gedcom/intake/"
+    r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}(?P<operation>/roots|/discard)?$"
+)
+_GEDCOM_ROOT_CANDIDATES_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/gedcom/jobs/"
+    r"[A-Za-z0-9][A-Za-z0-9._~-]{0,31}/root-candidates$"
+)
+_CHAT_SESSION_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}(?P<operation>/runs)?$"
+)
+_CHAT_STREAM_ROUTE = re.compile(
+    rf"^{re.escape(API_NAMESPACE)}/chat/sessions/chat_[0-9a-f]{{32}}/streams"
+    r"(?:/run_[0-9a-f]{32}(?P<operation>/events|/cancel))?$"
+)
 _FORBIDDEN_REQUEST_HEADERS: Final = frozenset(
     {
         b"cookie",
@@ -56,8 +88,98 @@ _SECURITY_HEADERS: Final = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _RoutePolicy:
+    method: str
+    accepts_json: bool = False
+
+
+def _route_policy(
+    path: str,
+    surface: Literal["control", "probe"],
+    runtime_shutdown_enabled: bool,
+) -> _RoutePolicy | None:
+    if path in {
+        f"{API_NAMESPACE}/health",
+        f"{API_NAMESPACE}/capabilities",
+    }:
+        return _RoutePolicy("GET")
+    if surface == "probe":
+        return None
+    if path == f"{API_NAMESPACE}/startup-diagnostics":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/chat/capability":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/chat/sessions":
+        return _RoutePolicy("POST", accepts_json=True)
+    if path in {
+        f"{API_NAMESPACE}/gedcom/intake",
+        f"{API_NAMESPACE}/gedcom/inspect",
+        f"{API_NAMESPACE}/gedcom/merge",
+        f"{API_NAMESPACE}/gedcom/subtree",
+        f"{API_NAMESPACE}/gedcom/quality",
+        f"{API_NAMESPACE}/gedcom/sync",
+    }:
+        return _RoutePolicy("POST", accepts_json=True)
+    if _GEDCOM_RESULT_ROUTE.fullmatch(path) is not None:
+        return _RoutePolicy("GET")
+    intake_match = _GEDCOM_INTAKE_ROUTE.fullmatch(path)
+    if intake_match is not None:
+        operation = intake_match.group("operation")
+        return _RoutePolicy(
+            "GET" if operation is None else "POST", accepts_json=operation == "/roots"
+        )
+    if _GEDCOM_ROOT_CANDIDATES_ROUTE.fullmatch(path) is not None:
+        return _RoutePolicy("POST", accepts_json=True)
+    chat_stream_match = _CHAT_STREAM_ROUTE.fullmatch(path)
+    if chat_stream_match is not None:
+        operation = chat_stream_match.group("operation")
+        if operation == "/events":
+            return _RoutePolicy("GET")
+        if operation == "/cancel":
+            return _RoutePolicy("POST")
+        return _RoutePolicy("POST", accepts_json=True)
+    chat_match = _CHAT_SESSION_ROUTE.fullmatch(path)
+    if chat_match is not None:
+        if chat_match.group("operation") == "/runs":
+            return _RoutePolicy("POST", accepts_json=True)
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/jobs":
+        return _RoutePolicy("GET")
+    if path == f"{API_NAMESPACE}/jobs/shutdown":
+        return _RoutePolicy("POST", accepts_json=True)
+    if runtime_shutdown_enabled and path == f"{API_NAMESPACE}/runtime/shutdown":
+        return _RoutePolicy("POST")
+    job_match = _JOB_ROUTE.fullmatch(path)
+    if job_match is not None:
+        operation = job_match.group("operation")
+        return _RoutePolicy("POST" if operation == "/cancel" else "GET")
+    if path == f"{API_NAMESPACE}/settings":
+        return _RoutePolicy("PATCH", accepts_json=True)
+    if path == f"{API_NAMESPACE}/provider-configuration":
+        return _RoutePolicy("GET")
+    if path in {
+        f"{API_NAMESPACE}/provider-profiles",
+        f"{API_NAMESPACE}/provider-endpoints/validate",
+        f"{API_NAMESPACE}/consents/preview",
+        f"{API_NAMESPACE}/consents",
+    }:
+        return _RoutePolicy("POST", accepts_json=True)
+    if _CONSENT_REVOKE_ROUTE.fullmatch(path) is not None:
+        return _RoutePolicy("POST", accepts_json=True)
+    match = _SECRET_ROUTE.fullmatch(path)
+    if match is None:
+        return None
+    operation = match.group(1)
+    if operation == "status":
+        return _RoutePolicy("GET")
+    if operation == "set":
+        return _RoutePolicy("POST", accepts_json=True)
+    return _RoutePolicy("POST")
+
+
 def _header_map(scope: Scope) -> dict[bytes, list[bytes]]:
-    raw_headers = cast(list[tuple[bytes, bytes]], scope.get("headers", []))
+    raw_headers = cast("list[tuple[bytes, bytes]]", scope.get("headers", []))
     headers: dict[bytes, list[bytes]] = {}
     for raw_name, value in raw_headers:
         headers.setdefault(raw_name.lower(), []).append(value)
@@ -101,7 +223,12 @@ def _authenticate(headers: dict[bytes, list[bytes]], settings: ApiSettings) -> N
         )
 
 
-def _validate_request(scope: Scope, settings: ApiSettings) -> None:
+def _validate_request(
+    scope: Scope,
+    settings: ApiSettings,
+    surface: Literal["control", "probe"],
+    runtime_shutdown_enabled: bool,
+) -> _RoutePolicy:
     headers = _header_map(scope)
     _authenticate(headers, settings)
 
@@ -129,26 +256,46 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
             409, "APP_BUILD_MISMATCH", "The desktop and sidecar build identities do not match."
         )
 
-    path = cast(str, scope.get("path", ""))
-    if path not in _ALLOWED_ROUTES:
+    path = cast("str", scope.get("path", ""))
+    policy = _route_policy(path, surface, runtime_shutdown_enabled)
+    if policy is None:
         raise request_error(
             404, "ROUTE_UNAVAILABLE", "The requested internal API route is unavailable."
         )
-    if scope.get("method") != "GET":
+    method = cast("str", scope.get("method", ""))
+    if path == f"{API_NAMESPACE}/settings" and method == "GET":
+        policy = _RoutePolicy("GET")
+    if _CHAT_SESSION_ROUTE.fullmatch(path) is not None and method == "DELETE":
+        policy = _RoutePolicy("DELETE")
+    if method != policy.method:
         raise request_error(
             405, "METHOD_NOT_ALLOWED", "The internal API route does not accept this method."
         )
-    if cast(bytes, scope.get("query_string", b"")):
+    chat_stream_match = _CHAT_STREAM_ROUTE.fullmatch(path)
+    if chat_stream_match is not None and chat_stream_match.group("operation") == "/events":
+        _one_header(headers, b"last-event-id")
+    if cast("bytes", scope.get("query_string", b"")):
         raise request_error(
             400,
             "REQUEST_QUERY_FORBIDDEN",
             "The internal API control routes do not accept query parameters.",
         )
-    if b"content-type" in headers:
+    content_type = _one_header(headers, b"content-type")
+    if policy.accepts_json:
+        if (
+            content_type is None
+            or content_type.split(b";", 1)[0].strip().lower() != b"application/json"
+        ):
+            raise request_error(
+                415,
+                "REQUEST_CONTENT_TYPE_REQUIRED",
+                "The internal API route accepts only JSON request bodies.",
+            )
+    elif content_type is not None:
         raise request_error(
             415,
             "REQUEST_CONTENT_TYPE_FORBIDDEN",
-            "The internal API control routes do not accept a content type.",
+            "The internal API route does not accept a content type.",
         )
 
     raw_length = _one_header(headers, b"content-length")
@@ -167,12 +314,13 @@ def _validate_request(scope: Scope, settings: ApiSettings) -> None:
             raise request_error(
                 413, "REQUEST_TOO_LARGE", "The request exceeds the internal API size limit."
             )
-        if content_length:
+        if content_length and not policy.accepts_json:
             raise request_error(
                 400,
                 "REQUEST_BODY_FORBIDDEN",
-                "The internal API control routes do not accept a request body.",
+                "The internal API route does not accept a request body.",
             )
+    return policy
 
 
 async def _verify_empty_body(receive: Receive) -> Receive:
@@ -198,23 +346,77 @@ async def _verify_empty_body(receive: Receive) -> Receive:
     return replay_first_message
 
 
+async def _buffer_bounded_body(receive: Receive, *, maximum_bytes: int) -> Receive:
+    messages: list[Message] = []
+    total = 0
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message["type"] != "http.request":
+            break
+        total += len(cast("bytes", message.get("body", b"")))
+        if total > maximum_bytes:
+            raise request_error(
+                413,
+                "REQUEST_TOO_LARGE",
+                "The request exceeds the internal API size limit.",
+            )
+        if not message.get("more_body", False):
+            break
+
+    index = 0
+
+    async def replay_messages() -> Message:
+        nonlocal index
+        if index < len(messages):
+            message = messages[index]
+            index += 1
+            return message
+        return await receive()
+
+    return replay_messages
+
+
 class InternalApiMiddleware:
-    def __init__(self, app: ASGIApp, *, settings: ApiSettings) -> None:
+    """Enforce internal API origin, host, request-size, and response-header policy."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        settings: ApiSettings,
+        surface: Literal["control", "probe"] = "control",
+        runtime_shutdown_enabled: bool = False,
+    ) -> None:
         self._app = app
         self._settings = settings
+        self._surface = surface
+        self._runtime_shutdown_enabled = runtime_shutdown_enabled
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Apply internal request policy before delegating to the wrapped ASGI app."""
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return
 
         correlation_ref = new_correlation_ref()
-        state = cast(dict[str, object], scope.setdefault("state", {}))
+        state = cast("dict[str, object]", scope.setdefault("state", {}))
         state["correlation_ref"] = correlation_ref
         secured_send = self._secured_send(send, correlation_ref)
         try:
-            _validate_request(scope, self._settings)
-            receive = await _verify_empty_body(receive)
+            policy = _validate_request(
+                scope,
+                self._settings,
+                self._surface,
+                self._runtime_shutdown_enabled,
+            )
+            if policy.accepts_json:
+                receive = await _buffer_bounded_body(
+                    receive,
+                    maximum_bytes=self._settings.request_policy.max_body_bytes,
+                )
+            else:
+                receive = await _verify_empty_body(receive)
         except ApiRequestError as error:
             await error_response(error, correlation_ref=correlation_ref)(
                 scope, receive, secured_send
@@ -242,7 +444,7 @@ class InternalApiMiddleware:
     def _secured_send(send: Send, correlation_ref: str) -> Send:
         async def secured(message: Message) -> None:
             if message.get("type") == "http.response.start":
-                raw_headers = cast(list[tuple[bytes, bytes]], message.get("headers", []))
+                raw_headers = cast("list[tuple[bytes, bytes]]", message.get("headers", []))
                 replaced = (
                     {name for name, _value in _SECURITY_HEADERS}
                     | _REMOVED_RESPONSE_HEADERS

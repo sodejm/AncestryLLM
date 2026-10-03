@@ -49,6 +49,7 @@ class ProviderExecutionCoordinator:
         timeout_seconds: float,
         cancellation_check: CancellationCheck = _no_cancellation,
     ) -> ResultT:
+        """Execute the provider execution coordinator operation and return its typed result."""
         with self.lease(
             key,
             max_concurrency=max_concurrency,
@@ -65,6 +66,7 @@ class ProviderExecutionCoordinator:
         *,
         max_pending: int,
     ) -> Iterator[None]:
+        """Return the provider admission controller used for rate and concurrency limits."""
         with self._lock:
             if self._closed:
                 raise ProviderError(
@@ -106,6 +108,7 @@ class ProviderExecutionCoordinator:
         timeout_seconds: float,
         cancellation_check: CancellationCheck = _no_cancellation,
     ) -> Iterator[None]:
+        """Return the provider capacity limiter for the requested profile."""
         with self._lock:
             if self._closed:
                 raise ProviderError(
@@ -169,16 +172,19 @@ class ProviderExecutionCoordinator:
     ) -> Iterator[None]:
         """Admit one request and lease provider capacity for its active call."""
 
-        with self.admission(key, max_pending=max_pending):
-            with self.capacity(
+        with (
+            self.admission(key, max_pending=max_pending),
+            self.capacity(
                 key,
                 max_concurrency=max_concurrency,
                 timeout_seconds=timeout_seconds,
                 cancellation_check=cancellation_check,
-            ):
-                yield
+            ),
+        ):
+            yield
 
     def close(self) -> None:
+        """Release resources owned by the provider execution coordinator."""
         with self._lock:
             self._closed = True
             lanes = tuple(self._lanes.values())
@@ -222,6 +228,7 @@ class ExactResultCache:
         cancellation_check: CancellationCheck = _no_cancellation,
         cache_when: Callable[[ResultT], bool] = lambda _result: True,
     ) -> tuple[ResultT, bool]:
+        """Return a cached result or execute the admitted provider request."""
         now = time.monotonic()
         owner = False
         with self._lock:
@@ -294,6 +301,7 @@ class ExactResultCache:
             self._entries.pop(key, None)
 
     def close(self) -> None:
+        """Release resources owned by the exact result cache."""
         with self._lock:
             self._closed = True
             self._entries.clear()

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 import tomllib
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,10 +14,14 @@ from typing import Any
 import tomli_w
 from platformdirs import user_config_path, user_data_path
 
+from ancestryllm.core.atomic_file import AtomicFileMutation
+from ancestryllm.core.deployment import DeploymentProfile
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
+from ancestryllm.core.mutation import LocalMutationCoordinator
 
 APP_NAME = "ancestryllm"
+CONFIG_SCHEMA_VERSION = 1
 DEFAULT_MODULES = ("gedcom", "rootsmagic", "ocr", "prompts", "people", "providers", "secrets")
 _SECTION_KEYS = {
     "storage": {"data_dir", "family_tree_dirs"},
@@ -29,16 +33,21 @@ _SECTION_KEYS = {
         "query_timeout_seconds",
         "provider_timeout_seconds",
     },
+    "deployment": {
+        "schema_version",
+        "mode",
+        "topology",
+        "endpoint_origin",
+        "endpoint_identity_sha256",
+    },
 }
-_TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress"}
+_TOP_LEVEL_KEYS = {*_SECTION_KEYS, "file_ingress", "schema_version", "revision"}
 
 
 def _secure_directory(path: Path) -> Path:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
+    with suppress(OSError):
         path.chmod(0o700)
-    except OSError:
-        pass
     return path
 
 
@@ -135,7 +144,7 @@ def _path_setting(
             section=section,
         )
     try:
-        return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+        return Path(os.path.expandvars(value)).expanduser().resolve()
     except (OSError, RuntimeError, ValueError) as exc:
         raise _config_error(
             f"The {section}.{field_name} setting must be a valid path.",
@@ -157,13 +166,18 @@ class AppConfig:
     query_timeout_seconds: float = 10.0
     provider_timeout_seconds: float = 60.0
     file_ingress: FileIngressLimits = field(default_factory=FileIngressLimits)
+    deployment: DeploymentProfile = field(default_factory=DeploymentProfile.local)
+    schema_version: int = CONFIG_SCHEMA_VERSION
+    revision: int = 0
 
     @property
     def database_path(self) -> Path:
+        """Resolve the configured application database path."""
         return self.data_dir / "workspace.db"
 
     @classmethod
     def load(cls, path: Path | None = None) -> AppConfig:
+        """Load the data required by the app config."""
         configured_config_dir = os.getenv("ANCESTRYLLM_CONFIG_DIR")
         configured_data_dir = os.getenv("ANCESTRYLLM_DATA_DIR")
         if path is not None:
@@ -230,10 +244,25 @@ class AppConfig:
             ) from exc
         if set(payload) - _TOP_LEVEL_KEYS:
             raise _config_error("The configuration contains an unsupported top-level section.")
+        schema_version = payload.get("schema_version", CONFIG_SCHEMA_VERSION)
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != CONFIG_SCHEMA_VERSION
+        ):
+            raise _config_error("The configuration schema version is unsupported.")
+        revision = payload.get("revision", 0)
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise _config_error("The configuration revision must be a non-negative integer.")
         storage = _section(payload, "storage")
         modules = _section(payload, "modules")
         providers = _section(payload, "providers")
         limits = _section(payload, "limits")
+        deployment = (
+            DeploymentProfile.from_mapping(payload["deployment"])
+            if "deployment" in payload
+            else DeploymentProfile.local()
+        )
         configured_data = storage.get("data_dir")
         if configured_data is not None:
             configured_data = _string(
@@ -317,11 +346,17 @@ class AppConfig:
             query_timeout_seconds=query_timeout_seconds,
             provider_timeout_seconds=provider_timeout_seconds,
             file_ingress=file_ingress,
+            deployment=deployment,
+            schema_version=schema_version,
+            revision=revision,
         )
 
-    def save(self) -> None:
+    def save(self, *, expected_revision: int | None = None) -> bool:
+        """Persist validated settings with optimistic revision control and report whether content changed."""
         self.config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "revision": self.revision,
             "storage": {
                 "data_dir": str(self.data_dir),
                 "family_tree_dirs": [str(path) for path in self.family_tree_dirs],
@@ -335,18 +370,17 @@ class AppConfig:
                 "provider_timeout_seconds": self.provider_timeout_seconds,
             },
             "file_ingress": self.file_ingress.to_mapping(),
+            "deployment": self.deployment.to_mapping(),
         }
         encoded = tomli_w.dumps(payload).encode("utf-8")
-        fd, temporary_name = tempfile.mkstemp(prefix=".config-", dir=self.config_path.parent)
-        temporary = Path(temporary_name)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.config_path)
-            self.config_path.chmod(0o600)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
+        with (
+            LocalMutationCoordinator() as coordinator,
+            AtomicFileMutation(self.config_path, coordinator) as publication,
+        ):
+            actual_revision = (
+                AppConfig.load(self.config_path).revision if self.config_path.exists() else 0
+            )
+            if expected_revision is not None and actual_revision != expected_revision:
+                return False
+            publication.publish(encoded)
+        return True

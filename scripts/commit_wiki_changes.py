@@ -8,9 +8,12 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 BOT_NAME = "github-actions[bot]"
 BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
@@ -106,6 +109,7 @@ def _write_workflow_output(path: Path, result: CommitResult) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the commit wiki changes command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repository",
@@ -127,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the commit wiki changes command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         result = commit_wiki_changes(args.repository, args.source_sha)

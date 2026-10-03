@@ -9,12 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
 
 from ancestryllm.application.dto import (
     ArtifactGrantRef,
     ArtifactRef,
     BoundaryDTO,
+    DecisionKind,
+    DecisionOption,
+    DecisionRequest,
+    IdentityCandidate,
     NamedValue,
     ProviderSelection,
     Scalar,
@@ -23,6 +27,9 @@ from ancestryllm.application.dto import (
     ServiceResult,
 )
 from ancestryllm.core.commands import COMMAND_SPECIFICATIONS, DispatchKey
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +206,41 @@ class DiagnosticRecord(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class DeploymentProfileRecord(BoundaryDTO):
+    """Versioned non-secret deployment intent for adapter presentation."""
+
+    schema_version: int
+    mode_code: str
+    topology_code: str
+    endpoint_origin: str | None
+    endpoint_identity_sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentModeRecord(BoundaryDTO):
+    """Renderer-neutral mode copy and selection constraints."""
+
+    mode_code: str
+    label: str
+    summary: str
+    consequences: tuple[str, ...]
+    prerequisites: tuple[str, ...]
+    default: bool
+    recommended: bool
+    advanced: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnosticRecord(BoundaryDTO):
+    """One coded deployment diagnostic without host or credential details."""
+
+    diagnostic_code: str
+    status_code: str
+    message: str
+    remediation: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ModulesListRequest(ServiceRequest):
     """List configured module descriptors."""
 
@@ -325,16 +367,170 @@ class RootsMagicExportArtifact(BoundaryDTO):
 
 
 @dataclass(frozen=True, slots=True)
+class GedcomSourceSummary(BoundaryDTO):
+    """Sanitized structural metadata for one granted GEDCOM source."""
+
+    source: ArtifactRef
+    gedcom_version: str
+    individual_count: int
+    family_count: int
+    other_record_count: int
+    encoding: str = "utf-8"
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomValidationFinding(BoundaryDTO):
+    """One coded GEDCOM validation outcome without record contents."""
+
+    code: str
+    severity: str
+    subject_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RootCandidate(BoundaryDTO):
+    """Bounded, private presentation of one explicitly selectable person."""
+
+    person_ref: str
+    reason_code: str
+    display_name: str = ""
+    source_identifier: str = ""
+    birth_date: str = ""
+    death_date: str = ""
+    relationship_summary: str = ""
+
+    def __post_init__(self) -> None:
+        for value, maximum in (
+            (self.display_name, 128),
+            (self.source_identifier, 96),
+            (self.birth_date, 64),
+            (self.death_date, 64),
+            (self.relationship_summary, 128),
+        ):
+            if len(value) > maximum:
+                raise ValueError("Root candidate display text exceeds its limit.")
+
+
+@dataclass(frozen=True, slots=True)
+class RootCandidatePage(BoundaryDTO):
+    """One bounded private page; never persisted in public job history."""
+
+    candidates: tuple[RootCandidate, ...]
+    total_count: int | None
+    next_cursor: str | None
+
+    def __post_init__(self) -> None:
+        if len(self.candidates) > 100 or (
+            self.total_count is not None and self.total_count < len(self.candidates)
+        ):
+            raise ValueError("Invalid root candidate page bounds.")
+        if self.next_cursor is not None and len(self.next_cursor) > 256:
+            raise ValueError("Root candidate cursor exceeds its limit.")
+
+
+_DEFAULT_MERGE_DECISION_OPTIONS = (
+    DecisionOption(
+        option_id="retain-both",
+        label_code="gedcom.merge.retain-both",
+    ),
+    DecisionOption(
+        option_id="merge",
+        label_code="gedcom.merge.merge",
+        destructive=True,
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MergeDecisionRequest(BoundaryDTO):
+    """Duplicate adjudication with an explicit conservative default."""
+
+    decision_id: str
+    left_person_ref: str
+    right_person_ref: str
+    evidence_codes: tuple[str, ...]
+    options: tuple[DecisionOption, ...] = _DEFAULT_MERGE_DECISION_OPTIONS
+    default_option_id: str = "retain-both"
+
+    def __post_init__(self) -> None:
+        DecisionRequest(
+            decision_id=self.decision_id,
+            operation="gedcom.merge",
+            decision_code="possible-duplicate",
+            kind=DecisionKind.RESOLVE_CONFLICT,
+            options=self.options,
+            default_option_id=self.default_option_id,
+        )
+        IdentityCandidate(candidate_ref=self.left_person_ref, confidence=0)
+        IdentityCandidate(candidate_ref=self.right_person_ref, confidence=0)
+        if not 1 <= len(self.evidence_codes) <= 32:
+            raise ValueError("merge evidence codes must contain between 1 and 32 items.")
+        if len(set(self.evidence_codes)) != len(self.evidence_codes):
+            raise ValueError("merge evidence codes must be unique.")
+        for evidence_code in self.evidence_codes:
+            DecisionOption(option_id=evidence_code, label_code=evidence_code)
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectRequest(ServiceRequest):
+    """Inspect one granted GEDCOM without exposing its host path or records."""
+
+    source: ArtifactGrantRef
+    expected_sha256: str | None = None
+    expected_size_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.expected_sha256 is None) != (self.expected_size_bytes is None):
+            raise ValueError("An expected source fingerprint requires both size and digest.")
+        if self.expected_sha256 is not None and (
+            len(self.expected_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.expected_sha256)
+            or type(self.expected_size_bytes) is not int
+            or not 0 <= self.expected_size_bytes <= 512 * 1024 * 1024
+        ):
+            raise ValueError("Invalid expected source fingerprint.")
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectResult(ServiceResult):
+    """Private retained inspection; adapters expose a summary and bounded pages."""
+
+    summary: GedcomSourceSummary
+    findings: tuple[GedcomValidationFinding, ...]
+    root_candidates: tuple[RootCandidate, ...]
+    finding_count: int
+
+    def summary_result(self) -> GedcomInspectSummary:
+        """Project metadata without serializing the complete candidate collection."""
+        return GedcomInspectSummary(
+            summary=self.summary,
+            findings=self.findings[:100],
+            finding_count=self.finding_count,
+            root_candidate_count=len(self.root_candidates),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GedcomInspectSummary(ServiceResult):
+    """Bounded inspection metadata without names or the complete person index."""
+
+    summary: GedcomSourceSummary
+    findings: tuple[GedcomValidationFinding, ...]
+    finding_count: int
+    root_candidate_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class GedcomMergeRequest(ServiceRequest):
     """Merge granted GEDCOM inputs into granted loss-minimal outputs."""
 
     inputs: tuple[ArtifactGrantRef, ...]
     output: ArtifactGrantRef
-    quality_report: ArtifactGrantRef
+    quality_report: ArtifactGrantRef | None
     root_person_ref: str | None
-    gedcom_version: str
     provider: ProviderSelection
     similarity_threshold: int
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,8 +538,8 @@ class GedcomMergeResult(ServiceResult):
     """Published merge artifacts and deterministic result contracts."""
 
     gedcom: ArtifactRef
-    quality_report: ArtifactRef
-    root_person_ref: str
+    quality_report: ArtifactRef | None
+    root_person_ref: str | None
     changes: ChangeSummary
     quality: QualitySummary
     provenance: tuple[ProvenanceRecord, ...]
@@ -358,7 +554,7 @@ class GedcomSubtreeRequest(ServiceRequest):
     root_person_ref: str
     scope: str
     generations: int | None
-    gedcom_version: str
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +575,7 @@ class GedcomQualityRequest(ServiceRequest):
     output: ArtifactGrantRef
     root_person_ref: str | None
     provider: ProviderSelection
+    gedcom_version: str = "5.5.5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,6 +625,19 @@ class GedcomSyncResult(ServiceResult):
     changes: ChangeSummary
     quality: QualitySummary
     provenance: tuple[ProvenanceRecord, ...]
+
+
+# Short compatibility imports for existing CLI dispatch and service adapters.  Keep
+# the public concrete class names stable because BoundaryDTO serializes the class
+# name as its type discriminator.
+MergeRequest = GedcomMergeRequest
+MergeResult = GedcomMergeResult
+QualityRequest = GedcomQualityRequest
+QualityResult = GedcomQualityResult
+SubtreeRequest = GedcomSubtreeRequest
+SubtreeResult = GedcomSubtreeResult
+SyncRequest = GedcomSyncRequest
+SyncResult = GedcomSyncResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -657,6 +867,108 @@ class OcrExtractResult(ServiceResult):
 
 
 @dataclass(frozen=True, slots=True)
+class DeploymentModesRequest(ServiceRequest):
+    """List reviewed deployment choices."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentModesResult(ServiceResult):
+    """Reviewed deployment choices in deterministic presentation order."""
+
+    modes: tuple[DeploymentModeRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStatusRequest(ServiceRequest):
+    """Read stored deployment intent."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStatusResult(ServiceResult):
+    """Stored intent and optimistic-lock revision."""
+
+    schema_version: int
+    revision: int
+    profile: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPreviewRequest(ServiceRequest):
+    """Preview an exact deployment target without mutation."""
+
+    schema_version: int
+    expected_revision: int
+    target: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPreviewResult(ServiceResult):
+    """Target-bound switch consequences and confirmation."""
+
+    schema_version: int
+    expected_revision: int
+    current: DeploymentProfileRecord
+    target: DeploymentProfileRecord
+    consequences: tuple[str, ...]
+    confirmation: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentSwitchRequest(ServiceRequest):
+    """Apply one previously previewed deployment target."""
+
+    schema_version: int
+    expected_revision: int
+    target: DeploymentProfileRecord
+    confirmation: str
+    unattended: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentSwitchResult(ServiceResult):
+    """Persisted deployment intent after a successful switch."""
+
+    schema_version: int
+    revision: int
+    profile: DeploymentProfileRecord
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnoseRequest(ServiceRequest):
+    """Compare stored intent with sanitized runtime facts."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDiagnoseResult(ServiceResult):
+    """Aggregate fail-closed deployment diagnostics."""
+
+    schema_version: int
+    revision: int
+    status_code: str
+    diagnostics: tuple[DeploymentDiagnosticRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentMetadataRequest(ServiceRequest):
+    """Request redacted deployment evidence for an allowlisted purpose."""
+
+    purpose_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentMetadataResult(ServiceResult):
+    """Privacy-minimal deployment evidence for backup or support metadata."""
+
+    schema_version: int
+    purpose_code: str
+    deployment_schema_version: int
+    config_revision: int
+    mode_code: str
+    topology_code: str
+    endpoint_identity_sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseBackupRequest(ServiceRequest):
     """Create a database backup at one granted output."""
 
@@ -698,10 +1010,10 @@ _CONTRACT_TYPES = (
     ("rootsmagic", "list", RootsMagicListRequest, RootsMagicListResult),
     ("rootsmagic", "query", RootsMagicQueryRequest, RootsMagicQueryResult),
     ("rootsmagic", "export", RootsMagicExportRequest, RootsMagicExportResult),
-    ("gedcom", "merge", GedcomMergeRequest, GedcomMergeResult),
-    ("gedcom", "subtree", GedcomSubtreeRequest, GedcomSubtreeResult),
-    ("gedcom", "quality", GedcomQualityRequest, GedcomQualityResult),
-    ("gedcom", "sync", GedcomSyncRequest, GedcomSyncResult),
+    ("gedcom", "merge", MergeRequest, MergeResult),
+    ("gedcom", "subtree", SubtreeRequest, SubtreeResult),
+    ("gedcom", "quality", QualityRequest, QualityResult),
+    ("gedcom", "sync", SyncRequest, SyncResult),
     ("prompts", "list", PromptsListRequest, PromptsListResult),
     ("prompts", "save", PromptSaveRequest, PromptSaveResult),
     ("prompts", "show", PromptShowRequest, PromptShowResult),
@@ -716,6 +1028,12 @@ _CONTRACT_TYPES = (
     ("secrets", "delete", SecretDeleteRequest, SecretDeleteResult),
     ("secrets", "status", SecretStatusRequest, SecretStatusResult),
     ("ocr", "extract", OcrExtractRequest, OcrExtractResult),
+    ("deployment", "modes", DeploymentModesRequest, DeploymentModesResult),
+    ("deployment", "status", DeploymentStatusRequest, DeploymentStatusResult),
+    ("deployment", "preview", DeploymentPreviewRequest, DeploymentPreviewResult),
+    ("deployment", "switch", DeploymentSwitchRequest, DeploymentSwitchResult),
+    ("deployment", "diagnose", DeploymentDiagnoseRequest, DeploymentDiagnoseResult),
+    ("deployment", "metadata", DeploymentMetadataRequest, DeploymentMetadataResult),
     ("database", "backup", DatabaseBackupRequest, DatabaseBackupResult),
     ("database", "diagnose", DatabaseDiagnoseRequest, DatabaseDiagnoseResult),
 )
@@ -748,16 +1066,39 @@ __all__ = [
     "DatabaseBackupResult",
     "DatabaseDiagnoseRequest",
     "DatabaseDiagnoseResult",
+    "DeploymentDiagnoseRequest",
+    "DeploymentDiagnoseResult",
+    "DeploymentDiagnosticRecord",
+    "DeploymentMetadataRequest",
+    "DeploymentMetadataResult",
+    "DeploymentModeRecord",
+    "DeploymentModesRequest",
+    "DeploymentModesResult",
+    "DeploymentPreviewRequest",
+    "DeploymentPreviewResult",
+    "DeploymentProfileRecord",
+    "DeploymentStatusRequest",
+    "DeploymentStatusResult",
+    "DeploymentSwitchRequest",
+    "DeploymentSwitchResult",
     "DiagnosticRecord",
+    "GedcomInspectRequest",
+    "GedcomInspectResult",
+    "GedcomInspectSummary",
     "GedcomMergeRequest",
     "GedcomMergeResult",
     "GedcomQualityRequest",
     "GedcomQualityResult",
+    "GedcomSourceSummary",
     "GedcomSubtreeRequest",
     "GedcomSubtreeResult",
     "GedcomSyncRequest",
     "GedcomSyncResult",
     "GedcomSyncSnapshot",
+    "GedcomValidationFinding",
+    "MergeDecisionRequest",
+    "MergeRequest",
+    "MergeResult",
     "ModuleDisableRequest",
     "ModuleDisableResult",
     "ModuleEnableRequest",
@@ -793,9 +1134,13 @@ __all__ = [
     "ProviderRevokeResult",
     "ProvidersListRequest",
     "ProvidersListResult",
+    "QualityRequest",
+    "QualityResult",
     "QualitySummary",
     "QueryExecutionRecord",
     "QueryRow",
+    "RootCandidate",
+    "RootCandidatePage",
     "RootsMagicExportArtifact",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",
@@ -814,5 +1159,9 @@ __all__ = [
     "SecretStatusRecord",
     "SecretStatusRequest",
     "SecretStatusResult",
+    "SubtreeRequest",
+    "SubtreeResult",
+    "SyncRequest",
+    "SyncResult",
     "TreeRecord",
 ]

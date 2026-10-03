@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import json
-from collections.abc import Mapping
-from typing import Any
+import re
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -15,11 +16,16 @@ from ancestryllm.llm.contracts import (
     GenerationRequest,
     ProviderExecution,
 )
-from ancestryllm.llm.policy import ConsentGrant, validate_endpoint
+from ancestryllm.llm.endpoint_validation import EndpointValidationService
+from ancestryllm.llm.policy import DEFAULT_PROVIDER_ENDPOINTS, ConsentGrant, validate_endpoint
 from ancestryllm.llm.registry import PROVIDER_IDS
-from ancestryllm.storage.database import Database
 from ancestryllm.storage.models import ConsentProfileModel, ProviderProfileModel
 from ancestryllm.storage.repositories import ProviderRepository
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ancestryllm.storage.database import Database
 
 SECRET_REFERENCES = {
     "openai": "openai.api_key",
@@ -52,6 +58,8 @@ EXECUTION_SETTING_NAMES = frozenset(
         "zero_data_retention",
     }
 )
+CONTROL_SETTING_NAMES = frozenset({"endpoint_identity_sha256"})
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 COMMON_PROFILE_SETTINGS = frozenset(
     {
         "cache_max_entries",
@@ -66,6 +74,7 @@ COMMON_PROFILE_SETTINGS = frozenset(
 )
 PROVIDER_PROFILE_SETTINGS = {
     "ollama": COMMON_PROFILE_SETTINGS
+    | CONTROL_SETTING_NAMES
     | frozenset(
         {
             "base_url",
@@ -77,10 +86,12 @@ PROVIDER_PROFILE_SETTINGS = {
             "seed",
         }
     ),
-    "openai": COMMON_PROFILE_SETTINGS,
-    "anthropic": COMMON_PROFILE_SETTINGS,
-    "gemini": COMMON_PROFILE_SETTINGS,
-    "openrouter": COMMON_PROFILE_SETTINGS | frozenset({"base_url", "zero_data_retention"}),
+    "openai": COMMON_PROFILE_SETTINGS | CONTROL_SETTING_NAMES,
+    "anthropic": COMMON_PROFILE_SETTINGS | CONTROL_SETTING_NAMES,
+    "gemini": COMMON_PROFILE_SETTINGS | CONTROL_SETTING_NAMES,
+    "openrouter": COMMON_PROFILE_SETTINGS
+    | CONTROL_SETTING_NAMES
+    | frozenset({"base_url", "zero_data_retention"}),
 }
 
 
@@ -111,6 +122,16 @@ def _validated_settings(
             details={"settings": unknown},
         )
     normalized = {name: _coerce_setting(value) for name, value in settings.items()}
+    endpoint_identity = normalized.get("endpoint_identity_sha256")
+    if endpoint_identity is not None and (
+        not isinstance(endpoint_identity, str)
+        or _SHA256_PATTERN.fullmatch(endpoint_identity) is None
+    ):
+        raise AncestryError(
+            "PROVIDER_PROFILE_INVALID",
+            "The provider profile endpoint identity is invalid.",
+            "Test the endpoint again and recreate the profile.",
+        )
     execution_payload = {
         name: value for name, value in normalized.items() if name in EXECUTION_SETTING_NAMES
     }
@@ -142,8 +163,86 @@ def _validated_settings(
 
 
 class ProviderProfileService:
-    def __init__(self, database: Database) -> None:
+    """Coordinate provider profile operations across the application boundary."""
+
+    def __init__(
+        self,
+        database: Database,
+        *,
+        endpoint_validator: EndpointValidationService | None = None,
+    ) -> None:
         self.database = database
+        self._endpoint_validator = endpoint_validator or EndpointValidationService()
+
+    @staticmethod
+    def _endpoint_for(provider_id: str, execution: ProviderExecution) -> str:
+        endpoint = execution.base_url or DEFAULT_PROVIDER_ENDPOINTS.get(provider_id)
+        if endpoint is None:
+            raise AncestryError(
+                "PROVIDER_PROFILE_INVALID",
+                "The provider profile does not have a supported endpoint.",
+            )
+        return endpoint
+
+    def _verify_endpoint_identity(
+        self,
+        provider_id: str,
+        endpoint: str,
+        settings: Mapping[str, object],
+    ) -> None:
+        expected = settings.get("endpoint_identity_sha256")
+        if expected is None:
+            return
+        if not isinstance(expected, str) or _SHA256_PATTERN.fullmatch(expected) is None:
+            raise AncestryError(
+                "PROVIDER_PROFILE_INVALID",
+                "The provider profile endpoint identity is invalid.",
+            )
+        observed = self._endpoint_validator.validate(provider_id, endpoint)
+        if not hmac.compare_digest(expected, observed.destination_digest):
+            raise SecurityPolicyError(
+                "ENDPOINT_DESTINATION_CHANGED",
+                "The endpoint destination changed after it was tested.",
+                "Test the endpoint again and create a new reviewed profile.",
+            )
+
+    def verify_endpoint_identity(self, profile_name: str) -> None:
+        """Revalidate a bound profile without exposing its resolved destinations."""
+
+        with self.database.session() as session:
+            profile = ProviderRepository(session).get_profile(profile_name)
+            if profile is None:
+                raise AncestryError(
+                    "PROVIDER_PROFILE_NOT_FOUND", f"Provider profile not found: {profile_name}"
+                )
+            try:
+                raw_settings = json.loads(profile.settings_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise AncestryError(
+                    "PROVIDER_PROFILE_INVALID",
+                    f"Provider profile settings are malformed: {profile_name}",
+                ) from exc
+            if not isinstance(raw_settings, dict) or not all(
+                isinstance(name, str) for name in raw_settings
+            ):
+                raise AncestryError(
+                    "PROVIDER_PROFILE_INVALID",
+                    f"Provider profile settings are malformed: {profile_name}",
+                )
+            provider_id = profile.provider_id
+            execution, _ = _validated_settings(
+                provider_id,
+                raw_settings,
+                profile_name=profile.name,
+            )
+            endpoint = self._endpoint_for(provider_id, execution)
+            if raw_settings.get("endpoint_identity_sha256") is None:
+                raise SecurityPolicyError(
+                    "ENDPOINT_TEST_REQUIRED",
+                    "The provider profile was not created from a tested endpoint.",
+                    "Test the endpoint and create a new reviewed profile.",
+                )
+        self._verify_endpoint_identity(provider_id, endpoint, raw_settings)
 
     def create_profile(
         self,
@@ -152,6 +251,7 @@ class ProviderProfileService:
         model: str,
         settings: Mapping[str, object] | None = None,
     ) -> ProviderProfileModel:
+        """Persist a validated provider profile and its reviewed settings."""
         if provider_id not in PROVIDER_IDS or provider_id == "none":
             raise AncestryError(
                 "PROVIDER_UNKNOWN", f"Unsupported configured provider: {provider_id}"
@@ -189,8 +289,15 @@ class ProviderProfileService:
         self,
         request: GenerationRequest,
         consent: ConsentGrant | None = None,
+        *,
+        enforce_request_bounds: bool = False,
     ) -> GenerationRequest:
-        """Resolve a built-in provider ID or named profile into one immutable request plan."""
+        """Resolve a provider selection into one immutable request plan.
+
+        Profile retry and temperature settings remain explicit opt-ins for established
+        generation callers. Bounded presentation adapters can instead require every
+        request setting to remain at or below their already-validated request limits.
+        """
 
         selection = request.provider_id
         consent_profile = consent.provider_profile_name if consent is not None else None
@@ -270,16 +377,18 @@ class ProviderProfileService:
                     "The command model does not match the selected provider profile.",
                     "Omit --model or use the model configured by the profile.",
                 )
-            for bounded_name in (
-                "max_output_tokens",
-                "timeout_seconds",
-            ):
+            bounded_settings = (
+                REQUEST_SETTING_NAMES
+                if enforce_request_bounds
+                else frozenset({"max_output_tokens", "timeout_seconds"})
+            )
+            for bounded_name in bounded_settings:
                 if bounded_name in request_settings:
                     request_settings[bounded_name] = min(
                         getattr(request, bounded_name),
                         request_settings[bounded_name],
                     )
-            return request.model_copy(
+            resolved_request = request.model_copy(
                 update={
                     "provider_id": profile.provider_id,
                     "model": profile.model,
@@ -287,6 +396,10 @@ class ProviderProfileService:
                     **request_settings,
                 }
             )
+            endpoint = self._endpoint_for(profile.provider_id, execution)
+            provider_id = profile.provider_id
+        self._verify_endpoint_identity(provider_id, endpoint, raw_settings)
+        return resolved_request
 
     def create_consent(
         self,
@@ -300,6 +413,7 @@ class ProviderProfileService:
         max_cost_usd: float | None = None,
         retain_payloads: bool = False,
     ) -> ConsentProfileModel:
+        """Persist an explicit provider consent grant after policy validation."""
         with self.database.session() as session:
             repository = ProviderRepository(session)
             profile = repository.get_profile(provider_profile)
@@ -324,6 +438,7 @@ class ProviderProfileService:
             return consent
 
     def consent_grant(self, name: str) -> ConsentGrant:
+        """Return the active consent grant for a provider profile."""
         with self.database.session() as session:
             consent = ProviderRepository(session).get_consent(name)
             if consent is None:
@@ -349,17 +464,20 @@ class ProviderProfileService:
             )
 
     def revoke_consent(self, name: str) -> None:
+        """Revoke an existing provider consent grant."""
         with self.database.session() as session:
             consent = ProviderRepository(session).get_consent(name)
             if consent is None:
                 raise AncestryError("CONSENT_NOT_FOUND", f"Consent profile not found: {name}")
-            consent.revoked_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            consent.revoked_at = dt.datetime.now(dt.UTC).isoformat()
             session.commit()
 
     def list_profiles(self) -> list[ProviderProfileModel]:
+        """Return provider profiles without exposing credential material."""
         with self.database.session() as session:
             return ProviderRepository(session).list_profiles()
 
     def list_consents(self) -> list[ConsentProfileModel]:
+        """Return the persisted provider consent grants."""
         with self.database.session() as session:
             return ProviderRepository(session).list_consents()

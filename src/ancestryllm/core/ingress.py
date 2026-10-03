@@ -9,15 +9,15 @@ import math
 import os
 import stat
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import asdict, dataclass, fields
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import ConfigurationError, FileIngressError
-from ancestryllm.core.publication import cleanup_open_path
+from ancestryllm.core.publication import cleanup_open_path, path_stat
 
 _ARCHIVE_SIGNATURES = (
     b"PK\x03\x04",  # ZIP
@@ -35,7 +35,7 @@ def _reject_json_constant(_constant: str) -> object:
     raise ValueError("non-finite JSON constant")
 
 
-class FileKind(str, Enum):
+class FileKind(StrEnum):
     """Supported public input classes."""
 
     CONFIG = "config"
@@ -210,6 +210,7 @@ class FileSnapshot:
 
     @classmethod
     def from_stat(cls, value: os.stat_result) -> FileSnapshot:
+        """Construct a stable file snapshot from operating-system metadata."""
         return cls(
             value.st_dev,
             value.st_ino,
@@ -234,6 +235,7 @@ class TextLine:
 
     text: str
     byte_count: int
+    encoding: str = "utf-8"
 
 
 class _BoundedRawReader(io.RawIOBase):
@@ -293,6 +295,7 @@ class FileIngressPolicy:
         self.limits = limits or FileIngressLimits()
 
     def limit(self, kind: FileKind) -> FileLimit:
+        """Return the byte limit for the requested ingress file category."""
         return {
             FileKind.CONFIG: self.limits.config,
             FileKind.GEDCOM: self.limits.gedcom,
@@ -388,7 +391,7 @@ class FileIngressPolicy:
         expected: FileSnapshot | None = None,
     ) -> tuple[int, FileSnapshot]:
         try:
-            preflight = self._validate_stat(os.lstat(path), kind)
+            preflight = self._validate_stat(path_stat(path), kind)
         except FileIngressError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:
@@ -474,7 +477,7 @@ class FileIngressPolicy:
 
         selected = self._selected_path(path, kind)
         try:
-            current = FileSnapshot.from_stat(os.lstat(selected))
+            current = FileSnapshot.from_stat(path_stat(selected))
         except (OSError, RuntimeError, ValueError) as exc:
             raise self._error(
                 "FILE_INPUT_CHANGED",
@@ -611,7 +614,7 @@ class FileIngressPolicy:
                                 limit_name="max_records",
                                 limit=maximum_records,
                             )
-                    yield TextLine(raw_line, line_bytes)
+                    yield TextLine(raw_line, line_bytes, byte_encoding)
                 current = FileSnapshot.from_stat(os.fstat(text.buffer.fileno()))
                 if current != opened:
                     raise self._error(
@@ -712,6 +715,19 @@ class FileIngressPolicy:
                 limit=limit.max_collection_items,
             )
 
+    def validate_collection_items(self, kind: FileKind, count: int) -> None:
+        """Reject a retained input-derived collection that exceeds its budget."""
+
+        maximum = self.limit(kind).max_collection_items
+        if maximum is not None and count > maximum:
+            raise self._error(
+                "FILE_COLLECTION_LIMIT_EXCEEDED",
+                f"The {kind.value} input exceeds the configured collection limit ({maximum}).",
+                kind,
+                limit_name="max_collection_items",
+                limit=maximum,
+            )
+
     def read_text(
         self,
         path: str | Path,
@@ -720,6 +736,7 @@ class FileIngressPolicy:
         allow_empty: bool = True,
         expected: FileSnapshot | None = None,
     ) -> str:
+        """Read bounded text through the repository file-ingress policy."""
         value = "".join(self.iter_text_lines(path, kind, expected=expected))
         if not allow_empty and not value:
             raise self._error(
@@ -924,7 +941,7 @@ class FileIngressPolicy:
                         limit=limit.max_nesting,
                     )
                 collection_items += len(item)
-                pending.extend((child, depth) for child in item.keys())
+                pending.extend((child, depth) for child in item)
                 pending.extend((child, depth) for child in item.values())
             elif isinstance(item, list):
                 depth = parent_depth + 1
@@ -1021,6 +1038,7 @@ class FileIngressPolicy:
         kind: FileKind,
         *,
         expected: FileFingerprint,
+        on_created: Callable[[Path, int], None] | None = None,
     ) -> None:
         """Copy only the verified source identity and reject mid-copy changes."""
 
@@ -1033,30 +1051,34 @@ class FileIngressPolicy:
         )
         digest = hashlib.sha256()
         try:
-            with os.fdopen(descriptor, "rb", closefd=True) as source:
-                with target.open("xb", buffering=0) as output:
-                    try:
-                        for chunk in self._bounded_chunks(source, kind):
-                            digest.update(chunk)
-                            remaining = memoryview(chunk)
-                            while remaining:
-                                written = output.write(remaining)
-                                if written is None or written <= 0:
-                                    raise OSError("The destination write made no progress.")
-                                remaining = remaining[written:]
-                        output.flush()
-                        os.fsync(output.fileno())
-                        current = FileSnapshot.from_stat(os.fstat(source.fileno()))
-                        if current != opened or digest.hexdigest() != expected.sha256:
-                            raise self._error(
-                                "FILE_INPUT_CHANGED",
-                                f"The {kind.value} input changed while it was being consumed.",
-                                kind,
-                            )
-                        self.assert_unchanged(selected, kind, opened)
-                    except BaseException:
-                        cleanup_open_path(target, output.fileno())
-                        raise
+            with (
+                os.fdopen(descriptor, "rb", closefd=True) as source,
+                target.open("xb", buffering=0) as output,
+            ):
+                try:
+                    if on_created is not None:
+                        on_created(target, output.fileno())
+                    for chunk in self._bounded_chunks(source, kind):
+                        digest.update(chunk)
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            written = output.write(remaining)
+                            if written is None or written <= 0:
+                                raise OSError("The destination write made no progress.")
+                            remaining = remaining[written:]
+                    output.flush()
+                    os.fsync(output.fileno())
+                    current = FileSnapshot.from_stat(os.fstat(source.fileno()))
+                    if current != opened or digest.hexdigest() != expected.sha256:
+                        raise self._error(
+                            "FILE_INPUT_CHANGED",
+                            f"The {kind.value} input changed while it was being consumed.",
+                            kind,
+                        )
+                    self.assert_unchanged(selected, kind, opened)
+                except BaseException:
+                    cleanup_open_path(target, output.fileno())
+                    raise
         except (FileExistsError, FileIngressError):
             raise
         except (OSError, RuntimeError, ValueError) as exc:

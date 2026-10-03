@@ -1,16 +1,81 @@
+"""Enforce canonical commands and fail-closed security contracts in CI workflows."""
+
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+CODEQL_PATH = ROOT / ".github/workflows/codeql.yml"
 RELEASE_READINESS_PATH = ROOT / ".github/workflows/release-readiness.yml"
+RELEASE_PATH = ROOT / ".github/workflows/release.yml"
+DESKTOP_SIDECAR_PATH = ROOT / ".github/workflows/desktop-sidecar.yml"
+RELEASE_PROJECT_PROOF_PATH = ROOT / ".github/workflows/release-project-gate-proof.yml"
 DEPENDENCY_REVIEW_PATH = ROOT / ".github/workflows/dependency-review.yml"
 PR_LABELER_PATH = ROOT / ".github/workflows/label.yml"
 PR_LABELER_CONFIG_PATH = ROOT / ".github/labeler.yml"
 WORKFLOWS_DIR = ROOT / ".github/workflows"
+
+GOVERNED_JOB_TIMEOUTS = {
+    ".github/workflows/ci.yml": {
+        "changes": 5,
+        "lockfile": 15,
+        "test": 20,
+        "mutation-recovery": 20,
+        "quality": 20,
+        "docs-screenshots": 40,
+        "security": 30,
+        "package": 20,
+        "install-smoke": 20,
+        "sdist-smoke": 20,
+        "container": 40,
+        "workflow-audit": 20,
+        "timeout-proof-exercise": 1,
+        "timeout-proof-evidence": 5,
+        "pr-gate": 5,
+    },
+    ".github/workflows/codeql.yml": {"analyze": 30},
+    ".github/workflows/dependency-review.yml": {"dependency-review": 15},
+    ".github/workflows/release-readiness.yml": {
+        "validate": 10,
+        "quality": 30,
+        "security": 30,
+        "codeql": 30,
+        "package": 20,
+        "install": 20,
+        "evidence": 10,
+    },
+    ".github/workflows/desktop-sidecar.yml": {
+        "changes": 5,
+        "desktop-security": 60,
+        "native-package": 45,
+        "desktop-gate": 10,
+    },
+    ".github/workflows/release-project-gate-proof.yml": {"validate": 15},
+    ".github/workflows/release.yml": {
+        "validate": 15,
+        "build": 30,
+        "desktop-installers": 90,
+        "desktop-installer-validation": 60,
+        "desktop-release-aggregate": 30,
+        "import-desktop-release-distributions": 30,
+        "assemble-release-distributions": 30,
+        "publish-build-provenance": 20,
+        "verify-build-provenance": 20,
+        "draft-github-release": 20,
+        "publish-testpypi": 20,
+        "verify-testpypi": 30,
+        "publish-pypi": 20,
+        "verify-pypi-hashes": 30,
+        "verify-pypi-install": 30,
+        "verify-docs-publication": 15,
+        "publish-github-release": 20,
+    },
+}
 
 
 def _job(workflow: str, job: str) -> str:
@@ -19,6 +84,11 @@ def _job(workflow: str, job: str) -> str:
     body = workflow.split(marker, maxsplit=1)[1]
     next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\n", body)
     return body[: next_job.start()] if next_job else body
+
+
+def _job_names(workflow: str) -> set[str]:
+    jobs = workflow.split("\njobs:\n", maxsplit=1)[1]
+    return set(re.findall(r"(?m)^  ([a-z][a-z0-9-]*):\n", jobs))
 
 
 def test_pull_request_labeler_has_the_config_file_it_loads() -> None:
@@ -59,8 +129,34 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
-    for command in ("ruff check src tests scripts", "mypy src/ancestryllm"):
-        assert quality_job.count(command) == 1
+    for command in (
+        "uv run --locked --group lint ruff check src tests scripts",
+        "uv run --locked --group typecheck mypy src/ancestryllm",
+    ):
+        command_line = re.compile(rf"(?m)^\s*{re.escape(command)}\s*$")
+        assert len(command_line.findall(quality_job)) == 1
+
+
+def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    quality_job = _job(workflow, "quality")
+    readiness = RELEASE_READINESS_PATH.read_text(encoding="utf-8")
+    evidence_builder = (ROOT / "scripts/create_release_evidence.py").read_text(encoding="utf-8")
+
+    blocking_step = "name: Lint, type check, and repository contracts"
+    advisory_step = """      - name: Advisory ty evaluation
+        continue-on-error: true
+        run: uv run --locked --group typecheck ty check src/ancestryllm
+"""
+
+    assert blocking_step in quality_job
+    assert advisory_step in quality_job
+    assert quality_job.index(blocking_step) < quality_job.index(advisory_step)
+    assert "ty check" not in readiness
+    assert '"mypy",' in readiness
+    assert '"mypy",' in evidence_builder
+    assert '"type-check",' not in readiness
+    assert '"type-check",' not in evidence_builder
 
 
 def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_workflow() -> None:
@@ -90,7 +186,16 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
 
     assert "name: lockfile consistency" in lockfile_job
     assert "uv lock --check" in lockfile_job
-    for job in ("test", "quality", "security", "package", "workflow-audit"):
+    for job in (
+        "test",
+        "mutation-recovery",
+        "quality",
+        "docs-screenshots",
+        "security",
+        "package",
+        "container",
+        "workflow-audit",
+    ):
         assert "lockfile" in _job(workflow, job).split("runs-on:", maxsplit=1)[0]
 
 
@@ -101,18 +206,72 @@ def test_ci_uses_one_stable_aggregate_pull_request_gate() -> None:
     assert "name: PR gate" in gate
     assert "if: ${{ always() && github.event_name == 'pull_request' }}" in gate
     for dependency in (
+        "changes",
         "lockfile",
         "test",
+        "mutation-recovery",
         "quality",
+        "docs-screenshots",
         "security",
         "package",
         "install-smoke",
         "sdist-smoke",
+        "container",
         "workflow-audit",
     ):
         assert f"      - {dependency}\n" in gate
+    assert "CHANGES_RESULT: ${{ needs.changes.result }}" in gate
+    assert "DOCS_SCREENSHOTS_RESULT: ${{ needs.docs-screenshots.result }}" in gate
+    assert "MUTATION_RECOVERY_RESULT: ${{ needs.mutation-recovery.result }}" in gate
+    assert 'require_success mutation-recovery "$MUTATION_RECOVERY_RESULT"' in gate
+    assert 'require_success changes "$CHANGES_RESULT"' in gate
+    assert 'require_success docs-screenshots "$DOCS_SCREENSHOTS_RESULT"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "success"' in gate
     assert 'WORKFLOW_AUDIT_RESULT" != "skipped"' in gate
+
+
+def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    job = _job(workflow, "docs-screenshots")
+    desktop_package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+
+    assert "runs-on: ubuntu-24.04" in job
+    assert "timeout-minutes: 40" in job
+    assert "LANG: en_US.UTF-8" in job
+    assert "LC_ALL: en_US.UTF-8" in job
+    assert "TZ: UTC" in job
+    assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
+    assert 'node-version: "26.5.0"' in job
+    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
+    assert 'version: "11.9.0"' in job
+    for package in (
+        "locales=2.39-0ubuntu8.9",
+        "xauth=1:1.1.2-1build1",
+        "xvfb=2:21.1.12-1ubuntu1.6",
+    ):
+        assert package in job
+    assert (
+        'ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" '
+        in job
+    )
+    assert "xvfb-run --auto-servernum uv run --locked --group lint python" in job
+    assert "scripts/docs_screenshots.py check --manifest" in job
+
+    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
+    assert desktop_package["packageManager"] == "pnpm@11.9.0"
+    assert desktop_package["devDependencies"]["electron"] == "39.8.10"
+    assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
+    assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
+    assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
+
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1" in job
+    assert "if: failure()" in job
+    assert "path: ${{ runner.temp }}/docs-screenshot-drift-v1.json" in job
+    assert "if-no-files-found: error" in job
+    assert "retention-days: 7" in job
+    assert "docs/assets" not in job
+    assert ".png" not in job
 
 
 def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
@@ -152,9 +311,52 @@ def test_dependency_review_runs_on_hosted_ubuntu_with_bounded_duration() -> None
     assert "self-hosted" not in workflow
 
 
+def test_governed_ci_security_and_release_jobs_have_reviewed_timeouts() -> None:
+    for relative_path, expected_timeouts in GOVERNED_JOB_TIMEOUTS.items():
+        workflow = (ROOT / relative_path).read_text(encoding="utf-8")
+
+        assert _job_names(workflow) == set(expected_timeouts), relative_path
+        for job_name, expected_minutes in expected_timeouts.items():
+            job = _job(workflow, job_name)
+            timeout_values = re.findall(r"(?m)^    timeout-minutes: ([^\n]+)$", job)
+            assert timeout_values == [str(expected_minutes)], f"{relative_path}:{job_name}"
+            assert "${{" not in timeout_values[0], f"{relative_path}:{job_name}"
+
+            steps_offset = job.find("\n    steps:\n")
+            if steps_offset >= 0:
+                timeout_offset = job.index(f"\n    timeout-minutes: {expected_minutes}\n")
+                assert timeout_offset < steps_offset, f"{relative_path}:{job_name}"
+
+
+def test_ci_timeout_proof_is_manual_deterministic_and_fail_closed() -> None:
+    workflow = CI_PATH.read_text(encoding="utf-8")
+    exercise = _job(workflow, "timeout-proof-exercise")
+    evidence = _job(workflow, "timeout-proof-evidence")
+
+    assert "timeout_proof:" in workflow
+    assert "type: boolean" in workflow
+    assert "default: false" in workflow
+    proof_condition = "if: ${{ github.event_name == 'workflow_dispatch' && inputs.timeout_proof }}"
+    assert proof_condition in exercise
+    assert "timeout-minutes: 1" in exercise
+    assert "python scripts/ci_timeout_proof.py arm" in exercise
+    assert "time.sleep(300)" in exercise
+    assert exercise.index("actions/upload-artifact@") < exercise.index("time.sleep(300)")
+
+    assert "needs: timeout-proof-exercise" in evidence
+    assert "if: ${{ always() && inputs.timeout_proof }}" in evidence
+    assert "PROOF_RESULT: ${{ needs.timeout-proof-exercise.result }}" in evidence
+    assert "python scripts/ci_timeout_proof.py confirm" in evidence
+    assert "actions/download-artifact@" in evidence
+    assert "actions/upload-artifact@" in evidence
+    assert "CI_TIMEOUT_PROOF_EXPECTED_FAILURE" in evidence
+    assert re.search(r"(?m)^\s+exit 1$", evidence)
+    assert "secrets." not in exercise + evidence
+
+
 def test_all_applicable_workflow_jobs_use_the_local_verified_uv_action() -> None:
     expected_counts = {
-        ".github/workflows/ci.yml": 6,
+        ".github/workflows/ci.yml": 8,
         ".github/workflows/release-readiness.yml": 3,
         ".github/workflows/release.yml": 3,
         ".github/workflows/desktop-sidecar.yml": 2,
@@ -173,7 +375,9 @@ def test_verified_uv_calling_jobs_grant_attestation_read_permission() -> None:
         ".github/workflows/ci.yml": (
             "lockfile",
             "test",
+            "mutation-recovery",
             "quality",
+            "docs-screenshots",
             "security",
             "package",
             "workflow-audit",
@@ -241,17 +445,52 @@ def test_stock_pip_consumer_smoke_jobs_remain_explicit_exceptions() -> None:
 def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> None:
     hooks = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    bootstrap_policy = json.loads(
+        (ROOT / "config/uv-bootstrap-policy.json").read_text(encoding="utf-8")
+    )
 
     assert "default_stages: [pre-commit]" in hooks
     assert "entry: make pre-push" in hooks
     assert "entry: make workflow-audit" in hooks
-    assert "entry: make lock-check" in hooks
-    assert "files: ^(pyproject\\.toml|uv\\.lock)$" in hooks
+    assert "id: gitleaks" in hooks
+    assert "repo: https://github.com/pre-commit/pre-commit-hooks" in hooks
+
+    ruff_hook = """  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 39d9ac5938dadb73df0564a45f163e25ff9fa6e2
+    hooks:
+      - id: ruff-check
+        args: ["--no-fix"]
+        files: ^(src|tests|scripts)/
+      - id: ruff-format
+        args: ["--check"]
+        files: ^(src|tests|scripts)/
+"""
+    uv_hook = """  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 8ff2449591c8de025b17661ba76d60237a1ae62b
+    hooks:
+      - id: uv-lock
+        args: ["--check"]
+"""
+    assert ruff_hook in hooks
+    assert uv_hook in hooks
+    assert "ancestryllm-lockfile-consistency" not in hooks
+    assert "entry: make lock-check" not in hooks
+    assert "--fix" not in ruff_hook
+    assert "--unsafe-fixes" not in hooks
+
+    lock_versions = {
+        package["name"]: package["version"] for package in lock["package"] if "version" in package
+    }
+    assert lock_versions["ruff"] == "0.16.3"
+    assert bootstrap_policy["uv"]["version"] == "0.12.1"
+    assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
+
     workflow_filter = r"^\.github/(actions|workflows)/"
     assert f"files: {workflow_filter}" in hooks
     assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
     assert re.match(workflow_filter, ".github/workflows/ci.yml")
-    assert not re.match(workflow_filter, "docs/CI.md")
+    assert not re.match(workflow_filter, "docs/reference/CI.md")
     assert hooks.count("stages: [pre-push]") == 2
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
@@ -262,7 +501,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
 
 
 def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
-    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/reference/CI.md").read_text(encoding="utf-8")
 
     assert "### Phase A: establish the aggregate gate" in guide
     assert "### Phase B: reduce the pull-request matrix" in guide
@@ -277,10 +516,30 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
 
     assert _job(ci, "quality").count("scripts/check_code_documentation.py") == 1
     assert _job(readiness, "quality").count("scripts/check_code_documentation.py") == 1
+    ci_quality = _job(ci, "quality")
+    readiness_quality = _job(readiness, "quality")
+    setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
+
+    for quality_job in (ci_quality, readiness_quality):
+        assert quality_job.count("python scripts/check_gfm_markdown.py") == 1
+        assert (
+            quality_job.count(
+                "ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419"
+            )
+            == 1
+        )
+        assert quality_job.count("pnpm --dir desktop docs:check") == 1
+        assert quality_job.count("node desktop/scripts/install-locked.mjs") == 1
+        assert setup_node in quality_job
+        assert 'node-version: "26.5.0"' in quality_job
+        assert setup_pnpm in quality_job
+        assert 'version: "11.9.0"' in quality_job
     assert "code-docs-check:" in makefile, "Makefile must define code-docs-check target"
     assert makefile.count("check_code_documentation.py") == 2, (
         "Makefile code-docs-check target must invoke check_code_documentation.py"
     )
+    assert "pnpm --dir desktop docs:check" in makefile
 
 
 def test_secret_scans_use_commit_ranges_or_exact_candidate_trees() -> None:
@@ -306,7 +565,7 @@ def test_secret_scans_use_commit_ranges_or_exact_candidate_trees() -> None:
 
 
 def test_secret_scan_contract_is_documented_with_native_repository_controls() -> None:
-    guide = (ROOT / "docs/CI.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/reference/CI.md").read_text(encoding="utf-8")
     normalized_guide = " ".join(guide.split())
 
     assert "current `main` candidate tree" in normalized_guide
@@ -329,8 +588,11 @@ def test_tracked_text_avoids_provider_key_shaped_identifiers() -> None:
         if not relative_bytes:
             continue
         relative = relative_bytes.decode("utf-8")
+        tracked_path = ROOT / relative
+        if not tracked_path.is_file():
+            continue
         try:
-            lines = (ROOT / relative).read_text(encoding="utf-8").splitlines()
+            lines = tracked_path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             continue
         matches.extend(

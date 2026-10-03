@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import importlib
 import io
@@ -11,17 +10,20 @@ import shlex
 import socket
 import sys
 import threading
-from collections.abc import Iterator
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from prompt_toolkit.completion import DummyCompleter
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from ancestryllm.core.context import AppContext
+if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Iterator
+
+    from ancestryllm.core.context import AppContext
 
 
 @dataclass(frozen=True)

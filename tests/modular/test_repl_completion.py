@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import socket
+from contextlib import suppress
 from dataclasses import FrozenInstanceError
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from prompt_toolkit.completion import CompleteEvent, Completer, ThreadedCompleter
@@ -12,8 +13,12 @@ from prompt_toolkit.document import Document
 
 from ancestryllm.console.completion import CompletionSnapshot, create_completer
 from ancestryllm.console.router import SessionRouter
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.secrets import ENVIRONMENT_NAMES
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.context import AppContext
 
 
 def _values(completer: Completer, text: str) -> list[str]:
@@ -190,10 +195,8 @@ def test_file_completion_is_confined_private_and_bounded(
     app_context.config.family_tree_dirs = [tree_dir]
 
     symlink = tmp_path / "linked.ged"
-    try:
+    with suppress(OSError):
         symlink.symlink_to(outside)
-    except OSError:
-        pass
 
     for index in range(100):
         (tmp_path / f"fixture-{index:03d}.ged").write_text("0 TRLR\n", encoding="utf-8")

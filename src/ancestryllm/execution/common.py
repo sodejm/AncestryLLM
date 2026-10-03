@@ -8,27 +8,28 @@ from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
-from ancestryllm.application.dto import JSONValue
-from ancestryllm.application.executor import CommandInvocation
 from ancestryllm.application.results import StructuredResult, TableResult
-from ancestryllm.core.commands import ModuleDescriptor
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
-from ancestryllm.llm.policy import ConsentGrant
+
+if TYPE_CHECKING:
+    from ancestryllm.application.dto import JSONValue
+    from ancestryllm.application.executor import CommandInvocation
+    from ancestryllm.core.commands import ModuleDescriptor
+    from ancestryllm.core.context import AppContext
+    from ancestryllm.llm.policy import ConsentGrant
 
 _MISSING: Final = object()
-_T = TypeVar("_T", str, int, bool)
 
 
-def _typed(
+def _typed[T: (str, int, bool)](
     invocation: CommandInvocation,
     name: str,
-    expected: type[_T],
-    default: _T | object = _MISSING,
-) -> _T:
+    expected: type[T],
+    default: T | object = _MISSING,
+) -> T:
     value = invocation.argument(name, default)
     if expected is int:
         valid = isinstance(value, int) and not isinstance(value, bool)
@@ -40,7 +41,7 @@ def _typed(
             f"Command argument {name!r} must be {expected.__name__}.",
             exit_code=2,
         )
-    return cast(_T, value)
+    return cast("T", value)
 
 
 def text(
@@ -48,10 +49,12 @@ def text(
     name: str,
     default: str | object = _MISSING,
 ) -> str:
+    """Require and return a string argument from a command invocation."""
     return _typed(invocation, name, str, default)
 
 
 def optional_text(invocation: CommandInvocation, name: str) -> str | None:
+    """Return an optional string argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -69,10 +72,12 @@ def integer(
     name: str,
     default: int | object = _MISSING,
 ) -> int:
+    """Require and return an integer argument from a command invocation."""
     return _typed(invocation, name, int, default)
 
 
 def optional_integer(invocation: CommandInvocation, name: str) -> int | None:
+    """Return an optional integer argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -86,6 +91,7 @@ def optional_integer(invocation: CommandInvocation, name: str) -> int | None:
 
 
 def number(invocation: CommandInvocation, name: str) -> float | None:
+    """Require and return a numeric argument from a command invocation."""
     value = invocation.argument(name, None)
     if value is None:
         return None
@@ -103,6 +109,7 @@ def boolean(
     name: str,
     default: bool | object = _MISSING,
 ) -> bool:
+    """Require and return a boolean argument from a command invocation."""
     return _typed(invocation, name, bool, default)
 
 
@@ -111,6 +118,7 @@ def text_values(
     name: str,
     default: tuple[str, ...] | object = _MISSING,
 ) -> tuple[str, ...]:
+    """Return a validated tuple of string arguments from a command invocation."""
     value = invocation.argument(name, default)
     if not isinstance(value, tuple) or not all(isinstance(item, str) for item in value):
         raise AncestryError(
@@ -122,15 +130,18 @@ def text_values(
 
 
 def path(invocation: CommandInvocation, name: str) -> Path:
+    """Require and return a filesystem path from a command invocation."""
     return Path(text(invocation, name))
 
 
 def optional_path(invocation: CommandInvocation, name: str) -> Path | None:
+    """Return an optional filesystem path from a command invocation."""
     value = optional_text(invocation, name)
     return Path(value) if value is not None else None
 
 
 def key_values(values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeated key-value arguments from a command invocation."""
     result: dict[str, str] = {}
     for raw in values:
         if "=" not in raw:
@@ -141,6 +152,7 @@ def key_values(values: tuple[str, ...]) -> dict[str, str]:
 
 
 def consent(context: AppContext, name: str | None) -> ConsentGrant | None:
+    """Require and return the explicit cloud-consent decision for an invocation."""
     return context.provider_profiles.consent_grant(name) if name else None
 
 
@@ -163,7 +175,7 @@ def _serializable_value(value: object) -> object:
 
     if is_dataclass(value):
         return {
-            str(key): _serializable_value(item) for key, item in asdict(cast(Any, value)).items()
+            str(key): _serializable_value(item) for key, item in asdict(cast("Any", value)).items()
         }
     if isinstance(value, Path):
         raise TypeError("Command results must not contain Path host objects.")
@@ -191,7 +203,7 @@ def _serializable_value(value: object) -> object:
 def structured_result(value: object) -> StructuredResult:
     """Declare a strict structured result for a legacy service return value."""
 
-    return StructuredResult(cast(JSONValue, _serializable_value(value)))
+    return StructuredResult(cast("JSONValue", _serializable_value(value)))
 
 
 def table_result(
@@ -201,7 +213,7 @@ def table_result(
     """Declare tabular records while preserving their established JSON shape."""
 
     rows = tuple(
-        tuple(cast(JSONValue, _serializable_value(record.get(column))) for column in columns)
+        tuple(cast("JSONValue", _serializable_value(record.get(column))) for column in columns)
         for record in records
     )
     return TableResult(columns=columns, rows=rows)

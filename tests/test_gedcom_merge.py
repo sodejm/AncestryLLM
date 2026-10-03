@@ -106,15 +106,15 @@ class TestNormaliseGedcomDate:
 
 def _make_record(**kwargs) -> gm.IndividualRecord:
     """Construct an IndividualRecord with sensible defaults for tests."""
-    defaults = dict(
-        pointer="@I1@",
-        given_name="John",
-        surname="Smith",
-        birth_date="15 JUL 1850",
-        death_date="01 JAN 1920",
-        gender="M",
-        source_file="/fake/file_a.ged",
-    )
+    defaults = {
+        "pointer": "@I1@",
+        "given_name": "John",
+        "surname": "Smith",
+        "birth_date": "15 JUL 1850",
+        "death_date": "01 JAN 1920",
+        "gender": "M",
+        "source_file": "/fake/file_a.ged",
+    }
     defaults.update(kwargs)
     return gm.IndividualRecord(**defaults)
 

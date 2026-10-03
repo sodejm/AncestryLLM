@@ -1,14 +1,117 @@
+/** Verifies OpenAPI operations remain aligned with the desktop runtime bridge contract. */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 
 const openApiUrl = new URL('../../docs/api/openapi-v1.json', import.meta.url)
 
-test('OpenAPI capabilities stay aligned with the TypeScript bridge runtime contract', async () => {
+test('OpenAPI bridge surfaces stay aligned with the TypeScript runtime contract', async () => {
   const document = JSON.parse(await readFile(openApiUrl, 'utf8'))
   const schemas = document.components.schemas
-  assert.deepEqual(Object.keys(document.paths).sort(), ['/api/v1/capabilities', '/api/v1/health'])
+  assert.deepEqual(Object.keys(document.paths).sort(), [
+    '/api/v1/capabilities',
+    '/api/v1/chat/capability',
+    '/api/v1/chat/sessions',
+    '/api/v1/chat/sessions/{session_id}',
+    '/api/v1/chat/sessions/{session_id}/runs',
+    '/api/v1/chat/sessions/{session_id}/streams',
+    '/api/v1/chat/sessions/{session_id}/streams/{run_id}/cancel',
+    '/api/v1/chat/sessions/{session_id}/streams/{run_id}/events',
+    '/api/v1/consents',
+    '/api/v1/consents/preview',
+    '/api/v1/consents/{name}/revoke',
+    '/api/v1/gedcom/inspect',
+    '/api/v1/gedcom/intake',
+    '/api/v1/gedcom/intake/{job_id}',
+    '/api/v1/gedcom/intake/{job_id}/discard',
+    '/api/v1/gedcom/intake/{job_id}/roots',
+    '/api/v1/gedcom/jobs/{job_id}/result',
+    '/api/v1/gedcom/jobs/{job_id}/root-candidates',
+    '/api/v1/gedcom/merge',
+    '/api/v1/gedcom/quality',
+    '/api/v1/gedcom/subtree',
+    '/api/v1/gedcom/sync',
+    '/api/v1/health',
+    '/api/v1/jobs',
+    '/api/v1/jobs/shutdown',
+    '/api/v1/jobs/{job_id}',
+    '/api/v1/jobs/{job_id}/cancel',
+    '/api/v1/jobs/{job_id}/events',
+    '/api/v1/provider-configuration',
+    '/api/v1/provider-endpoints/validate',
+    '/api/v1/provider-profiles',
+    '/api/v1/secrets/{reference}/delete',
+    '/api/v1/secrets/{reference}/set',
+    '/api/v1/secrets/{reference}/status',
+    '/api/v1/settings',
+    '/api/v1/startup-diagnostics',
+  ])
   assert.equal(document.paths['/api/v1/capabilities'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/CapabilityManifest')
+  assert.equal(document.paths['/api/v1/startup-diagnostics'].get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/StartupDiagnosticReportResponse')
+
+  const providerConfigurationRef = '#/components/schemas/ProviderConfigurationResponse'
+  assert.equal(document.paths['/api/v1/provider-configuration'].get.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/provider-endpoints/validate'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/EndpointValidationRequest')
+  assert.equal(document.paths['/api/v1/provider-endpoints/validate'].post.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/EndpointValidationResponse')
+  assert.equal(document.paths['/api/v1/provider-profiles'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ProviderProfileCreateRequest')
+  assert.equal(document.paths['/api/v1/provider-profiles'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/consents/preview'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ConsentPreviewRequest')
+  assert.equal(document.paths['/api/v1/consents/preview'].post.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/ConsentPreviewResponse')
+  assert.equal(document.paths['/api/v1/consents'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ConsentCreateRequest')
+  assert.equal(document.paths['/api/v1/consents'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+  assert.equal(document.paths['/api/v1/consents/{name}/revoke'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ProviderConfigurationMutationRequest')
+  assert.equal(document.paths['/api/v1/consents/{name}/revoke'].post.responses['200'].content['application/json'].schema.$ref, providerConfigurationRef)
+
+  const settingsPath = document.paths['/api/v1/settings']
+  assert.equal(settingsPath.get.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/SettingsResponse')
+  assert.equal(settingsPath.patch.requestBody.content['application/json'].schema.$ref, '#/components/schemas/SettingsPatchRequest')
+  assert.equal(settingsPath.patch.responses['200'].content['application/json'].schema.$ref, '#/components/schemas/SettingsResponse')
+
+  const secretStatusRef = '#/components/schemas/SecretStatusResponse'
+  assert.equal(document.paths['/api/v1/secrets/{reference}/status'].get.responses['200'].content['application/json'].schema.$ref, secretStatusRef)
+  assert.equal(document.paths['/api/v1/secrets/{reference}/set'].post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/SecretSetRequest')
+  assert.equal(document.paths['/api/v1/secrets/{reference}/set'].post.responses['200'].content['application/json'].schema.$ref, secretStatusRef)
+  assert.equal(document.paths['/api/v1/secrets/{reference}/delete'].post.responses['200'].content['application/json'].schema.$ref, secretStatusRef)
+
+  assert.deepEqual({
+    additionalProperties: schemas.SecretSetRequest.additionalProperties,
+    required: schemas.SecretSetRequest.required,
+    properties: schemas.SecretSetRequest.properties,
+  }, {
+    additionalProperties: false,
+    required: ['value'],
+    properties: {
+      value: { maxLength: 65_536, minLength: 1, title: 'Value', type: 'string', writeOnly: true },
+    },
+  })
+  assert.deepEqual({
+    additionalProperties: schemas.SecretStatusResponse.additionalProperties,
+    required: schemas.SecretStatusResponse.required,
+    properties: schemas.SecretStatusResponse.properties,
+  }, {
+    additionalProperties: false,
+    required: ['reference', 'status'],
+    properties: {
+      reference: { maxLength: 96, minLength: 1, pattern: '^[a-z0-9_.-]+$', title: 'Reference', type: 'string' },
+      status: { enum: ['present', 'missing', 'unavailable'], title: 'Status', type: 'string' },
+    },
+  })
+  assert.equal(Object.hasOwn(schemas.SecretStatusResponse.properties, 'value'), false)
+
+  assert.deepEqual({
+    additionalProperties: schemas.SettingsResponse.additionalProperties,
+    required: schemas.SettingsResponse.required,
+    properties: Object.keys(schemas.SettingsResponse.properties).sort(),
+  }, {
+    additionalProperties: false,
+    required: ['schema_version', 'revision', 'fields'],
+    properties: ['fields', 'revision', 'schema_version'],
+  })
+  assert.equal(schemas.SettingsResponse.properties.schema_version.const, 1)
+  assert.equal(schemas.SettingsPatchRequest.properties.schema_version.const, 1)
+  assert.equal(schemas.SettingFieldResponse.properties.sensitive.const, false)
+  assert.equal(schemas.SettingFieldResponse.additionalProperties, false)
+  assert.equal(schemas.SettingsPatchRequest.additionalProperties, false)
 
   assert.deepEqual({
     additionalProperties: schemas.CapabilityManifest.additionalProperties,

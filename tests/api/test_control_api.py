@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-
-from fastapi.testclient import TestClient
+from typing import TYPE_CHECKING
 
 from ancestryllm.api import API_CONTRACT, API_NAMESPACE, ApiSettings
 from ancestryllm.application.dto import CONTRACT_VERSION
 from ancestryllm.core.commands import BUILTIN_MODULES
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 def test_health_requires_handshake_and_returns_token_derived_readiness(

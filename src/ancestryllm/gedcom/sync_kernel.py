@@ -128,7 +128,7 @@ def _validate_rfc3339(label: str, value: str) -> None:
         if offset_hour > 23 or offset_minute > 59:
             raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError(f"{label} must be a bounded RFC 3339 timestamp.") from exc
 
@@ -792,12 +792,16 @@ class SyncKernelResult(SyncValue):
             or self.failed_stage is not None
         ):
             raise ValueError("Successful non-publication results cannot contain failure metadata.")
-        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE}:
-            if self.plan is None or self.decisions:
-                raise ValueError("Non-publication success requires an undecided plan.")
-        if self.outcome is SyncOutcome.NO_CHANGE and self.plan is not None:
-            if self.plan.entries or self.plan.decisions:
-                raise ValueError("No-change results require an empty plan.")
+        if self.outcome in {SyncOutcome.DRY_RUN, SyncOutcome.NO_CHANGE} and (
+            self.plan is None or self.decisions
+        ):
+            raise ValueError("Non-publication success requires an undecided plan.")
+        if (
+            self.outcome is SyncOutcome.NO_CHANGE
+            and self.plan is not None
+            and (self.plan.entries or self.plan.decisions)
+        ):
+            raise ValueError("No-change results require an empty plan.")
 
     @property
     def committed(self) -> bool:
@@ -826,7 +830,9 @@ class SyncCancelled(SyncStageError):
 class SnapshotStage(Protocol):
     """Capture and verify immutable inputs."""
 
-    def capture(self, request: SyncRequest) -> SyncSnapshotState: ...
+    def capture(self, request: SyncRequest) -> SyncSnapshotState:
+        """Capture the input state required by the snapshot stage."""
+        ...
 
 
 @runtime_checkable
@@ -837,7 +843,9 @@ class ComparisonStage(Protocol):
         self,
         snapshot: SyncSnapshotState,
         options: SyncOptions,
-    ) -> tuple[SyncDelta, ...]: ...
+    ) -> tuple[SyncDelta, ...]:
+        """Compare captured GEDCOM states without mutating either source."""
+        ...
 
 
 @runtime_checkable
@@ -849,14 +857,18 @@ class PlanningStage(Protocol):
         snapshot: SyncSnapshotState,
         deltas: tuple[SyncDelta, ...],
         options: SyncOptions,
-    ) -> SyncPlanningOutput: ...
+    ) -> SyncPlanningOutput:
+        """Build the deterministic loss-minimal GEDCOM synchronization plan."""
+        ...
 
 
 @runtime_checkable
 class DecisionStage(Protocol):
     """Resolve a declared decision through an outer application port."""
 
-    def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection: ...
+    def decide(self, request: SyncDecisionRequest) -> SyncDecisionSelection:
+        """Select the next deterministic action for the decision stage."""
+        ...
 
 
 @runtime_checkable
@@ -868,7 +880,9 @@ class ApplicationStage(Protocol):
         snapshot: SyncSnapshotState,
         plan: SyncPlan,
         decisions: tuple[SyncDecisionSelection, ...],
-    ) -> SyncStagedApplication: ...
+    ) -> SyncStagedApplication:
+        """Stage the planned GEDCOM changes without committing them."""
+        ...
 
 
 @runtime_checkable
@@ -879,34 +893,44 @@ class CommitStage(Protocol):
     and must not raise after the publication boundary has been crossed.
     """
 
-    def prepare(self, staged: SyncStagedApplication) -> SyncPublication: ...
+    def prepare(self, staged: SyncStagedApplication) -> SyncPublication:
+        """Prepare the state required by the commit stage."""
+        ...
 
     def commit(
         self,
         staged: SyncStagedApplication,
         publication: SyncPublication,
-    ) -> None: ...
+    ) -> None:
+        """Commit the prepared GEDCOM changes after all safety checks pass."""
+        ...
 
 
 @runtime_checkable
 class RecoveryStage(Protocol):
     """Recover unpublished state while preserving the prior revision."""
 
-    def recover(self, context: SyncRecoveryContext) -> SyncRecoveryMetadata: ...
+    def recover(self, context: SyncRecoveryContext) -> SyncRecoveryMetadata:
+        """Recover the recovery stage after an interrupted operation."""
+        ...
 
 
 @runtime_checkable
 class CancellationStage(Protocol):
     """Check cooperative cancellation at interruptible boundaries."""
 
-    def check_cancelled(self) -> None: ...
+    def check_cancelled(self) -> None:
+        """Raise when cooperative cancellation has been requested."""
+        ...
 
 
 @runtime_checkable
 class EventStage(Protocol):
     """Receive one bounded structural event."""
 
-    def emit(self, event: SyncEvent) -> None: ...
+    def emit(self, event: SyncEvent) -> None:
+        """Publish one bounded synchronization event to the configured observer."""
+        ...
 
 
 class NeverCancelled:
@@ -915,6 +939,7 @@ class NeverCancelled:
     __slots__ = ()
 
     def check_cancelled(self) -> None:
+        """Raise when cooperative cancellation has been requested."""
         return
 
 
@@ -924,6 +949,7 @@ class DiscardEvents:
     __slots__ = ()
 
     def emit(self, event: SyncEvent) -> None:
+        """Discard a synchronization event without side effects."""
         del event
 
 

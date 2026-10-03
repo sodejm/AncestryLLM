@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -11,8 +10,13 @@ from ancestryllm.core.errors import ProviderError, normalize_provider_error
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult, ProviderCapabilities
 from ancestryllm.llm.validation import validate_structured_output
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 class AnthropicProvider:
+    """Adapt Anthropic generation and streaming behind the provider contract."""
+
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ProviderError("PROVIDER_KEY_MISSING", "No Anthropic key is configured.")
@@ -20,6 +24,7 @@ class AnthropicProvider:
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the anthropic provider."""
         return ProviderCapabilities(
             provider_id="anthropic", remote=True, structured_output=False, streaming=True
         )
@@ -53,6 +58,7 @@ class AnthropicProvider:
         return "\n".join(systems), messages
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the anthropic provider."""
         system, messages = self._messages(request)
         try:
             with self._client(request.timeout_seconds) as client:
@@ -82,22 +88,25 @@ class AnthropicProvider:
         )
 
     def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the anthropic provider."""
         system, messages = self._messages(request)
         stream_started = False
         try:
-            with self._client(request.timeout_seconds) as client:
-                with client.messages.stream(
+            with (
+                self._client(request.timeout_seconds) as client,
+                client.messages.stream(
                     model=request.model,
                     system=system,
                     messages=messages,
                     max_tokens=request.max_output_tokens,
                     temperature=request.temperature,
                     timeout=httpx.Timeout(request.timeout_seconds),
-                ) as stream:
-                    for text in stream.text_stream:
-                        if text:
-                            stream_started = True
-                            yield text
+                ) as stream,
+            ):
+                for text in stream.text_stream:
+                    if text:
+                        stream_started = True
+                        yield text
         except ProviderError:
             raise
         except Exception as exc:

@@ -1,0 +1,6 @@
+/** Defines a fixture with placeholder declaration documentation. */
+
+/** TODO */
+export function placeholderDocumentation(): string {
+  return 'placeholder'
+}

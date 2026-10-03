@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,10 +19,12 @@ from ancestryllm.application.executor import (
     CommandOutcome,
 )
 from ancestryllm.core.commands import COMMAND_SPECIFICATIONS, DispatchKey
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.runtime import create_command_executor
 from ancestryllm.terminal.parser import build_parser, invocation_from_namespace
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "ancestryllm"
 FORBIDDEN_EXECUTOR_IMPORTS = (
@@ -181,9 +184,11 @@ def test_focused_executors_have_no_transport_frameworks_or_print_calls() -> None
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.startswith(FORBIDDEN_EXECUTOR_IMPORTS):
-                        violations.append(f"{path.name}: import {alias.name}")
+                violations.extend(
+                    f"{path.name}: import {alias.name}"
+                    for alias in node.names
+                    if alias.name.startswith(FORBIDDEN_EXECUTOR_IMPORTS)
+                )
             elif isinstance(node, ast.ImportFrom) and node.module is not None:
                 if node.module.startswith(FORBIDDEN_EXECUTOR_IMPORTS):
                     violations.append(f"{path.name}: from {node.module}")

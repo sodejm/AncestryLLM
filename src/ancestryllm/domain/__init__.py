@@ -18,8 +18,10 @@ from ancestryllm.domain.models import (
     Relationship,
     SourceIdentifier,
 )
+from ancestryllm.domain.secrets import SUPPORTED_SECRET_REFERENCES
 
 __all__ = [
+    "SUPPORTED_SECRET_REFERENCES",
     "ChangeKind",
     "Citation",
     "Fact",

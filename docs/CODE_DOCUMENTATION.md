@@ -1,9 +1,11 @@
 # In-Code Documentation Policy
 
 This document defines the repository-wide standard for in-code documentation across all
-first-party source files. Its file-level baseline is machine-checkable via
-`make code-docs-check`; declaration-level expectations are reviewed manually against the
-implementation, call sites, and `ARCHITECTURE.md`.
+first-party source files. The tracked-file inventory and file/module purpose requirements
+are machine-checkable via `make code-docs-check`. Python, TypeScript, JavaScript, and Swift
+declaration requirements are enforced by the same target through language-aware semantic
+checks, an explicit scoped Ruff rule set, and exact-pinned JSDoc validation. Human review
+remains necessary for accuracy, but it is not the enforcement mechanism.
 
 ## Purpose
 
@@ -27,19 +29,27 @@ script enforces this at every CI run.
 | `first-party-code` | Production source maintained as code | `src/**/*.py`, `desktop/src/**/*.ts` |
 | `first-party-test` | Test source maintained as code | `tests/**/*.py`, `desktop/src/**/*.test.ts` |
 | `first-party-script` | Build/release/tooling scripts | `scripts/*.py`, `scripts/*.sh` |
-| `first-party-config-exec` | Executable/behaviour-defining config | `*.yml`, `*.yaml`, `Makefile`, `pyproject.toml` |
-| `generated-vendor` | Generated or vendored output | `uv.lock`, `pnpm-lock.yaml`, `*.d.ts` stubs |
+| `first-party-config-exec` | Executable/behaviour-defining config | `*.yml`, `*.Dockerfile`, `Makefile`, `pyproject.toml` |
+| `generated-vendor` | Generated or vendored output and exact reviewed vendor patch inputs | `uv.lock`, `pnpm-lock.yaml`, the allowlisted Electron patch |
 | `test-data-fixture` | Fictional test data | `tests/fixtures/**/*.ged` |
-| `non-code-doc` | Human-readable documentation/content | `docs/**/*.md`, `README.md`, `LICENSE` |
-| `non-comment-format` | Formats that do not safely permit comments | `*.json`, `*.plist` |
+| `non-code-doc` | Human-readable documentation/content and reviewed documentation images | `docs/**/*.md`, `docs/**/*.png`, `README.md`, `LICENSE` |
+| `non-comment-format` | Formats or strict parser contracts that do not safely permit comments | `*.json`, `*.plist`, strict-JSON Compose manifests |
 | `ide-config` | Editor/IDE configuration | `.vscode/**` |
 
 ### Non-comment formats
 
 Files whose formats do not safely permit comments (JSON, plist/XML property lists) are
 classified as `non-comment-format` and excluded from file-level documentation requirements.
-Their semantics must be explained in an adjacent authoritative document mapped in
-`NON_COMMENT_FORMAT_MAP` inside `scripts/check_code_documentation.py`.
+This also applies to the three `containers/compose*.yaml` manifests: despite their suffix,
+they intentionally remain strict JSON-compatible YAML so duplicate keys and non-JSON YAML
+constructs fail closed. Their semantics must be explained in an adjacent authoritative
+document mapped in `NON_COMMENT_FORMAT_MAP` inside `scripts/check_code_documentation.py`.
+
+Vendor patch syntax does not have a portable file-header comment form. Such artifacts are
+classified as `generated-vendor` only when their exact repository path appears in
+`GENERATED_VENDOR_PATHS`; an unreviewed patch path remains an unknown extension and fails
+closed. The Electron patch's purpose and locked integrity hash are documented in the desktop
+installation and security guidance.
 
 ## Language standards
 
@@ -50,17 +60,27 @@ Their semantics must be explained in an adjacent authoritative document mapped i
   - Exception: an `__init__.py` that contains only `from … import …` re-exports with no
     other logic may use a single-sentence summary docstring.
 - Public classes, functions, and methods document semantics, parameters, return values,
-    raised exceptions, side effects, invariants, and security/privacy constraints where
-    those facts are not obvious.
+  raised exceptions, side effects, invariants, and security/privacy constraints where
+  those facts are not obvious. Private-named declarations explicitly listed in a literal
+  top-level `__all__` assignment are treated as public exports by the semantic checker.
 - Non-public code receives declaration-level documentation when its algorithm, invariant,
     state transition, or safety constraint is not obvious.
-- Ruff pydocstyle rules (`D` group) are not currently enabled. The automated gate checks
-  module-level docstrings; the declaration-level expectations above are enforced in review.
+- Protocol and abstract methods document the contract they require implementations to
+  preserve. Overrides own a local docstring rather than relying on inherited prose that may
+  no longer describe specialized behavior.
+- Overload signatures do not carry competing docstrings; the concrete implementation owns
+  the public documentation. Ruff rule `D418` rejects docstrings on overload stubs.
+- Tests use descriptive class and function names as their primary declaration documentation.
+  `D101`, `D102`, and `D103` are therefore narrowly ignored only for `tests/**`; module and
+  package documentation, empty docstrings, and overload ownership remain enforced there.
+- Constructors and magic methods inherit the owning class contract by default, so the
+  style-oriented `D105` and `D107` rules are not selected. A non-obvious constructor or
+  magic-method invariant still requires focused documentation under the manual policy.
 
 ### TypeScript/TSX (`.ts`, `.tsx`)
 
-- Every module must have a `/** … */` TSDoc block before the first non-import statement
-  that states the module's purpose and primary responsibility.
+- Every module must begin with a meaningful `/** … */` TSDoc block that states the
+  module's purpose and primary responsibility. A leading license block may precede it.
 - Exported functions, classes, interfaces, types, constants, React components, hooks,
   IPC contracts, and security-sensitive internal boundaries require TSDoc-style `/** … */`
   documentation.
@@ -78,7 +98,7 @@ Their semantics must be explained in an adjacent authoritative document mapped i
 
 ### Swift (`.swift`)
 
-- Swift DocC-compatible `///` comments for the file's purpose and all callable
+- Swift DocC-compatible `///` comments document the file's purpose and all callable
   declarations.
 - Parameter, return, error, and platform/keychain behaviour documented where applicable.
 
@@ -105,30 +125,67 @@ Their semantics must be explained in an adjacent authoritative document mapped i
 
 Run `make code-docs-check` locally or in CI. The command:
 
-1. Classifies every Git-tracked file using `scripts/check_code_documentation.py`.
-2. Verifies that every first-party source file has a module/file-level purpose statement.
-3. Rejects unknown file extensions in comment-capable categories.
-4. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
+1. Runs Ruff rules `D100`, `D101`, `D102`, `D103`, `D104`, `D418`, and `D419` across
+   `src`, `tests`, and `scripts`, with only the documented test-declaration exception.
+2. Classifies every Git-tracked file using `scripts/check_code_documentation.py`.
+3. Verifies that every first-party source file has a meaningful, language-appropriate
+   module/file-level purpose statement: Python docstrings, TSDoc/JSDoc blocks, Swift DocC
+   lines, shell/config hash comments, HTML comments, or CSS comments.
+4. Verifies meaningful public class, function, and method docstrings in production Python
+   and repository scripts, including literal `__all__` exports plus protocol, abstract,
+   override, and migration contracts.
+5. Uses the TypeScript compiler AST to require meaningful TSDoc/JSDoc on exported desktop
+   declarations, default exports, re-exports, declaration files, React components, and
+   hooks, while checking an explicit reviewed map of security-sensitive internal
+   declarations.
+6. Runs exact-pinned `eslint-plugin-jsdoc` rules across JavaScript, MJS, TypeScript, and TSX
+   to reject malformed documentation syntax, unknown tags, and missing descriptions.
+7. Requires Swift DocC on every callable declaration in addition to the Swift file-purpose
+   header.
+8. Rejects empty or placeholder purpose statements, unknown file extensions in
+   comment-capable categories, and unmapped non-comment formats.
+9. Rejects any permanent documentation-violation baseline.
+10. Emits stable `path:rule` diagnostics and exits non-zero on any violation.
 
-The check is deterministic, offline, and does not call any provider or upload source.
+The check is deterministic, offline, and does not call any provider or upload source. It
+ignores a Git-index entry that has been deleted from the working tree, which lets a deletion
+be validated before commit; exact-checkout CI still evaluates every file present in the
+candidate commit.
 
-### Legacy baseline
-
-`docs/CODE_DOCUMENTATION_BASELINE.txt` records the known violations present when
-this first enforcement slice landed. The checker permits only those exact
-`path:rule` diagnostics; any new violation still fails CI. Remove an entry when
-its documented file is brought into compliance. This keeps the gate enforceable
-while the repository is remediated in focused language/path batches.
+The declaration gates add no baseline or production-tree ignore. Desktop tests receive only
+a declaration-level exemption because descriptive test names are their primary contract;
+their module headers remain required. Focused fixtures cover missing, malformed, and
+placeholder documentation, declaration files, React exports, and security-boundary map
+drift.
 
 ## Suppression rules
 
 Suppressions are narrow and justified:
 
-- If a scoped Ruff pydocstyle check is introduced, a `# noqa: D…` comment may suppress a
-  single violation only when the policy explicitly allows it (e.g., trivial `__init__.py`
-  re-exports or self-documenting test functions). The comment must include a rationale.
+- A `# noqa: D…` comment may suppress a single violation only when the policy explicitly
+  allows it and the comment includes a rationale. No standing Python declaration
+  suppression is required by the current source tree.
 - Disabling an entire source or test tree is rejected.
 - ESLint `eslint-disable` comments for TSDoc/JSDoc rules require an inline justification.
+- Security-sensitive desktop internals are listed by path and declaration name in
+  `SECURITY_BOUNDARY_DECLARATIONS`. Removing or renaming a reviewed boundary without
+  updating that map fails closed, and additions require review rather than a broad pattern
+  exemption.
+
+## Architecture and security impact
+
+This policy and checker do not change an ancestry application API, CLI command, service
+DTO, provider contract, GEDCOM representation, storage schema, FastAPI contract, or
+Electron boundary. They add `make code-docs-check` to the repository verification
+architecture; the runtime application architecture remains unchanged.
+
+The checker adds no runtime dependency or application trust boundary. After the locked
+development environment is installed, it reads only tracked paths and local source text,
+runs without provider calls or credentials, and emits path/rule codes rather than source
+contents. `eslint-plugin-jsdoc` is an exact-pinned, lockfile-verified development dependency
+and never ships in the desktop application. The explicit internal-boundary map prevents a
+security-sensitive declaration from silently losing documentation. These controls narrow
+the audit gap without changing the repository's runtime threat model.
 
 ## Reviewer expectations
 

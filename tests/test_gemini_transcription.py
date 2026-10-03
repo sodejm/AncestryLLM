@@ -1,3 +1,5 @@
+"""Verify normalization of text returned by the legacy Gemini transcription adapter."""
+
 from ancestryllm.ocr import service as gemini
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Protocol, Sequence
+from typing import TYPE_CHECKING, Protocol
 
 from ancestryllm.api.contracts import (
     API_CONTRACT,
@@ -15,18 +15,27 @@ from ancestryllm.api.contracts import (
     HealthResponse,
     PaginationPolicy,
 )
-from ancestryllm.api.settings import ApiSettings
-from ancestryllm.application.executor import CommandExecutor
-from ancestryllm.core.commands import ModuleDescriptor
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ancestryllm.api.settings import ApiSettings
+    from ancestryllm.application.executor import CommandExecutor
+    from ancestryllm.core.commands import ModuleDescriptor
 
 
 class ModuleDescriptorRegistry(Protocol):
-    def descriptors(self) -> Sequence[ModuleDescriptor]: ...
+    """Define read-only lookup for registered capability descriptors."""
+
+    def descriptors(self) -> Sequence[ModuleDescriptor]:
+        """Return the descriptors exposed by the module descriptor registry."""
+        ...
 
 
 def capability_manifest(
     registry: ModuleDescriptorRegistry, executor: CommandExecutor, settings: ApiSettings
 ) -> CapabilityManifest:
+    """Build the capability manifest from registered command descriptors."""
     registered = frozenset(executor.dispatch_keys)
     modules: list[CapabilityModule] = []
     for descriptor in sorted(registry.descriptors(), key=lambda item: item.module_id):
@@ -55,6 +64,7 @@ def capability_manifest(
 
 
 def health_response(settings: ApiSettings) -> HealthResponse:
+    """Build a sanitized health response for the internal API."""
     proof_payload = f"{API_CONTRACT}\n{settings.app_build}\n{settings.sidecar_build}".encode()
     proof = hmac.new(settings.bearer_token.encode(), proof_payload, hashlib.sha256).hexdigest()
     return HealthResponse(

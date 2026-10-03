@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.errors import ProviderError
-from ancestryllm.core.secrets import SecretStore
-from ancestryllm.llm.contracts import LLMProvider
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ancestryllm.core.secrets import SecretStore
+    from ancestryllm.llm.contracts import LLMProvider
 
 PROVIDER_IDS = ("none", "ollama", "openai", "anthropic", "gemini", "openrouter")
 logger = logging.getLogger(__name__)
@@ -17,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ProviderRegistry:
+    """Register and resolve provider implementations by stable identifier."""
+
     secrets: SecretStore
     _shared: dict[tuple[str, str, str], LLMProvider] = field(
         default_factory=dict,
@@ -34,6 +40,7 @@ class ProviderRegistry:
         zero_data_retention: bool = True,
         profile_name: str | None = None,
     ) -> LLMProvider:
+        """Create a provider implementation from its registered factory."""
         if provider_id == "none":
             from ancestryllm.llm.providers.none import NoneProvider
 

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import contextlib
+import hmac
 import logging
+import secrets
 import threading
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from enum import Enum
-from typing import Any, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import (
     CancellationError,
@@ -19,10 +21,46 @@ from ancestryllm.core.cancellation import (
 )
 from ancestryllm.core.errors import AncestryError
 
+if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Callable
+
 logger = logging.getLogger(__name__)
 
+MAX_JOB_WORKERS = 32
+MAX_JOB_PENDING = 1_024
+MAX_JOB_ID_NUMBER = 999_999_999_999
+MAX_JOB_NAME_CHARACTERS = 256
+MAX_JOB_RESOURCE_KEYS = 32
+MAX_JOB_RESOURCE_KEY_BYTES = 4_096
+MAX_JOB_PROGRESS_CHARACTERS = 512
+MAX_JOB_PROGRESS_TOTAL = 1_000_000_000
+MAX_JOB_OUTCOME_CHARACTERS = 2_048
+MAX_JOB_ERROR_CODE_CHARACTERS = 96
 
-class JobState(str, Enum):
+
+def _validate_bounded_text(value: object, label: str, maximum: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string.")
+    if "\x00" in value or len(value) > maximum:
+        raise ValueError(f"{label} exceeds its bounded length.")
+    return value
+
+
+def _valid_error_code(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= MAX_JOB_ERROR_CODE_CHARACTERS
+        and all(
+            character in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+            for character in value
+        )
+    )
+
+
+class JobState(StrEnum):
+    """Enumerate the supported job state values."""
+
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -32,6 +70,8 @@ class JobState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ProgressEvent:
+    """Report a typed progress update for a background job."""
+
     operation: str
     timestamp: str
     completed: int | None = None
@@ -40,6 +80,8 @@ class ProgressEvent:
 
 @dataclass(frozen=True, slots=True)
 class JobSnapshot:
+    """Capture the externally visible state of one background job."""
+
     job_id: str
     name: str
     state: JobState
@@ -63,9 +105,12 @@ class JobSnapshot:
 class _JobRecord:
     snapshot: JobSnapshot
     token: CancellationToken
+    resource_keys: tuple[str, ...]
+    resource_locks: tuple[threading.Lock, ...]
     future: Future[Any] | None = None
     cancellation_was_deferred: bool = False
     cancellation_accepted_at: str | None = None
+    result_discarded: bool = False
 
 
 def _timestamp() -> str:
@@ -81,10 +126,12 @@ class JobReporter:
 
     @property
     def cancellation_requested(self) -> bool:
+        """Return whether cooperative job cancellation was requested."""
         return self._manager._token(self.job_id).requested
 
     @property
     def cancellation_pending(self) -> bool:
+        """Return whether a cancellation request is awaiting completion."""
         return self._manager._token(self.job_id).state.pending
 
     def check_cancelled(self) -> None:
@@ -95,6 +142,11 @@ class JobReporter:
     def non_interruptible(self, operation: str) -> contextlib.AbstractContextManager[None]:
         """Defer cancellation through an atomic operation."""
 
+        operation = _validate_bounded_text(
+            operation,
+            "Protected operation",
+            MAX_JOB_PROGRESS_CHARACTERS,
+        )
         return self._manager._token(self.job_id).defer(operation)
 
     def update(
@@ -104,13 +156,32 @@ class JobReporter:
         completed: int | None = None,
         total: int | None = None,
     ) -> None:
-        if not operation.strip():
-            raise ValueError("Progress operation must not be empty.")
+        """Publish a progress update through the job reporter."""
+        operation = _validate_bounded_text(
+            operation,
+            "Progress operation",
+            MAX_JOB_PROGRESS_CHARACTERS,
+        )
         if (completed is None) is not (total is None):
             raise ValueError("Determinate progress requires both completed and total values.")
-        if completed is not None and total is not None:
-            if completed < 0 or total < 1 or completed > total:
-                raise ValueError("Progress values require 0 <= completed <= total and total >= 1.")
+        if (
+            completed is not None
+            and total is not None
+            and (
+                isinstance(completed, bool)
+                or not isinstance(completed, int)
+                or isinstance(total, bool)
+                or not isinstance(total, int)
+                or completed < 0
+                or total < 1
+                or completed > total
+                or total > MAX_JOB_PROGRESS_TOTAL
+            )
+        ):
+            raise ValueError(
+                "Progress values require bounded integers with "
+                "0 <= completed <= total and total >= 1."
+            )
         self.check_cancelled()
         self._manager._report_progress(
             self.job_id,
@@ -120,10 +191,16 @@ class JobReporter:
     def set_outcome(self, summary: str, *, next_action: str) -> None:
         """Retain a redacted, transport-neutral success summary and next action."""
 
-        if not summary.strip():
-            raise ValueError("Job outcome summary must not be empty.")
-        if not next_action.strip():
-            raise ValueError("Job next action must not be empty.")
+        summary = _validate_bounded_text(
+            summary,
+            "Job outcome summary",
+            MAX_JOB_OUTCOME_CHARACTERS,
+        )
+        next_action = _validate_bounded_text(
+            next_action,
+            "Job next action",
+            MAX_JOB_OUTCOME_CHARACTERS,
+        )
         self.check_cancelled()
         self._manager._report_outcome(self.job_id, summary, next_action)
 
@@ -136,10 +213,27 @@ class JobManager:
         *,
         max_workers: int = 4,
         max_pending: int = 64,
+        start_id: int = 1,
         redact: Callable[[str], str] | None = None,
     ) -> None:
-        if max_workers < 1 or max_pending < max_workers:
-            raise ValueError("Job limits require max_pending >= max_workers >= 1.")
+        if (
+            isinstance(max_workers, bool)
+            or not isinstance(max_workers, int)
+            or not 1 <= max_workers <= MAX_JOB_WORKERS
+            or isinstance(max_pending, bool)
+            or not isinstance(max_pending, int)
+            or not max_workers <= max_pending <= MAX_JOB_PENDING
+        ):
+            raise ValueError(
+                "Job limits require bounded integers with "
+                "1 <= max_workers <= 32 and max_workers <= max_pending <= 1024."
+            )
+        if (
+            isinstance(start_id, bool)
+            or not isinstance(start_id, int)
+            or not 1 <= start_id <= MAX_JOB_ID_NUMBER
+        ):
+            raise ValueError("The first job identifier is outside its bounded range.")
         self.max_workers = max_workers
         self.max_pending = max_pending
         self._redact = redact or (lambda value: value)
@@ -150,9 +244,10 @@ class JobManager:
         self._capacity = threading.BoundedSemaphore(max_pending)
         self._lock = threading.RLock()
         self._records: dict[str, _JobRecord] = {}
-        self._resource_locks: dict[str, threading.Lock] = {}
+        self._resource_locks: dict[str, tuple[threading.Lock, int]] = {}
+        self._resource_identifier_key = secrets.token_bytes(32)
         self._listeners: list[Callable[[JobSnapshot], None]] = []
-        self._next_id = 1
+        self._next_id = start_id
         self._closed = False
 
     def submit(
@@ -162,6 +257,9 @@ class JobManager:
         *,
         resource_keys: tuple[str, ...] = (),
     ) -> JobSnapshot:
+        """Submit a background job through the job manager."""
+        if not callable(function):
+            raise ValueError("Background job work must be callable.")
         return self._submit(
             name,
             lambda _reporter: function(),
@@ -175,6 +273,7 @@ class JobManager:
         *,
         resource_keys: tuple[str, ...] = (),
     ) -> JobSnapshot:
+        """Submit a background job with typed progress reporting through the job manager."""
         return self._submit(name, function, resource_keys=resource_keys)
 
     def _submit(
@@ -184,19 +283,50 @@ class JobManager:
         *,
         resource_keys: tuple[str, ...],
     ) -> JobSnapshot:
+        name = _validate_bounded_text(name, "Job name", MAX_JOB_NAME_CHARACTERS)
+        if not callable(function):
+            raise ValueError("Background job work must be callable.")
+        if not isinstance(resource_keys, tuple) or len(resource_keys) > MAX_JOB_RESOURCE_KEYS:
+            raise ValueError("Background job resource keys exceed their bounded count.")
+        for resource_key in resource_keys:
+            _validate_bounded_text(
+                resource_key,
+                "Background job resource key",
+                MAX_JOB_RESOURCE_KEY_BYTES,
+            )
+            if (
+                len(resource_key.encode("utf-8", errors="surrogatepass"))
+                > MAX_JOB_RESOURCE_KEY_BYTES
+            ):
+                raise ValueError("Background job resource key exceeds its bounded size.")
+        normalized_keys = tuple(sorted(set(resource_keys)))
         with self._lock:
             if self._closed:
                 raise AncestryError("JOB_MANAGER_CLOSED", "The background job manager is closed.")
+            if self._next_id > MAX_JOB_ID_NUMBER:
+                raise AncestryError(
+                    "JOB_IDENTIFIER_EXHAUSTED",
+                    "The background job identifier space is exhausted.",
+                    "Restart only after archived job history has been reviewed and rotated.",
+                )
         if not self._capacity.acquire(blocking=False):
             raise AncestryError(
                 "JOB_QUEUE_FULL",
                 f"The background job queue reached its {self.max_pending}-job limit.",
                 "Wait for a job to finish, then retry.",
             )
-        normalized_keys = tuple(sorted(set(resource_keys)))
+        public_resource_keys = self._public_resource_keys(normalized_keys)
         with self._lock:
+            if self._next_id > MAX_JOB_ID_NUMBER:
+                self._capacity.release()
+                raise AncestryError(
+                    "JOB_IDENTIFIER_EXHAUSTED",
+                    "The background job identifier space is exhausted.",
+                    "Restart only after archived job history has been reviewed and rotated.",
+                )
             job_id = f"j{self._next_id:06d}"
             self._next_id += 1
+            resource_locks = self._reserve_resource_locks(normalized_keys)
             snapshot = JobSnapshot(
                 job_id=job_id,
                 name=name,
@@ -204,10 +334,10 @@ class JobManager:
                 submitted_at=_timestamp(),
                 started_at=None,
                 finished_at=None,
-                resource_keys=normalized_keys,
+                resource_keys=public_resource_keys,
             )
             token = CancellationToken()
-            record = _JobRecord(snapshot, token)
+            record = _JobRecord(snapshot, token, normalized_keys, resource_locks)
             self._records[job_id] = record
             token.subscribe(lambda state: self._sync_cancellation(job_id, state))
         self._notify(snapshot)
@@ -217,23 +347,38 @@ class JobManager:
                 job_id,
                 function,
                 normalized_keys,
+                resource_locks,
             )
         except BaseException:
             with self._lock:
                 self._records.pop(job_id, None)
+                self._release_resource_locks(normalized_keys, resource_locks)
             self._capacity.release()
             raise
         with self._lock:
             record.future = future
         return snapshot
 
+    def _public_resource_keys(self, resource_keys: tuple[str, ...]) -> tuple[str, ...]:
+        """Return manager-local opaque identifiers for public job snapshots."""
+
+        return tuple(
+            "resource_"
+            + hmac.digest(
+                self._resource_identifier_key,
+                resource_key.encode("utf-8", errors="surrogatepass"),
+                "sha256",
+            ).hex()
+            for resource_key in resource_keys
+        )
+
     def _execute(
         self,
         job_id: str,
         function: Callable[[JobReporter], Any],
         resource_keys: tuple[str, ...],
+        locks: tuple[threading.Lock, ...],
     ) -> None:
-        locks = [self._resource_lock(key) for key in resource_keys]
         acquired: list[threading.Lock] = []
         token = self._token(job_id)
         try:
@@ -258,11 +403,15 @@ class JobManager:
                         self._transition_cancelled(job_id)
                     else:
                         if isinstance(exc, AncestryError):
-                            code = exc.code
-                            message = self._redact(exc.message)
-                            remediation = self._redact(
+                            code = exc.code if _valid_error_code(exc.code) else "JOB_FAILED"
+                            message = self._bounded_redacted(
+                                exc.message,
+                                MAX_JOB_OUTCOME_CHARACTERS,
+                            )
+                            remediation = self._bounded_redacted(
                                 exc.remediation
-                                or "Review the coded failure before retrying manually."
+                                or "Review the coded failure before retrying manually.",
+                                MAX_JOB_OUTCOME_CHARACTERS,
                             )
                         else:
                             code = "JOB_FAILED"
@@ -288,11 +437,49 @@ class JobManager:
         finally:
             for lock in reversed(acquired):
                 lock.release()
+            with self._lock:
+                self._release_resource_locks(resource_keys, locks)
             self._capacity.release()
 
-    def _resource_lock(self, resource_key: str) -> threading.Lock:
-        with self._lock:
-            return self._resource_locks.setdefault(resource_key, threading.Lock())
+    def _reserve_resource_locks(
+        self,
+        resource_keys: tuple[str, ...],
+    ) -> tuple[threading.Lock, ...]:
+        locks: list[threading.Lock] = []
+        for resource_key in resource_keys:
+            current = self._resource_locks.get(resource_key)
+            if current is None:
+                lock = threading.Lock()
+                references = 0
+            else:
+                lock, references = current
+            self._resource_locks[resource_key] = (lock, references + 1)
+            locks.append(lock)
+        return tuple(locks)
+
+    def _release_resource_locks(
+        self,
+        resource_keys: tuple[str, ...],
+        locks: tuple[threading.Lock, ...],
+    ) -> None:
+        for resource_key, lock in zip(resource_keys, locks, strict=True):
+            current_lock, references = self._resource_locks[resource_key]
+            if current_lock is not lock:
+                raise RuntimeError("Background job resource-lock identity changed unexpectedly.")
+            if references == 1:
+                del self._resource_locks[resource_key]
+            else:
+                self._resource_locks[resource_key] = (lock, references - 1)
+
+    def _bounded_redacted(self, value: str, maximum: int) -> str:
+        try:
+            redacted: object = self._redact(value)
+        except BaseException:  # noqa: BLE001 - never expose an unredacted fallback
+            return "Sensitive background job detail was removed."
+        if not isinstance(redacted, str):
+            return "Sensitive background job detail was removed."
+        bounded = redacted.replace("\x00", "\ufffd")[:maximum]
+        return bounded if bounded.strip() else "Sensitive background job detail was removed."
 
     def _transition(self, job_id: str, state: JobState, **changes: Any) -> None:
         with self._lock:
@@ -356,6 +543,8 @@ class JobManager:
                 "cancellation_deferred_by": current.cancellation_deferred_by,
             }
             values.update(changes)
+            if record.result_discarded:
+                values["result"] = None
             record.snapshot = JobSnapshot(**values)
             snapshot = record.snapshot
         self._notify(snapshot)
@@ -375,7 +564,9 @@ class JobManager:
                 cancellation_requested_at=state.requested_at,
                 cancellation_pending=state.pending,
                 cancellation_deferred_by=(
-                    self._redact(state.deferred_by) if state.pending and state.deferred_by else None
+                    self._bounded_redacted(state.deferred_by, MAX_JOB_PROGRESS_CHARACTERS)
+                    if state.pending and state.deferred_by
+                    else None
                 ),
             )
             snapshot = record.snapshot
@@ -428,7 +619,10 @@ class JobManager:
             record.snapshot = replace(
                 record.snapshot,
                 progress=ProgressEvent(
-                    operation=self._redact(event.operation),
+                    operation=self._bounded_redacted(
+                        event.operation,
+                        MAX_JOB_PROGRESS_CHARACTERS,
+                    ),
                     timestamp=event.timestamp,
                     completed=event.completed,
                     total=event.total,
@@ -444,13 +638,14 @@ class JobManager:
                 return
             record.snapshot = replace(
                 record.snapshot,
-                outcome_summary=self._redact(summary),
-                next_action=self._redact(next_action),
+                outcome_summary=self._bounded_redacted(summary, MAX_JOB_OUTCOME_CHARACTERS),
+                next_action=self._bounded_redacted(next_action, MAX_JOB_OUTCOME_CHARACTERS),
             )
             snapshot = record.snapshot
         self._notify(snapshot)
 
     def subscribe(self, listener: Callable[[JobSnapshot], None]) -> Callable[[], None]:
+        """Subscribe to future events exposed by the job manager."""
         with self._lock:
             self._listeners.append(listener)
 
@@ -470,7 +665,20 @@ class JobManager:
             except BaseException as exc:  # noqa: BLE001 - listeners cannot break job execution
                 logger.warning("Job listener failed: %s", type(exc).__name__)
 
+    def discard_result(self, job_id: str) -> None:
+        """Release private result data, including results of still-running jobs.
+
+        Lifecycle metadata remains available. This is deliberately irreversible:
+        a late completion cannot restore data that its consumer has discarded.
+        """
+        with self._lock:
+            self.get(job_id)
+            record = self._records[job_id]
+            record.result_discarded = True
+            record.snapshot = replace(record.snapshot, result=None)
+
     def get(self, job_id: str) -> JobSnapshot:
+        """Return the current snapshot for one job or raise ``JOB_NOT_FOUND``."""
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
@@ -482,6 +690,7 @@ class JobManager:
             return record.snapshot
 
     def list(self, state: JobState | None = None) -> list[JobSnapshot]:
+        """Return current job snapshots, optionally filtered by lifecycle state."""
         with self._lock:
             snapshots = [record.snapshot for record in self._records.values()]
         if state is not None:
@@ -489,16 +698,15 @@ class JobManager:
         return snapshots
 
     def wait(self, job_id: str, timeout: float | None = None) -> JobSnapshot:
+        """Wait for the requested job to reach a terminal state in the job manager."""
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
                 return self.get(job_id)
             future = record.future
         if future is not None:
-            try:
+            with suppress(CancelledError):
                 future.result(timeout=timeout)
-            except CancelledError:
-                pass
         return self.get(job_id)
 
     def active(self) -> tuple[JobSnapshot, ...]:
@@ -555,6 +763,7 @@ class JobManager:
                     cancellation_pending=False,
                     cancellation_deferred_by=None,
                 )
+                self._release_resource_locks(record.resource_keys, record.resource_locks)
                 self._capacity.release()
                 snapshot = record.snapshot
             else:
@@ -570,6 +779,7 @@ class JobManager:
         return self.get(job_id)
 
     def shutdown(self, *, wait: bool = True, cancel: bool = False) -> None:
+        """Release resources owned by the job manager."""
         with self._lock:
             self._closed = True
         if cancel:

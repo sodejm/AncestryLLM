@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import FileArtifactResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.execution.common import path, table_result
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 _BACKUP_OPERATION = "database.backup"
 _BACKUP_MEDIA_TYPE = "application/octet-stream"
@@ -14,10 +18,13 @@ _DIAGNOSTIC_COLUMNS = ("code", "status", "message", "remediation")
 
 
 class DatabaseExecutor:
+    """Dispatch database commands through the application service boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._context = context
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch database diagnostics or an encrypted backup operation."""
         if invocation.key.action == "diagnose":
             from ancestryllm.storage.diagnostics import diagnose_storage
 

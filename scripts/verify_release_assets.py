@@ -67,6 +67,7 @@ def _read_checksums(path: Path) -> dict[str, str]:
 
 
 def verify_release_assets(expected_directory: Path, actual_directory: Path) -> None:
+    """Verify every release asset against its reviewed checksum."""
     expected = _regular_files(expected_directory, "expected")
     actual = _regular_files(actual_directory, "actual")
     if set(actual) != set(expected):
@@ -96,6 +97,7 @@ def verify_release_assets(expected_directory: Path, actual_directory: Path) -> N
 
 
 def main() -> int:
+    """Run the verify release assets command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected", required=True, type=Path)
     parser.add_argument("--actual", required=True, type=Path)

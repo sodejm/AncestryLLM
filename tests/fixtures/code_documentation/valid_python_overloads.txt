@@ -1,0 +1,16 @@
+"""Exercises documentation ownership for overloaded functions."""
+
+from typing import overload
+
+
+@overload
+def normalize(value: int) -> int: ...
+
+
+@overload
+def normalize(value: str) -> str: ...
+
+
+def normalize(value: int | str) -> int | str:
+    """Return the value through the representative normalized interface."""
+    return value

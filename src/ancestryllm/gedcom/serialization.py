@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ancestryllm.core.publication import StagedFileToken
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.publication import StagedFileToken
 from ancestryllm.gedcom.artifact_publication import stage_text_atomically
 from ancestryllm.gedcom.graph import (
     _ROOTED_AUXILIARY_RECORD_TAGS,
@@ -175,11 +178,11 @@ def write_quality_diagnostic(
 def write_gedcom(
     records: list[IndividualRecord],
     output_path: str | Path,
-    source_parsers: Optional[list[Any]] = None,
-    source_documents: Optional[list[ParsedSource]] = None,
-    pointer_map: Optional[dict[str, str]] = None,
-    include_individuals: Optional[set[str]] = None,
-    include_families: Optional[set[str]] = None,
+    source_parsers: list[Any] | None = None,
+    source_documents: list[ParsedSource] | None = None,
+    pointer_map: dict[str, str] | None = None,
+    include_individuals: set[str] | None = None,
+    include_families: set[str] | None = None,
     gedcom_version: str = "5.5.5",
 ) -> StagedFileToken:
     """Render and stage a loss-minimizing GEDCOM artifact."""
@@ -191,6 +194,35 @@ def write_gedcom(
     out_path = Path(output_path).resolve()
     if out_path.parent and not out_path.parent.exists():
         raise OSError(f"Output directory does not exist: {out_path.parent}")
+    payload = render_gedcom(
+        records,
+        source_parsers,
+        source_documents,
+        pointer_map,
+        include_individuals,
+        include_families,
+        gedcom_version,
+    )
+    token = stage_text_atomically(out_path, payload)
+    log.info("Wrote %d individuals to %s", len(records), out_path)
+    return token
+
+
+def render_gedcom(
+    records: list[IndividualRecord],
+    source_parsers: list[Any] | None = None,
+    source_documents: list[ParsedSource] | None = None,
+    pointer_map: dict[str, str] | None = None,
+    include_individuals: set[str] | None = None,
+    include_families: set[str] | None = None,
+    gedcom_version: str = "5.5.5",
+) -> str:
+    """Render and validate GEDCOM without publishing a filesystem artifact."""
+    cancellation_checkpoint()
+    if gedcom_version not in SUPPORTED_GEDCOM_VERSIONS:
+        raise ValueError(
+            f"Unsupported GEDCOM version {gedcom_version}; choose from {SUPPORTED_GEDCOM_VERSIONS}"
+        )
     lines: list[str] = []
     synthetic_submitter: list[str] = []
     if source_documents:
@@ -217,8 +249,10 @@ def write_gedcom(
             cancellation_checkpoint()
             if include_individuals is not None and record.pointer not in include_individuals:
                 continue
-            source_lines = survivor_lines.get(record.pointer) or (
-                _record_to_gedcom_lines(record).rstrip("\n").splitlines()
+            source_lines = (
+                record.raw_lines
+                or survivor_lines.get(record.pointer)
+                or (_record_to_gedcom_lines(record).rstrip("\n").splitlines())
             )
             person_lines.extend(_rewrite_xrefs(line, pointer_rewrites) for line in source_lines)
         rooted_export = include_individuals is not None or include_families is not None
@@ -308,14 +342,12 @@ def write_gedcom(
     lines = _wrap_long_gedcom_lines(lines)
     if gedcom_version == "5.5.5":
         validate_gedcom_555(lines)
-    payload = "\n".join(lines) + "\n"
-    token = stage_text_atomically(out_path, payload)
-    log.info("Wrote %d individuals to %s", len(records), out_path)
-    return token
+    return "\n".join(lines) + "\n"
 
 
 __all__ = [
     "SUPPORTED_GEDCOM_VERSIONS",
+    "render_gedcom",
     "validate_gedcom_555",
     "wrap_long_gedcom_lines",
     "write_gedcom",

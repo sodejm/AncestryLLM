@@ -1,3 +1,4 @@
+/** Inspects packaged Electron fuse state and emits deterministic security evidence. */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -79,6 +80,13 @@ async function readAsarHeaderHash(asarPath) {
   }
 }
 
+/**
+ * Validates the platform-specific ASAR integrity metadata against the packaged ASAR header.
+ * @param {string} platform - Node platform identifier for the inspected package.
+ * @param {Record<string, unknown>} [plist] - Parsed macOS Info.plist document; required on macOS.
+ * @param {string} [headerHash] - Lowercase SHA-256 digest read from the packaged ASAR header.
+ * @returns {Record<string, string>} A verified or explicitly not-applicable integrity result.
+ */
 export function asarIntegrityReport(platform, plist, headerHash) {
   assert.ok(
     platform === 'darwin' || platform === 'win32' || platform === 'linux',
@@ -114,14 +122,36 @@ export function asarIntegrityReport(platform, plist, headerHash) {
   }
 }
 
+/**
+ * Parses the optional package root and exclusive report-output path accepted by the CLI.
+ * @param {string[]} argv - CLI arguments after the script name.
+ * @returns {{rootPath?: string, outputPath?: string}} Validated paths selected by the caller.
+ */
 export function parseArguments(argv) {
   if (argv.length === 0) return {}
-  assert.equal(argv.length, 2, 'Usage: node scripts/inspect-package-fuses.mjs [--output <path>]')
-  assert.equal(argv[0], '--output', 'Usage: node scripts/inspect-package-fuses.mjs [--output <path>]')
-  assert.ok(argv[1], 'The --output option requires a path')
-  return { outputPath: argv[1] }
+  const usage =
+    'Usage: node scripts/inspect-package-fuses.mjs [--root <path>] [--output <path>]'
+  assert.equal(argv.length % 2, 0, usage)
+
+  const parsed = {}
+  for (let index = 0; index < argv.length; index += 2) {
+    const option = argv[index]
+    const value = argv[index + 1]
+    assert.ok(option === '--root' || option === '--output', usage)
+    assert.ok(value, `The ${option} option requires a path`)
+    const key = option === '--root' ? 'rootPath' : 'outputPath'
+    assert.equal(parsed[key], undefined, `The ${option} option may be supplied only once`)
+    parsed[key] = value
+  }
+  return parsed
 }
 
+/**
+ * Exclusively writes a deterministic, owner-readable package inspection report.
+ * @param {string} outputPath - Destination that must not already exist.
+ * @param {Record<string, unknown>} report - Validated package inspection evidence.
+ * @returns {Promise<void>} Completion after the JSON report is durably handed to the filesystem.
+ */
 export async function writeInspectionReport(outputPath, report) {
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
     encoding: 'utf8',
@@ -130,6 +160,11 @@ export async function writeInspectionReport(outputPath, report) {
   })
 }
 
+/**
+ * Formats a concise success summary without serializing package paths or evidence details.
+ * @param {Record<string, any>} report - Successful package inspection report.
+ * @returns {string} Human-readable confirmation of the checks applicable to the platform.
+ */
 export function formatInspectionSummary(report) {
   if (report.asar.integrity.status === 'verified') {
     return `Verified app.asar presence, ${report.fuses.count} packaged Electron fuse states, and macOS ElectronAsarIntegrity Info.plist metadata.`
@@ -137,6 +172,11 @@ export function formatInspectionSummary(report) {
   return `Verified app.asar presence and ${report.fuses.count} packaged Electron fuse states; ElectronAsarIntegrity Info.plist metadata verification is not applicable on ${report.platform}.`
 }
 
+/**
+ * Verifies the packaged executable's fuse policy, ASAR presence, and macOS integrity metadata.
+ * @param {{root?: string, platform?: string}} [options] - Package search root and platform override used by tests.
+ * @returns {Promise<Record<string, unknown>>} Schema-v1 evidence for the discovered native package.
+ */
 export async function inspectPackage({ root = releaseRoot, platform = process.platform } = {}) {
   const { executable, resources } = await discoverPackage(root, platform)
   const fuses = await getCurrentFuseWire(executable)
@@ -188,8 +228,8 @@ export async function inspectPackage({ root = releaseRoot, platform = process.pl
 }
 
 async function main(argv) {
-  const { outputPath } = parseArguments(argv)
-  const report = await inspectPackage()
+  const { outputPath, rootPath } = parseArguments(argv)
+  const report = await inspectPackage(rootPath ? { root: rootPath } : {})
   if (outputPath) await writeInspectionReport(outputPath, report)
   console.log(formatInspectionSummary(report))
 }

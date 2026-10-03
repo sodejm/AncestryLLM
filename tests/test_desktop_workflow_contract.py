@@ -1,17 +1,32 @@
 """Contract tests for the exact-head desktop verification workflow."""
 
+import json
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "desktop-sidecar.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+MAKEFILE = ROOT / "Makefile"
 VERIFICATION_DOC = ROOT / "docs" / "DESKTOP_VERIFICATION.md"
 VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.verification.yml"
+NATIVE_VERIFICATION_BUILDER_CONFIG = ROOT / "desktop" / "electron-builder.native-verification.yml"
+PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
+LINUX_KEYRING_RUNNER = ROOT / "desktop" / "scripts" / "run-with-linux-keyring.sh"
 RUNTIME_BRIDGE = ROOT / "desktop" / "src" / "main" / "runtime-bridge.ts"
 
 
 def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_desktop_install_is_one_locked_verified_contract() -> None:
+    workflow = _workflow()
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+
+    assert workflow.count("node desktop/scripts/install-locked.mjs") == 2
+    assert "pnpm --dir desktop install --frozen-lockfile" not in workflow
+    assert ("desktop-install:\n\t@node desktop/scripts/install-locked.mjs\n") in makefile
 
 
 def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
@@ -21,8 +36,13 @@ def test_desktop_workflow_has_an_always_reported_exact_head_gate() -> None:
     assert "inputs.commit_sha || github.sha" in workflow
     assert "pull_request:" not in workflow
     assert "github.event.pull_request" not in workflow
+    assert '[[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]' in workflow
+    assert 'if test "$EVENT_NAME" = "push"; then' in workflow
     assert "git fetch --no-tags origin main" in workflow
     assert 'test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"' in workflow
+    assert 'elif test "$EVENT_NAME" = "workflow_dispatch"; then' in workflow
+    assert 'test "$EXPECTED_HEAD" = "$GITHUB_SHA"' in workflow
+    assert 'echo "unsupported desktop verification event: $EVENT_NAME" >&2' in workflow
     assert "paths:" not in workflow
     assert "changes:" in workflow
     assert "desktop-security:" in workflow
@@ -83,10 +103,11 @@ def test_native_matrix_is_the_supported_six_row_boundary() -> None:
     assert "OPENSSL_DIR" not in workflow
     assert "dumpbin /headers" not in workflow
     assert (
-        "uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build"
+        "uv sync --locked --no-default-groups --extra desktop-build --group test "
+        "--no-install-project --no-build"
     ) in workflow
     assert "uv pip install --python .venv --no-deps --editable ." in workflow
-    assert workflow.count("uv run --no-sync") == 4
+    assert workflow.count("uv run --no-sync") == 5
     assert "self-hosted" not in workflow
     assert "ancestryllm-windows-11" not in workflow
     assert "runs-on: ${{ fromJSON(matrix.runs_on) }}" in workflow
@@ -111,17 +132,17 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
 
-    assert workflow.count("pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9") == 2
+    assert workflow.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413") == 2
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
-    assert workflow.count("node desktop/scripts/run-packaged-tests.mjs") == 4
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
     assert "verification-receipt.mjs" in workflow
     assert "--allow-output desktop/verification/security" not in workflow
     assert '--allow-output "$ROW_ROOT"' not in workflow
     assert "--allow-output desktop/out" not in workflow
     assert '--allow-output "$RECEIPTS_DIR/api-contract.json"' in workflow
-    assert "inspect-package-fuses.mjs --output" in workflow
+    assert 'inspect-package-fuses.mjs --root "$PACKAGED_RELEASE_ROOT" --output' in workflow
     assert "pnpm --dir desktop run check:secrets" in workflow
     assert "pnpm --dir desktop run sbom" in workflow
     assert "pnpm --dir desktop sbom" not in workflow
@@ -130,33 +151,82 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "--receipts" in workflow
     assert "--artifact metrics=" in workflow
     assert "--artifact fuseInspection=" in workflow
+    assert "--artifact fileGrantEvidence=" in workflow
     assert "--artifact sbom=" in workflow
     assert "--audit-passed" not in workflow
     assert "desktop/release/" not in workflow
     assert "--config electron-builder.verification.yml" in workflow
+    assert "--config electron-builder.native-verification.yml" in workflow
+    assert "--config electron-builder.file-grant-verification.yml" in workflow
+    production_build = workflow.index("pnpm --dir desktop run build\n")
+    production_assembly = workflow.index(
+        "electron-builder --config electron-builder.verification.yml"
+    )
+    production_sidecar_verification = workflow.index(
+        'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release'
+    )
+    native_verification_build = workflow.index(
+        "pnpm --dir desktop run build:packaged-native-verification"
+    )
+    native_verification_assembly = workflow.index(
+        "electron-builder --config electron-builder.native-verification.yml"
+    )
+    native_sidecar_verification = workflow.index(
+        'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-native-verification'
+    )
+    assert (
+        production_build
+        < production_assembly
+        < production_sidecar_verification
+        < native_verification_build
+        < native_verification_assembly
+        < native_sidecar_verification
+    )
+    assert (
+        'echo "PACKAGED_RELEASE_ROOT=desktop/release-native-verification" >> "$GITHUB_ENV"'
+    ) in workflow
+    assert workflow.count("if: runner.os != 'Windows'") >= 3
+    assert 'if [[ "$RUNNER_OS" != "Windows" ]]; then' in workflow
+    assert 'packaged_app="$(node desktop/scripts/find-packaged-app.mjs '
+    assert '"$PACKAGED_RELEASE_ROOT")"' in workflow
 
     builder = VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
     assert "extends: ./electron-builder.yml" in builder
-    assert 'identity: "-"' in builder
+    assert re.search(
+        r'mac:\n  identity: "-"\n  signIgnore:\n'
+        r'    - "/Contents/Resources/sidecar/"\n?\Z',
+        builder,
+    )
+    assert builder.count("signIgnore:") == 1
+
+    native_verification_builder = NATIVE_VERIFICATION_BUILDER_CONFIG.read_text(encoding="utf-8")
+    assert "extends: ./electron-builder.verification.yml" in native_verification_builder
+    assert re.search(
+        r"directories:\n  output: release-native-verification\n?\Z",
+        native_verification_builder,
+    )
 
 
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     workflow = _workflow()
 
     assert "scripts/build_verification_sidecar.py" in workflow
-    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" in workflow
+    assert "sidecar-process-tree-guard.json" in workflow
+    assert "--gate sidecarProcessTreeGuardPassed" in workflow
+    assert "tests/api/test_sidecar_bootstrap.py" in workflow
+    assert "ANCESTRYLLM_SUBSTITUTED_SIDECAR" in workflow
     assert "packaged-sidecar-withhold-retry.json" in workflow
     assert "--gate packagedSidecarWithholdRetryPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE"' in workflow
     assert "packaged-sidecar-restart-exhaustion-quit.json" in workflow
     assert "--gate packagedSidecarRestartExhaustionQuitPassed" in workflow
     assert '--artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE"' in workflow
-    assert "packaged-sidecar-version-mismatch.json" in workflow
-    assert "--gate packagedSidecarVersionMismatchPassed" in workflow
-    assert '--artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE"' in workflow
-    assert '--artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS"' in workflow
-    assert '--artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR"' in workflow
-    assert '--allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"' in workflow
+    assert "packaged-sidecar-integrity-substitution.json" in workflow
+    assert "--gate packagedSidecarIntegritySubstitutionPassed" in workflow
+    assert '--artifact faultEvidence="$ANCESTRYLLM_INTEGRITY_EVIDENCE"' in workflow
+    assert '--artifact failureDiagnostics="$ANCESTRYLLM_INTEGRITY_DIAGNOSTICS"' in workflow
+    assert '--artifact substitutedSidecar="$ANCESTRYLLM_SUBSTITUTED_SIDECAR"' in workflow
+    assert '--allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"' in workflow
 
     production_sources = "\n".join(
         path.read_text(encoding="utf-8")
@@ -165,39 +235,152 @@ def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
     )
     assert "ANCESTRYLLM_WITHHOLD_EVIDENCE" not in production_sources
     assert "ANCESTRYLLM_RESTART_EVIDENCE" not in production_sources
-    assert "ANCESTRYLLM_MISMATCH_EVIDENCE" not in production_sources
-    assert "ANCESTRYLLM_WRONG_BUILD_SIDECAR" not in production_sources
+    assert "ANCESTRYLLM_INTEGRITY_EVIDENCE" not in production_sources
+    assert "ANCESTRYLLM_SUBSTITUTED_SIDECAR" not in production_sources
 
 
-def test_packaged_scenarios_forward_playwright_filters_without_a_pnpm_separator() -> None:
+def test_workflow_binds_packaged_file_grant_mediation_without_production_dialog_hooks() -> None:
+    workflow = _workflow()
+
+    assert "ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_OPEN_PATH=" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_SAVE_PATH=" in workflow
+    assert "ANCESTRYLLM_FILE_GRANT_EVIDENCE=" in workflow
+    assert "packaged-file-grants.json" in workflow
+    assert "--gate packagedFileGrantSmokePassed" in workflow
+    assert '--artifact fileGrantEvidence="$ANCESTRYLLM_FILE_GRANT_EVIDENCE"' in workflow
+    assert '--file-grant-evidence "$ROW_ROOT/file-grant-mediation.json"' in workflow
+    assert "desktop/release-file-grant-verification" in workflow
+
+    production_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "desktop" / "src").rglob("*"))
+        if path.is_file()
+    )
+    assert "ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_OPEN_PATH" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_SAVE_PATH" not in production_sources
+    assert "ANCESTRYLLM_FILE_GRANT_EVIDENCE" not in production_sources
+
+
+def test_packaged_scenarios_forward_webdriverio_filters_without_a_pnpm_separator() -> None:
     workflow = _workflow()
 
     expected_scenarios = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence",
         "withholds and restores the packaged sidecar through Diagnostics retry",
-        "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit",
-        "rejects a target-native wrong-build packaged sidecar",
+        "exhausts packaged sidecar restarts and exits cleanly",
+        "rejects a substituted packaged sidecar before launch",
+        "mediates opaque packaged open and save file grants",
+        "launches the selected packaged runtime normally without a debugging transport",
     )
-    assert workflow.count("run-packaged-tests.mjs") == len(expected_scenarios)
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == len(expected_scenarios)
     for scenario in expected_scenarios:
         assert workflow.count(f'--grep "{scenario}"') == 1
 
-    assert re.search(r"run-packaged-tests\.mjs --\s", workflow) is None
+    assert re.search(r"run-wdio\.mjs packaged --\s", workflow) is None
+
+
+def test_packaged_diagnostics_expectations_follow_the_shared_contract() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+
+    assert "import type { AncestryBridge, StartupDiagnostics }" in source
+    assert "type StartupDiagnostics = Readonly<{" not in source
+    assert "type StartupExpectation" in source
+    assert "schema_version: 1" in source
+    assert "status: 'ready'" in source
+    assert "function matchesStartup" in source
+    assert "browser.waitUntil" in source
+    assert ").toMatchObject(expected)" not in source
+
+
+def test_linux_packaged_checks_use_a_disposable_native_secret_service() -> None:
+    workflow = _workflow()
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    runner = LINUX_KEYRING_RUNNER.read_text(encoding="utf-8")
+    install = (
+        "sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools"
+    )
+    verifier_launcher = "desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum"
+    production_launcher = (
+        "desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus "
+        "xvfb-run --auto-servernum"
+    )
+
+    assert workflow.count(install) == 1
+    assert release.count(install) == 2
+    assert workflow.count(verifier_launcher) == 2
+    # Both the private build validation and the public artifact validation run
+    # the automated and normal-launch packaged scenarios on Linux.
+    assert release.count(production_launcher) == 4
+    assert "--production-runtime-bus" not in workflow
+    assert LINUX_KEYRING_RUNNER.stat().st_mode & 0o111
+    assert "dbus-run-session" not in runner
+    assert "dbus-daemon" in runner
+    assert '--address="$session_address"' in runner
+    assert 'export DBUS_SESSION_BUS_ADDRESS="$session_address"' in runner
+    assert 'production_runtime_directory="/run/user/$user_id"' in runner
+    assert 'session_socket="$production_runtime_directory/bus"' in runner
+    assert 'if [[ -e "$session_socket" || -L "$session_socket" ]]; then' in runner
+    assert '[[ ! -L "$session_socket" && -S "$session_socket" ]]' in runner
+    assert "production D-Bus endpoint must be a current-user Unix socket" in runner
+    assert "stat -c '%u:%g:%d:%i' -- \"$session_socket\"" in runner
+    assert (
+        '[[ "$socket_user_id" == "$user_id" && "$socket_group_id" == "$user_group_id" ]]' in runner
+    )
+    assert "session_bus_responds" in runner
+    assert "production D-Bus endpoint is not a working session bus" in runner
+    assert "Secret Service endpoint is already occupied" in runner
+    assert "production D-Bus endpoint changed during validation" in runner
+    assert "reuse_existing_production_bus=true" in runner
+    assert 'if [[ "$reuse_existing_production_bus" != true ]]; then' in runner
+    assert 'production_socket_identity="$socket_device:$socket_inode"' in runner
+    reuse_branch = runner[
+        runner.index('if [[ -e "$session_socket" || -L "$session_socket" ]]; then') : runner.index(
+            'if [[ "$reuse_existing_production_bus" != true ]]; then'
+        )
+    ]
+    assert "production_socket_owned=true" not in reuse_branch
+    assert runner.count("production_socket_owned=true") == 1
+    assert (
+        'if [[ "$production_socket_owned" == true && ! -L "$session_socket" '
+        '&& -S "$session_socket" ]]; then'
+    ) in runner
+    assert '[[ "$current_socket_identity" == "$production_socket_identity" ]]' in runner
+    assert "gnome-keyring-daemon" in runner
+    assert "--components=secrets" in runner
+    assert "org.freedesktop.DBus.NameHasOwner" in runner
+    assert "string:org.freedesktop.secrets" in runner
+    assert "secret-tool store" in runner
+    assert "secret-tool lookup" in runner
+    assert "secret-tool clear" in runner
+    assert "service ancestryllm-verifier key bootstrap" in runner
+    assert "ANCESTRYLLM_NATIVE_KEYRING_SESSION" not in runner
+    assert 'export ANCESTRYLLM_NATIVE_KEYRING_ROOT="$keyring_root"' in runner
+    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" not in workflow
+    assert "ANCESTRYLLM_NATIVE_KEYRING_ROOT" not in release
+    assert "mktemp -d" in runner
+    assert "chmod 700" in runner
+    assert 'rm -rf -- "$keyring_root"' in runner
+    assert "PYTHON_KEYRING_BACKEND" not in workflow
+    assert "PYTHON_KEYRING_BACKEND" not in release
+    assert "PYTHON_KEYRING_BACKEND" not in runner
 
 
 def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandbox() -> None:
     workflow = _workflow()
 
     assert (
-        'wrong_build_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/'
+        'substituted_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/'
         '$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"' in workflow
     )
     expected_evidence_paths = (
         'ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"',
+        'ANCESTRYLLM_FILE_GRANT_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-mediation.json"',
         'ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"',
         'ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
-        'ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"',
-        'ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"',
+        'ANCESTRYLLM_INTEGRITY_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution.json"',
+        'ANCESTRYLLM_INTEGRITY_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"',
     )
     for evidence_path in expected_evidence_paths:
         assert evidence_path in workflow
@@ -205,19 +388,20 @@ def test_packaged_runtime_uses_absolute_evidence_paths_and_preserves_linux_sandb
     expected_recorded_evidence = (
         '--withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json"',
         '--restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json"',
-        '--mismatch-evidence "$ROW_ROOT/sidecar-version-mismatch.json"',
+        '--integrity-evidence "$ROW_ROOT/sidecar-integrity-substitution.json"',
+        '--file-grant-evidence "$ROW_ROOT/file-grant-mediation.json"',
     )
     for evidence_path in expected_recorded_evidence:
         assert evidence_path in workflow
     assert '--withhold-evidence "$ANCESTRYLLM_WITHHOLD_EVIDENCE"' not in workflow
     assert '--restart-evidence "$ANCESTRYLLM_RESTART_EVIDENCE"' not in workflow
-    assert '--mismatch-evidence "$ANCESTRYLLM_MISMATCH_EVIDENCE"' not in workflow
+    assert '--integrity-evidence "$ANCESTRYLLM_INTEGRITY_EVIDENCE"' not in workflow
 
     sandbox_step = "Prepare Chromium sandbox for unpacked Linux verification"
     assert f"name: {sandbox_step}" in workflow
     assert "if: runner.os == 'Linux'" in workflow
     assert 'sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"' in workflow
-    assert '"$GITHUB_WORKSPACE/desktop/release"/*) ;;' in workflow
+    assert '"$GITHUB_WORKSPACE/$PACKAGED_RELEASE_ROOT"/*) ;;' in workflow
     assert 'echo "::error::Unexpected Chromium sandbox path"' in workflow
     assert 'test ! -L "$sandbox_path"' in workflow
     assert 'test -f "$sandbox_path"' in workflow
@@ -253,4 +437,33 @@ def test_verification_document_covers_external_release_blockers() -> None:
     assert "ad hoc" in document
     assert "#231" in document
     assert "#131" in document
+    assert "full 40-character head SHA" in document
+    assert "immutable event SHA for the selected same-repository ref" in document
+    assert "does not receive release credentials" in document
     assert "Windows Server 2025" not in document
+
+
+def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
+    workflow = _workflow()
+    policy = json.loads(
+        (ROOT / "config/release-quality-policy-v1.json").read_text(encoding="utf-8")
+    )
+    package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+    vitest = (ROOT / "desktop/vitest.config.ts").read_text(encoding="utf-8")
+
+    for gate in policy["security"]["desktopReceiptGates"]:
+        assert f"--gate {gate}" in workflow
+
+    assert "verify-release-toolchain.mjs" in workflow
+    assert "pnpm --dir desktop run test:coverage" in workflow
+    assert "pnpm --dir desktop run test:accessibility" in workflow
+    assert "pnpm --dir desktop run test:e2e" in workflow
+    assert "tests/test_structured_diagnostics.py" in workflow
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "3.2.7"
+    assert "test:coverage" in package["scripts"]
+    coverage = policy["qa"]["desktopCoverage"]
+    assert f"provider: '{coverage['provider']}'" in vitest
+    for metric, threshold in coverage["thresholds"].items():
+        assert f"{metric}: {threshold}" in vitest
+    for exclusion in coverage["reviewedExclusions"]:
+        assert f"'{exclusion}'" in vitest

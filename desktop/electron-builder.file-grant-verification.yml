@@ -1,0 +1,6 @@
+# CI-only overlay for packaged native-dialog mediation verification. This
+# unpublished application substitutes a deterministic main-process dialog port;
+# production builds explicitly reject the adapter selectors.
+extends: ./electron-builder.verification.yml
+directories:
+  output: release-file-grant-verification

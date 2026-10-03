@@ -11,6 +11,19 @@ Release evidence contains fictional or aggregate test data only. It must never
 contain genealogy payloads, credentials, databases, backups, local paths, logs,
 prompt/response bodies, or secret values.
 
+`make sbom` invokes the locked CycloneDX environment generator in reproducible
+mode through the checked-in release-SBOM canonicalizer. The canonicalizer
+removes only the reviewed editable-project distribution reference, merges only
+semantically equivalent project components into the canonical PyPI identity,
+strips the document serial number and metadata timestamp, and requires the
+component references to exactly match a complete dependency graph. It sorts the
+result deterministically and publishes it with an atomic replacement.
+
+Schema drift, conflicting project components, an incomplete or dangling graph,
+or any remaining file URI or absolute local path fails with a stable code before
+the destination is replaced. CI, release readiness, and final release workflows
+must call this same Make interface rather than invoking `cyclonedx-py` directly.
+
 A gate is recorded as `verified`, `failed`, `unavailable`, or `unverified`.
 Only `verified` supports a positive compatibility claim. `unavailable` and
 `unverified` remain visible limitations in the release notes.
@@ -47,3 +60,49 @@ GitHub CLI assets and hashes, source repository and commit/ref, signer workflow,
 OIDC issuer, SLSA predicate, UTC timestamp, and success status. The manifest
 records that identity and the receipt digest. Unknown fields, omitted fields,
 non-success receipts, local paths, or identity drift fail evidence generation.
+
+## Native control-foundation records
+
+[`issue-363-macos-arm64-container-supervisor.json`](issue-363-macos-arm64-container-supervisor.json)
+is a sanitized, schema-v1 engineering record for the isolated native macOS
+arm64 Docker-control exercise. It binds the tested platform, engine and Compose
+identities, image digest, lifecycle operations, ambient-context preservation,
+and final owned-resource cleanup without recording a local path, socket,
+username, hostname, environment value, token, or response body.
+
+This record is partial source-feature evidence, not a release-gate result. It
+does not prove an application container runtime, workload authentication,
+secret or genealogy-data custody, migration, backup and recovery, all-platform
+support, packaged integration, or independent G5/G7 review. Future readiness
+evidence must not interpret this file as satisfying those remaining gates.
+
+## Tooling evaluation records
+
+Checked tooling evaluations such as
+[`uv-build-evaluation-v1.json`](uv-build-evaluation-v1.json) are reproducible
+engineering decision records, not release-gate results. The uv_build report
+binds exact backend versions, source commit and epoch, artifact hashes,
+comparison results, accepted archive-only normalizations, stable failure codes,
+and a compatible or incompatible status. Its closed schema rejects unknown or
+missing fields and its sanitization contract rejects local paths.
+
+The report documents why the evaluated candidate may or may not proceed to a
+separate adoption change. It does not prove a later commit or release candidate,
+cannot replace exact-candidate readiness evidence, and cannot turn an
+incompatible comparison into an authorized release backend. See the human
+[uv_build evaluation](../reference/UV_BUILD_EVALUATION.md) for the disposition.
+
+## Test-suite audit records
+
+[`issue-453-test-suite-audit.md`](issue-453-test-suite-audit.md) records the
+v0.7.0 consolidation audit, its before-and-after collection, runtime, and
+coverage measurements, and the rationale for both consolidated and retained
+test structures. It is a source-level maintenance record, not exact-candidate
+release-readiness evidence.
+
+## Extraction decision records
+
+[`issue-170-core-extraction-benchmark-and-dependency-report.md`](issue-170-core-extraction-benchmark-and-dependency-report.md)
+records CORE-42 benchmark/dependency inputs for GEDCOM and RootsMagic package
+extraction decisions. It is an issue-scoped architecture decision input, not a
+release-readiness gate result.

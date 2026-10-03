@@ -33,6 +33,10 @@ def test_agent_guidance_agrees_on_implemented_and_future_boundaries() -> None:
         "prompt-toolkit/Rich REPL",
         "FastAPI",
         "Electron",
+        "bounded Electron 0.6 desktop control shell",
+        "Home, Diagnostics, Settings, and onboarding",
+        "source-level gates",
+        "target-matched evidence",
         "future adapters",
         "same application-service contracts",
         "`CommandSpec`",
@@ -50,6 +54,7 @@ def test_agent_guidance_agrees_on_implemented_and_future_boundaries() -> None:
     stale_claims = (
         "executor/DTO boundary remains planned",
         "transport-neutral 0.3 executor as implemented until",
+        "isolated 0.5.0 work",
     )
     for claim in stale_claims:
         assert claim not in agents

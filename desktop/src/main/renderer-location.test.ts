@@ -1,3 +1,4 @@
+/** Verifies packaged renderer navigation cannot be redirected to untrusted origins. */
 import { describe, expect, it } from 'vitest'
 import { isTrustedRendererUrl, resolveRendererTarget } from './renderer-location'
 

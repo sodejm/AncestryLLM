@@ -87,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run the release signing policy command and return its exit status."""
     args = _parser().parse_args()
     try:
         mode = args.mode or default_signing_mode(args.version)

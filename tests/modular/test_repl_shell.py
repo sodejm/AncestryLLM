@@ -12,10 +12,10 @@ import sqlite3
 import sys
 import threading
 import types
-from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
@@ -23,14 +23,19 @@ from prompt_toolkit.completion import DummyCompleter
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
+from ancestryllm.application.results import TableResult
 from ancestryllm.console.router import RouteKind, RouteResult
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileKind
-from ancestryllm.core.jobs import JobSnapshot
 from ancestryllm.llm.contracts import GenerationRequest, GenerationResult
-from ancestryllm.llm.policy import ConsentGrant
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ancestryllm.core.context import AppContext
+    from ancestryllm.core.jobs import JobSnapshot
+    from ancestryllm.llm.policy import ConsentGrant
 
 
 @dataclass(frozen=True)
@@ -618,6 +623,7 @@ def test_missing_prompt_body_uses_multiline_editor_in_module_context(
 @pytest.mark.parametrize(
     ("value", "error_code"),
     (("", "MULTILINE_INPUT_EMPTY"), ("x" * 100_001, "MULTILINE_INPUT_TOO_LARGE")),
+    ids=("empty", "oversized"),
 )
 def test_multiline_editor_rejects_empty_and_oversized_input(
     shell_module,
@@ -808,14 +814,26 @@ def test_repl_preserves_bounded_file_error_code_without_path_or_payload(
     assert app_context.prompts.list() == []
 
 
-@pytest.mark.parametrize("operation", ("merge", "subtree", "quality", "rootsmagic"))
+@pytest.mark.parametrize(
+    ("operation", "expected_code"),
+    (
+        ("merge", "FILE_INPUT_UNREADABLE"),
+        ("subtree", "FILE_INPUT_UNREADABLE"),
+        ("quality", "FILE_INPUT_UNREADABLE"),
+        ("rootsmagic", "FILE_INPUT_UNREADABLE"),
+    ),
+)
 def test_repl_path_normalization_matches_the_one_shot_sanitized_error(
     shell_module,
     app_context: AppContext,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
+    expected_code: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     suffix = "rmtree" if operation == "rootsmagic" else "ged"
     private_input = Path(f"~PRIVATE-NONEXISTENT/tree.{suffix}")
     private_detail = "PRIVATE path normalization failure"
@@ -843,10 +861,14 @@ def test_repl_path_normalization_matches_the_one_shot_sanitized_error(
         if operation != "merge":
             command += " --root-person 'Fictional Example'"
 
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == expected_code
     assert str(private_input) not in rendered
     assert private_detail not in rendered
     assert output.read_bytes() == b"sentinel\n"
@@ -935,6 +957,9 @@ def test_repl_gedcom_ingress_failure_preserves_subtree_and_quality_outputs(
     tmp_path: Path,
     action: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     source = tmp_path / f"private-{action}.ged"
     private_payload = "PRIVATE-PAYLOAD fictional genealogy"
     source.write_text(
@@ -945,15 +970,18 @@ def test_repl_gedcom_ingress_failure_preserves_subtree_and_quality_outputs(
     output.write_bytes(b"sentinel\n")
     _set_file_limit(app_context, FileKind.GEDCOM, max_bytes=8)
 
-    failed, rendered = _background_failure(
-        shell_module,
-        app_context,
+    command = (
         f"gedcom {action} {shlex.quote(str(source))} "
-        f"--output {shlex.quote(str(output))} --root-person @I1@",
+        f"--output {shlex.quote(str(output))} --root-person @I1@"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
+    failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_TOO_LARGE"
     assert str(source) not in rendered
     assert private_payload not in rendered
     assert output.read_bytes() == b"sentinel\n"
@@ -999,6 +1027,9 @@ def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
     tmp_path: Path,
     operation: str,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     master = tmp_path / f"private-{operation}-master.ged"
     private_payload = "PRIVATE-PAYLOAD fictional sync input"
     master.write_text(
@@ -1033,10 +1064,14 @@ def test_repl_sync_ingress_failure_creates_no_release_or_failure_artifact(
             "--reason fictional-regression"
         )
 
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
+
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_TOO_LARGE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_TOO_LARGE"
     assert str(master) not in rendered
     assert private_payload not in rendered
     assert not release_root.exists()
@@ -1191,6 +1226,43 @@ def test_repl_ocr_ingress_failure_is_offline_and_payload_safe(
     assert str(source) not in rendered
     assert private_payload not in rendered
     provider_call.assert_not_called()
+
+
+def test_repl_backup_collision_snapshot_hides_host_paths(
+    shell_module,
+    app_context: AppContext,
+    tmp_path: Path,
+) -> None:
+    private_parent = tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-HOME-CANARY"
+    private_parent.mkdir(parents=True)
+    destination = private_parent / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    destination.write_bytes(b"existing encrypted backup sentinel")
+
+    with create_pipe_input() as pipe:
+        application, stdout, stderr = _application(shell_module, app_context, pipe)
+        asyncio.run(application.execute_line(f"database backup {shlex.quote(str(destination))}"))
+        failed = application.jobs.wait("j000001", timeout=2)
+        asyncio.run(application.execute_line("jobs show j000001"))
+        application.jobs.shutdown()
+
+    assert failed.state.value == "failed"
+    assert failed.error_code == "BACKUP_EXISTS"
+    assert failed.error_message == "The backup destination already exists."
+    assert failed.error_remediation == (
+        "Choose a different destination or remove the existing item before retrying."
+    )
+    assert failed.resource_keys
+    assert all(resource_ref.startswith("resource_") for resource_ref in failed.resource_keys)
+    rendered = stdout.getvalue() + stderr.getvalue() + json.dumps(shell_module.to_plain(failed))
+    for private_value in (
+        str(destination),
+        destination.name,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        str(app_context.database.path),
+    ):
+        assert private_value not in rendered
+    assert destination.read_bytes() == b"existing encrypted backup sentinel"
 
 
 def test_shell_dispatches_direct_commands_off_the_event_loop(
@@ -1493,6 +1565,9 @@ def test_repl_sync_path_normalization_reaches_typed_ingress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     private_master = Path("~PRIVATE-NONEXISTENT/master.ged")
     private_detail = "PRIVATE sync normalization failure"
     original_expanduser = Path.expanduser
@@ -1516,11 +1591,14 @@ def test_repl_sync_path_normalization_reaches_typed_ingress(
         f"--release-root={shlex.quote(str(release_root))} "
         "--no-quality-report"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
 
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_UNREADABLE"
     assert str(private_master) not in rendered
     assert private_detail not in rendered
     assert not release_root.exists()
@@ -1533,6 +1611,9 @@ def test_repl_sync_release_root_normalization_reaches_typed_ingress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from ancestryllm.cli import build_parser
+    from ancestryllm.cli import dispatch as cli_dispatch
+
     private_release_root = Path("~PRIVATE-NONEXISTENT/releases")
     private_detail = "PRIVATE release-root normalization failure"
     original_expanduser = Path.expanduser
@@ -1555,11 +1636,14 @@ def test_repl_sync_release_root_normalization_reaches_typed_ingress(
         f"--release-root {shlex.quote(str(private_release_root))} "
         "--no-quality-report"
     )
+    cli_namespace = build_parser().parse_args(shlex.split(command))
+    with pytest.raises(AncestryError) as cli_error:
+        cli_dispatch(cli_namespace, app_context, emit=lambda _value, _json: None)
 
     failed, rendered = _background_failure(shell_module, app_context, command)
 
     assert failed.state.value == "failed"
-    assert failed.error_code == "FILE_INPUT_UNREADABLE"
+    assert failed.error_code == cli_error.value.code == "FILE_INPUT_UNREADABLE"
     assert str(private_release_root) not in rendered
     assert private_detail not in rendered
 
@@ -1652,3 +1736,21 @@ def test_prompt_toolkit_repl_preserves_modules_list_json_schema(
         "required_services",
     }
     assert gedcom["actions"] == ["merge", "subtree", "quality", "sync"]
+
+
+def test_prompt_toolkit_repl_renders_bare_modules_as_a_readable_chooser(
+    shell_module, app_context: AppContext
+) -> None:
+    with create_pipe_input() as pipe:
+        application, stdout, _stderr = _application(shell_module, app_context, pipe)
+        route = application.router.route("modules")
+        asyncio.run(application.execute_line("modules"))
+
+    assert isinstance(route.value, TableResult)
+    rendered = stdout.getvalue()
+    assert "Module" in rendered
+    assert "Enter Command" in rendered
+    assert "Description" in rendered
+    assert "GEDCOM" in rendered
+    assert "use gedcom" in rendered
+    assert '{"module_id":' not in rendered

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.console.history import SecureHistory
 from ancestryllm.console.security import history_is_sensitive
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _history(path: Path, *, limit: int = 1_000) -> SecureHistory:
@@ -58,7 +60,7 @@ def test_secure_history_recovers_from_malformed_records_and_obeys_load_limit(
         + "\n",
         encoding="utf-8",
     )
-    os.chmod(history_path, 0o600)
+    history_path.chmod(0o600)
 
     history = _history(history_path, limit=3)
 

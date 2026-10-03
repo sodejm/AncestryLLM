@@ -20,10 +20,12 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 try:
     import resource
@@ -515,6 +517,7 @@ def _performance_samples(
 
 
 def performance_snapshot(manifest: dict[str, Any], temporary_root: Path) -> dict[str, Any]:
+    """Measure the characterized core-contract workload."""
     policy = manifest["performance"]
     runs = int(policy["runs"])
     warm_iterations = int(policy["warm_iterations_per_run"])
@@ -549,6 +552,7 @@ def _git_revision() -> str:
 
 
 def capture_report(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Capture the complete core-contract characterization report."""
     inventory = verify_inventory(manifest)
     expected_hashes = fixture_hashes(manifest)
     source_tree_sha256 = _source_tree_digest()
@@ -615,9 +619,11 @@ def compare_reports(
     if baseline.get("baseline_id") != candidate.get("baseline_id"):
         raise CharacterizationError("reports use different characterization baselines")
 
-    for field in ("fixture_digest", "semantic_digest"):
-        if baseline.get(field) != candidate.get(field):
-            violations.append({"gate": field, "reason": "deterministic contract changed"})
+    violations.extend(
+        {"gate": field, "reason": "deterministic contract changed"}
+        for field in ("fixture_digest", "semantic_digest")
+        if baseline.get(field) != candidate.get(field)
+    )
 
     baseline_dependencies = baseline.get("dependencies", {})
     candidate_dependencies = candidate.get("dependencies", {})
@@ -751,7 +757,7 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        os.replace(temporary, path)
+        temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -779,6 +785,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the characterize core contracts command and return its exit status."""
     args = _parser().parse_args(argv)
     try:
         if args.command == "_measure":

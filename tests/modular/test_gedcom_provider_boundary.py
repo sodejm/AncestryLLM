@@ -94,9 +94,11 @@ def test_only_provider_adapters_import_network_clients() -> None:
                 modules = (node.module,)
                 if node.module == "google":
                     modules += tuple(f"google.{alias.name}" for alias in node.names)
-            for module in modules:
-                if module in forbidden or any(module.startswith(f"{item}.") for item in forbidden):
-                    violations.append(f"{relative}:{node.lineno}:{module}")
+            violations.extend(
+                f"{relative}:{node.lineno}:{module}"
+                for module in modules
+                if module in forbidden or any(module.startswith(f"{item}.") for item in forbidden)
+            )
     assert violations == []
 
 

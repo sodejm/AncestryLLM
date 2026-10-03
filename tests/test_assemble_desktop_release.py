@@ -561,7 +561,7 @@ def test_pre_1_aggregate_rejects_trusted_signing_mode(tmp_path: Path) -> None:
                     "expectedOs": expected_os,
                     "arch": arch,
                     "binarySigningMode": "trusted",
-                    "gates": {gate: True for gate in sorted((*COMMON_GATES, *target_gates))},
+                    "gates": dict.fromkeys(sorted((*COMMON_GATES, *target_gates)), True),
                     "artifacts": {
                         "installer": {
                             "name": installer.name,

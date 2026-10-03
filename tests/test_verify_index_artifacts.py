@@ -1,3 +1,5 @@
+"""Verify package-index artifact allowlists, hashes, and expected release identities."""
+
 from __future__ import annotations
 
 import hashlib

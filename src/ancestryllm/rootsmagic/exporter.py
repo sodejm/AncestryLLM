@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
 
 from ancestryllm.application import _rootsmagic_export
-
-if TYPE_CHECKING:
-    from ancestryllm.application._rootsmagic_export import (
-        RootsMagicExporter as RootsMagicExporter,
-    )
-    from ancestryllm.application._rootsmagic_export import (
-        RootsMagicExportResult as RootsMagicExportResult,
-    )
+from ancestryllm.application._rootsmagic_export import (
+    RootsMagicExporter as RootsMagicExporter,
+)
+from ancestryllm.application._rootsmagic_export import (
+    RootsMagicExportResult as RootsMagicExportResult,
+)
 
 __all__ = ["RootsMagicExportResult", "RootsMagicExporter"]
 

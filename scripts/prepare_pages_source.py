@@ -10,9 +10,9 @@ import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from docs_linking import (
     DocumentationLinkError,
@@ -22,6 +22,9 @@ from docs_linking import (
 )
 from rewrite_wiki_links import rewrite_markdown_link_destinations
 from validate_wiki_docs import validate_wiki_source
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _FRONT_MATTER = re.compile(
     r"\A---[ \t]*\r?\n(?P<metadata>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\Z)", re.DOTALL
@@ -229,6 +232,7 @@ def prepare_pages_source(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the prepare pages source command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source", type=Path, required=True, help="canonical documentation directory"
@@ -243,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the prepare pages source command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         result = prepare_pages_source(args.source, args.destination, source_sha=args.source_sha)

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,6 +15,9 @@ from ancestryllm.core.cancellation import (
     CancellationToken,
     bind_cancellation_token,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _ParsedLine:

@@ -36,6 +36,8 @@ _PROFILE_OPTIONS: dict[str, dict[str, int]] = {
 
 @dataclass(frozen=True)
 class ModelMetadata:
+    """Identify the local model and runtime configuration used by a benchmark."""
+
     name: str
     digest: str | None
     size_bytes: int | None
@@ -47,6 +49,8 @@ class ModelMetadata:
 
 @dataclass(frozen=True)
 class RequestMetrics:
+    """Record latency, throughput, and token counts for one benchmark request."""
+
     phase: str
     status: str
     wall_seconds: float
@@ -63,6 +67,8 @@ class RequestMetrics:
 
 @dataclass(frozen=True)
 class BenchmarkResult:
+    """Combine benchmark identity, request metrics, and response validation results."""
+
     model: ModelMetadata
     profile: str
     profile_options: dict[str, int]
@@ -163,39 +169,41 @@ def _measure_request(
     first_token_at: float | None = None
     final_payload: Mapping[str, Any] | None = None
     try:
-        with httpx.Client(timeout=timeout_seconds) as client:
-            with client.stream(
+        with (
+            httpx.Client(timeout=timeout_seconds) as client,
+            client.stream(
                 "POST",
                 f"{endpoint}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": True, "options": profile_options},
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    payload = json.loads(line)
-                    if not isinstance(payload, Mapping):
-                        continue
-                    if payload.get("response") and first_token_at is None:
-                        first_token_at = time.monotonic()
-                        if cancel_after_first_token:
-                            return RequestMetrics(
-                                phase=phase,
-                                status="cancelled",
-                                wall_seconds=round(first_token_at - started, 6),
-                                ttft_seconds=round(first_token_at - started, 6),
-                                completion_tokens=None,
-                                completion_tokens_per_second=None,
-                                prompt_tokens=None,
-                                prompt_tokens_per_second=None,
-                                ollama_total_seconds=None,
-                                ollama_load_seconds=None,
-                                queue_delay_seconds=_queue_delay(queued_at, started),
-                                cancelled=True,
-                            )
-                    if payload.get("done") is True:
-                        final_payload = payload
-                        break
+            ) as response,
+        ):
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                payload = json.loads(line)
+                if not isinstance(payload, Mapping):
+                    continue
+                if payload.get("response") and first_token_at is None:
+                    first_token_at = time.monotonic()
+                    if cancel_after_first_token:
+                        return RequestMetrics(
+                            phase=phase,
+                            status="cancelled",
+                            wall_seconds=round(first_token_at - started, 6),
+                            ttft_seconds=round(first_token_at - started, 6),
+                            completion_tokens=None,
+                            completion_tokens_per_second=None,
+                            prompt_tokens=None,
+                            prompt_tokens_per_second=None,
+                            ollama_total_seconds=None,
+                            ollama_load_seconds=None,
+                            queue_delay_seconds=_queue_delay(queued_at, started),
+                            cancelled=True,
+                        )
+                if payload.get("done") is True:
+                    final_payload = payload
+                    break
     except httpx.TimeoutException:
         return RequestMetrics(
             phase=phase,
@@ -288,18 +296,18 @@ def run(
             cancel_after_first_token=cancel_after_first_token,
         )
     ]
-    for index in range(warm_runs):
-        requests.append(
-            _measure_request(
-                model=model,
-                endpoint=endpoint,
-                prompt=prompt,
-                profile_options=profile_options,
-                timeout_seconds=timeout_seconds,
-                phase=f"warm-{index + 1}",
-                cancel_after_first_token=cancel_after_first_token,
-            )
+    requests.extend(
+        _measure_request(
+            model=model,
+            endpoint=endpoint,
+            prompt=prompt,
+            profile_options=profile_options,
+            timeout_seconds=timeout_seconds,
+            phase=f"warm-{index + 1}",
+            cancel_after_first_token=cancel_after_first_token,
         )
+        for index in range(warm_runs)
+    )
     if queue_depth > 1:
         queued_at = time.monotonic()
         with ThreadPoolExecutor(max_workers=queue_depth) as executor:
@@ -350,6 +358,7 @@ def _safe_output_path(output: Path) -> Path:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the benchmark local LLM command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, help="already-installed Ollama model name")
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
@@ -367,6 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the benchmark local LLM command and return its exit status."""
     args = build_parser().parse_args(argv)
     if args.timeout_seconds <= 0 or args.warm_runs < 0 or args.queue_depth <= 0:
         raise SystemExit(

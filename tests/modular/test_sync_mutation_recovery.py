@@ -1,0 +1,302 @@
+"""Exercise journal recovery through the real fictional sync command."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import multiprocessing
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from ancestryllm.core.directory_mutation import DirectoryMutation
+from ancestryllm.core.mutation import LocalMutationCoordinator
+from ancestryllm.gedcom.sync import run_sync
+
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+
+
+def _update(root: Path) -> list[str]:
+    return [
+        "update",
+        "--master",
+        str(FIXTURES / "baseline-master.ged"),
+        "--initialize-manifest",
+        "--snapshot",
+        f"fictional:ancestry={FIXTURES / 'ancestry-snapshot-v1.ged'}",
+        "--release-root",
+        str(root),
+        "--no-quality-report",
+    ]
+
+
+def _terminate_sync(namespace: str, arguments: list[str], boundary: str, occurrence: int) -> None:
+    from ancestryllm.core import mutation
+    from ancestryllm.gedcom import sync_publication
+
+    seen = 0
+
+    def checkpoint(self: DirectoryMutation, reached: str) -> None:
+        nonlocal seen
+        if reached == boundary:
+            seen += 1
+            if seen == occurrence:
+                os._exit(37)
+
+    original = sync_publication._remove_published_staging_marker
+
+    def finalize(*args: object, **kwargs: object) -> None:
+        if boundary == "published":
+            os._exit(37)
+        original(*args, **kwargs)
+        if boundary == "finalized":
+            os._exit(37)
+
+    with (
+        patch.object(mutation, "coordinator_namespace", return_value=Path(namespace)),
+        patch.object(DirectoryMutation, "_checkpoint", checkpoint),
+        patch.object(sync_publication, "_remove_published_staging_marker", finalize),
+    ):
+        run_sync(arguments, raise_errors=True)
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+@pytest.mark.parametrize(
+    ("boundary", "occurrence"),
+    [
+        (boundary, 1)
+        for boundary in [
+            "staging_planned",
+            "staging_created",
+            "member_created",
+            "member_written",
+            "prepared",
+            "committing",
+            "published",
+            "finalized",
+            "committed",
+        ]
+    ]
+    + [
+        (boundary, occurrence)
+        for boundary in ("member_created", "member_written")
+        for occurrence in range(2, 6)
+    ],
+)
+def test_sync_restart_preserves_complete_release(
+    tmp_path: Path, operation: str, boundary: str, occurrence: int
+) -> None:
+    root = tmp_path / "releases"
+    root.mkdir()
+    unrelated = root / "unrelated.txt"
+    unrelated.write_bytes(b"preserved")
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional recovery test",
+        ]
+    namespace = tmp_path / "journal"
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_sync,
+        args=(str(namespace), arguments, boundary, occurrence),
+    )
+    process.start()
+    process.join(20)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Sync did not reach its requested crash boundary")
+    assert process.exitcode == 37
+    with LocalMutationCoordinator(namespace) as coordinator:
+        DirectoryMutation.reconcile_root(root, coordinator)
+        DirectoryMutation.reconcile_root(root, coordinator)
+        assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),)) == ()
+        with coordinator._transaction() as database:
+            outcomes = database.execute(
+                "SELECT state,outcome FROM operations JOIN directory_publications USING(operation_id)"
+            ).fetchall()
+        assert len(outcomes) == 1
+        assert outcomes[0]["outcome"] is not None
+        committed = boundary in {"published", "finalized", "committed"}
+        assert outcomes[0]["state"] == ("committed" if committed else "aborted")
+    releases = list(root.glob("g*"))
+    assert len(releases) == int(committed)
+    if committed:
+        release = releases[0]
+        assert sorted(child.name for child in release.iterdir()) == [
+            "manifest.json",
+            "master.ged",
+            "quality.md",
+            "rollback.json",
+            "update.md",
+        ]
+        manifest = json.loads((release / "manifest.json").read_bytes())
+        for name, digest in manifest["artifact_checksums"].items():
+            assert hashlib.sha256((release / name).read_bytes()).hexdigest() == digest
+    assert unrelated.read_bytes() == b"preserved"
+    assert not list(root.glob(".gedcom-*"))
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+def test_sync_committed_outcome_wins_over_late_cancellation(
+    tmp_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ancestryllm.core.cancellation import CancellationToken, bind_cancellation_token
+    from ancestryllm.gedcom import sync_publication
+    from ancestryllm.gedcom.sync import execute_sync
+
+    root = tmp_path / "releases"
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional cancellation test",
+        ]
+    token = CancellationToken()
+    original = sync_publication._remove_published_staging_marker
+
+    def cancel_after_commit(*args: object, **kwargs: object) -> None:
+        original(*args, **kwargs)
+        token.request()
+
+    monkeypatch.setattr(sync_publication, "_remove_published_staging_marker", cancel_after_commit)
+    with bind_cancellation_token(token):
+        result = execute_sync(arguments, raise_errors=True)
+    assert token.requested
+    assert result.committed
+    assert result.exit_code == 0
+    assert len(result.artifacts) == 5
+    assert all(path.is_file() for path in result.artifacts)
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+@pytest.mark.parametrize("boundary", ["published", "finalized"])
+def test_sync_retry_stops_after_recovering_committed_generation(
+    tmp_path, monkeypatch, operation, boundary
+):
+    import datetime
+    from types import SimpleNamespace
+
+    from ancestryllm.core import mutation
+    from ancestryllm.core.errors import AncestryError
+    from ancestryllm.gedcom import sync_operations
+
+    namespace = tmp_path / "journal"
+    monkeypatch.setattr(mutation, "coordinator_namespace", lambda: namespace)
+    root = tmp_path / "releases"
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional retry",
+        ]
+    process = multiprocessing.get_context("spawn").Process(
+        target=_terminate_sync, args=(str(namespace), arguments, boundary, 1)
+    )
+    process.start()
+    process.join(20)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Sync did not reach publication")
+    assert process.exitcode == 37
+    release = next(root.glob("g*"))
+    before = {
+        path.name: path.read_bytes() for path in release.iterdir() if path.suffix != ".marker"
+    }
+
+    class Later(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return super().now(tz) + datetime.timedelta(days=1)
+
+    monkeypatch.setattr(sync_operations, "dt", SimpleNamespace(datetime=Later, UTC=datetime.UTC))
+    with pytest.raises(AncestryError) as failure:
+        run_sync(arguments, raise_errors=True)
+    assert failure.value.code == "SYNC_RECOVERED_GENERATION"
+    assert list(root.glob("g*")) == [release]
+    for name in ("master.ged", "manifest.json", "rollback.json", "quality.md", "update.md"):
+        assert (release / name).read_bytes() == before[name]
+    with LocalMutationCoordinator(namespace) as coordinator:
+        assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),)) == ()
+    assert not list(root.glob(".gedcom-*"))
+
+
+@pytest.mark.parametrize("operation", ["update", "rebase"])
+def test_sync_failure_preserves_foreign_staged_member(tmp_path, monkeypatch, operation):
+    from ancestryllm.core.errors import AncestryError
+
+    root = tmp_path / "releases"
+    arguments = _update(root)
+    if operation == "rebase":
+        source = tmp_path / "source"
+        assert run_sync(_update(source), raise_errors=True) == 0
+        previous = next(source.glob("g0001-*"))
+        arguments = [
+            "rebase",
+            "--master",
+            str(previous / "master.ged"),
+            "--manifest",
+            str(previous / "manifest.json"),
+            "--release-root",
+            str(root),
+            "--reason",
+            "Fictional foreign member test",
+        ]
+    replaced = []
+
+    def replace_member(self, boundary):
+        if boundary != "member_written" or replaced:
+            return
+        stage = self.target.parent / self.record.stage
+        member = next(stage.glob("master.ged"))
+        member.rename(tmp_path / "preserved-owned-master")
+        member.write_bytes(b"foreign fictional content")
+        replaced.append(member)
+        raise OSError("Injected failure after a foreign replacement")
+
+    monkeypatch.setattr(DirectoryMutation, "_checkpoint", replace_member)
+    with pytest.raises(AncestryError) as failure:
+        run_sync(arguments, raise_errors=True)
+    assert failure.value.code == "SYNC_OUTPUT"
+    assert len(replaced) == 1
+    assert replaced[0].read_bytes() == b"foreign fictional content"
+    with LocalMutationCoordinator() as coordinator:
+        assert coordinator.interrupted((DirectoryMutation._root_scope(root, coordinator),))
+        with pytest.raises(AncestryError) as error:
+            DirectoryMutation.reconcile_root(root, coordinator)
+        assert error.value.code == "MUTATION_RECOVERY_REQUIRED"
+    assert replaced[0].read_bytes() == b"foreign fictional content"

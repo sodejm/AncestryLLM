@@ -1,3 +1,5 @@
+"""Verify release assets match the signed manifest and supported-platform allowlist."""
+
 from __future__ import annotations
 
 import hashlib

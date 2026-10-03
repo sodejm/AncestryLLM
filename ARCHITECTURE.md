@@ -1,44 +1,110 @@
 # AncestryLLM architecture
 
 This document is the architectural source of truth for the repository. It
-distinguishes the last published behavior, implemented Unreleased changes, and
-later-roadmap boundaries that are intentionally not implemented.
+distinguishes the bounded `0.6.0` release contract, implemented source-level
+features that still require named packaged evidence, and later-roadmap
+boundaries that are intentionally not implemented.
 Executable ownership and import rules are specified in
-[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The focused
+[`docs/reference/ARCHITECTURE_CONTRACTS.md`](docs/reference/ARCHITECTURE_CONTRACTS.md). The focused
 REPL layers and migration compatibility contract are specified in
-[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md). It should be read
+[`docs/explanation/REPL_ARCHITECTURE.md`](docs/explanation/REPL_ARCHITECTURE.md). It should be read
 with the implemented shared execution contract in
-[`docs/COMMAND_EXECUTOR.md`](docs/COMMAND_EXECUTOR.md),
+[`docs/reference/COMMAND_EXECUTOR.md`](docs/reference/COMMAND_EXECUTOR.md),
 with the accepted desktop decision in
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
-and the accepted, not-yet-implemented deployment direction in
+and the accepted deployment direction and implemented profile control plane in
 [`docs/ADR-0026-local-first-container-remote-deployment.md`](docs/ADR-0026-local-first-container-remote-deployment.md),
+the CORE-42 extraction decision in
+[`docs/ADR-0027-core-package-extraction-decision.md`](docs/ADR-0027-core-package-extraction-decision.md),
 and the operator-focused guides under `docs/`, especially the threat model,
 privacy and consent policy, GEDCOM compatibility guide, and CLI reference.
 
-The published `0.4.0` runtime is a single-user, local-first Python application
+The `0.6.0` release tree is a single-user, local-first Python application
 for genealogy research. It combines deterministic RootsMagic and GEDCOM
-workflows with optional LLM assistance. Isolated `0.5.0` work adds an
+workflows with optional LLM assistance. Version `0.6.0` includes an
 authenticated FastAPI control adapter for health and capability discovery, a
 UI-only Electron shell with Home, Diagnostics, a sanitized capability summary,
 local visual Settings, and a bounded first-run Home welcome, plus native
-packaged-sidecar build and supervision.
-The API exposes no genealogy, provider, domain, or generic command-dispatch
-route. The exact six-method renderer bridge uses deterministic fictional data
-in development; packaged Electron main alone may call the authenticated fixed
-capabilities route. A supported 0.x desktop release requires a target-matched,
+packaged-sidecar build, pre-spawn payload verification, full-process-tree
+supervision, and bounded shutdown drain.
+The `0.6.0` source also includes three path-free opaque file-grant methods, five
+fixed settings/credential methods, six fixed provider-configuration and
+consent methods, and five fixed task-lifecycle request methods plus one
+validated event listener. Settings expose only reviewed non-secret metadata and
+presence-only credential status; secret values are write-only and never return
+across HTTP or IPC. Issue #107 adds a local-only first-run choice, a typed
+sanitized startup-diagnostic report, and fail-closed read-only recovery. Issue
+#108 adds explicit endpoint tests, optimistic-revision provider profiles, and
+complete consent previews and grants without adding provider execution.
+Issue #109 adds a Tasks presentation that reloads backend snapshots, follows
+bounded monotonic events, distinguishes cooperative cancellation phases, and
+shows only coded failures and path-free artifact metadata. It adds no task
+admission, provider execution, direct artifact action, or genealogy operation.
+Issue #110 adds a fixed internal synchronous transient-chat API and application
+service. Each session binds one exact stored provider profile and model;
+pre-provider limits, endpoint policy, credentials, and fresh consent are
+rechecked for every run. Prompt and response content stays in process memory,
+the model receives no tools, and privacy-minimal audit records contain only
+reviewed identifiers, counters, and hashes.
+Issue #56 adds a service-internal asynchronous iterator over existing
+synchronous provider streams. Policy, consent, and capability checks finish
+before a context-preserving worker begins. The off-loop bridge uses a bounded
+queue and byte-bounded chunks, an absolute lifecycle deadline, cooperative
+cancellation, and exactly one terminal audit outcome. Structured requests stay
+on the validated non-streaming path. This boundary adds no API route, Electron
+bridge, renderer state, public streaming transport, or provider authority.
+Issue #111 consumes those boundaries through fixed authenticated start, SSE,
+and cancellation routes plus an Electron Main-owned source bridge. Schema-v1
+events are owner-scoped, strictly validated, and batched within 16 ms or 4 KiB.
+Main pauses the private stream at 256 KiB of exact unacknowledged encoded data,
+cancels after a 15-second acknowledgement stall, and permits only one replay
+reconnection for the same run and cursor without retrying provider execution.
+The sidecar retains only a bounded in-memory replay and records one
+payload-free terminal audit outcome across success, cancellation, shutdown, or
+restart reconciliation.
+Issue #112 adds the renderer-owned transient conversation presentation over
+that fixed bridge. The Chat workspace exposes only policy-compatible
+profile/model/consent choices, bounded session history, ordered stream state,
+stop/regenerate controls, usage placeholders, plain-text copy, and one polite
+status announcement. Model Markdown is parsed into a closed React element
+allowlist; raw HTML, images, embeds, unsafe or implicit links, executable model
+actions, and HTML clipboard content are rejected. Electron Main alone validates,
+confirms, and opens an explicit HTTPS destination. Conversation state remains
+bounded process memory and is cleared with renderer/session teardown. This
+adds no genealogy operation, generic provider dispatch, renderer network,
+filesystem, tool, or public API authority; target-matched packaged and
+adversarial evidence remains Issue #131.
+Packaged desktop startup uses the OS keyring only, blocks settings, preference,
+credential, provider-profile, and consent mutations while a required startup
+component is degraded, and never repairs configuration, creates a database, or
+replaces a key as part of diagnostics. Outside the fixed Issue #110-#112 chat
+routes, the API exposes no genealogy, provider-execution, domain, or generic
+command-dispatch route. Development uses
+deterministic fictional data, and packaged Electron main alone may call the
+authenticated fixed routes. A supported 0.x
+desktop release requires a target-matched,
 manually installed official unsigned installer and all release assurance gates.
 macOS and Windows can display an unknown-publisher or Gatekeeper prompt; users
 must verify published checksums and release evidence before installation.
 Unsigned CI artifacts and unpacked development builds are verification inputs
-only. Version 0.5.0 has no updater or background update channel.
+only. Version 0.6.0 has no updater or background update channel.
 
-There is no current supported production browser, public/LAN, container, or
-remote runtime. ADR-0026 accepts a planned single-household container backend
-and advanced self-supported remote profile, but neither is implemented or
-available. It does not accept a browser client, general public API, multi-user
-server, or multi-tenant service. The one-shot CLI and interactive console
-remain the implemented genealogy-capable user-facing adapters. Every adapter
+There is no current supported production browser, public/LAN, application
+container, or remote application runtime. The `0.6.0` source implements
+ADR-0026's versioned, local-default deployment-profile control plane, Issue
+#363's host-only container-control foundation, Issue #348's macOS arm64 runtime
+acquisition and lifecycle surface, and Issue #349's probe-only OCI and Compose
+verification topology. Issue #348 installs and manages only the app-owned
+Colima/Lima, Docker CLI, Compose, and Buildx substrate. Issue #349 builds a
+non-root gateway and optional worker but deliberately exposes only private
+health/capability probes, publishes no port, and cannot initialize or migrate
+genealogy storage. Neither issue activates a deployment profile, brokers
+application secrets, mounts user genealogy data, or exposes Docker authority
+to the renderer or containers. Remote enrollment and remote runtime remain
+unimplemented. The application does not accept a browser client, general
+public API, multi-user server, or multi-tenant service. The one-shot CLI and
+interactive console remain the implemented genealogy-capable user-facing
+adapters. Every adapter
 must consume the same application contracts and services without depending on
 terminal presentation or redefining domain behavior.
 
@@ -60,9 +126,12 @@ earlier priority.
 5. **Preserve genealogy evidence.** GEDCOM processing is loss-minimizing:
    citations, custom/vendor structures, relationships, conflicts, and unknown
    records are retained whenever they can be represented safely.
-6. **Publish atomically and make loss visible.** Configuration, GEDCOM exports,
-   and sync generations are staged before replacement or publication. Export
-   and sync reports disclose omissions and unsupported source data.
+6. **Stage publication and make loss visible.** Configuration files and sync
+   directories publish through atomic filesystem operations under durable
+   cross-process ownership. Legacy exports with separate filenames retain
+   recoverable complete-set semantics; they do not become visible in one
+   filesystem operation. Export and sync reports disclose omissions and
+   unsupported source data.
 7. **Keep interfaces replaceable.** Adapters render and route; services own use
    cases; infrastructure implements storage, provider, and file boundaries.
 
@@ -86,8 +155,8 @@ flowchart LR
     GED["GEDCOM files and\nrelease bundles"]
     LocalLLM["Approved Ollama endpoint"]
     Cloud["Allowlisted cloud\nproviders"]
-    ControlAPI["Versioned FastAPI control adapter\nhealth/capabilities in 0.5.0 source"]
-    Desktop["Bounded Electron shell\n0.5.0 control surface"]
+    ControlAPI["Versioned FastAPI control adapter\n0.6 source: control, diagnostics, settings, providers, consent, tasks, and chat"]
+    Desktop["Bounded Electron shell\n0.6 supported core plus source-level gated administration, tasks, and chat"]
     Future["Desktop domain API adapters\nlater roadmap"]
 
     Operator --> CLI
@@ -130,6 +199,26 @@ GEDCOM, RootsMagic content, prompt variables, OCR text, provider output, and
 external snapshots are untrusted data. An LLM is never an authority for family
 tree facts and receives no shell, SQL, filesystem, or other tool capability.
 
+### Repository delivery review authority
+
+The pull-request review workflow is a repository-delivery administrative
+boundary, not an application-runtime path. A trusted delivery driver records
+the immutable pull-request target, then reads `AGENTS.md` and the review skill
+from the recorded base SHA before it can request a review, post a disposition,
+or resolve a conversation. The pull-request head, its patch, and GitHub-supplied
+content are untrusted and cannot alter that authority. A review result is usable
+only when the expected Codex integration identity associates a successful
+terminal result with the exact trusted request and immutable target; explicit
+failure, a non-successful required check, unknown identity, unbound result,
+changed target, draft state, or unavailable evidence blocks delivery. The driver
+revalidates every exact-target Codex finding, including one already marked
+resolved, and treats resolution status as untrusted input: it verifies who
+resolved it and why, plus the exact-target evidence, before honoring a prior
+resolution. This tooling boundary grants no authority to push, merge, mark a
+pull request ready, or resolve security-sensitive findings without the required
+human decision. It changes no application data flow, runtime adapter, or product
+trust boundary.
+
 ### Genealogy authority
 
 The project has three deliberately different data roles:
@@ -151,20 +240,21 @@ The project has three deliberately different data roles:
 | `src/ancestryllm/cli.py` | Thin one-shot compatibility adapter and application entry point over the shared terminal path. |
 | `src/ancestryllm/console/` | Implemented prompt-toolkit/Rich REPL input, session, completion, and job adapter. |
 | `src/ancestryllm/terminal/` | Shared terminal parser, invocation translation, presentation, and dispatch composition used by CLI and REPL. |
-| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. |
-| `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, OCR, and database commands. |
+| `src/ancestryllm/application/` | Transport-neutral DTO, operation, port, artifact, error, invocation, outcome, `CommandExecutor`, and service-owned genealogy aggregate contracts. The `0.6.0` source-level `SettingsService`, `SecretManagementService`, and `DeploymentService` own reviewed non-secret settings, write-only credentials, and explicit deployment intent. Issue #104's `JobLifecycleService` owns strict schema-v1 job snapshots/events, replay, cooperative cancellation, terminal-state reconciliation, and shutdown assessment without depending on API or Electron types. Issue #110's standard-library-only chat DTOs define bounded schema-v1 session and run contracts without importing API, provider, database, or presentation types; Issue #111 extends them with immutable owner-scoped run and lifecycle-event contracts. |
+| `src/ancestryllm/execution/` | Focused adapter composition for modules, RootsMagic, GEDCOM, prompts, people, providers, secrets, deployment profiles, OCR, and database commands. |
 | `src/ancestryllm/core/commands.py` | Single framework-independent command specification, aliases, route identity, and dispatch metadata. |
-| `src/ancestryllm/core/` | Configuration, dependency composition, module registry, cancellation, secret boundary, and compatibility errors. |
+| `src/ancestryllm/core/` | Configuration, typed deployment-profile schema, dependency composition, module registry, cancellation, secret boundary, compatibility errors, and the shared durable local mutation coordinator. Its account-scoped metadata journal and OS resource locks coordinate configuration replacement, artifact/RootsMagic export publication, and sync generations across native processes. Recovery requires newly authorized resource binding; it never restores desktop grants. Internal terminal history is bounded, while explicit retry outcomes and unresolved recovery retain their authority. See [mutation recovery](docs/reference/MUTATION_RECOVERY.md) for visibility and evidence limits. |
 | `src/ancestryllm/domain/` | Provider- and adapter-independent genealogy identity, change, quality, provenance, and failure value objects. |
-| `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, and diagnostics. |
-| `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. |
+| `src/ancestryllm/storage/` | SQLCipher lifecycle, schema, repositories, migrations, backup, diagnostics, and the `0.6.0` bounded job snapshot/event repository. |
+| `src/ancestryllm/llm/` | Provider contract, registry, adapters, consent policy, profiles, validation, and audited generation. Issue #110's `ChatService` owns transient synchronous chat history, exact-profile preflight, fresh consent, bounded generation, and payload-free audit composition. Issue #56's internal bridge adapts authorized synchronous provider iterators to bounded asynchronous consumption without adding transport authority. Issue #111's `ChatStreamingService` owns bounded replay, monotonic lifecycle events, cancellation, shutdown, restart reconciliation, and exactly one payload-free terminal audit outcome. |
 | `src/ancestryllm/rootsmagic/` | Public immutable-source, query-orchestration, and GEDCOM mapping/export boundaries over characterized compatibility modules. |
 | `src/ancestryllm/gedcom/` | Public parser, graph, identity, quality, serialization, service, and sync boundaries over characterized loss-minimizing kernels. |
 | `src/ancestryllm/prompts/` | Immutable prompt revisions and exact-variable rendering. |
 | `src/ancestryllm/research/` | Curated encrypted research-person service. |
 | `src/ancestryllm/ocr/` | Provider-neutral extraction from already-transcribed OCR text. |
-| `src/ancestryllm/api/` | Source-level `0.5.0` internal FastAPI control adapter: authenticated health/capability discovery, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. It exposes no domain or generic command route. |
-| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, sanitized capability-summary, and local visual Settings surface; sandboxed renderer; exact six-method typed bridge; hardened main-process shell; fixed local protocol/CSP; global session/window denials; private native-sidecar supervisor and authenticated fixed-route capabilities client; bounded main-owned durable preferences; local fuse/ASAR inspection; and unsigned unpacked package assembly are implemented. Genealogy integration, domain routes, and updating are excluded from 0.5.0. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; macOS and Windows prompts must be addressed by verifying published checksums and release evidence, and unsigned CI artifacts are not supported distribution packages. |
+| `src/ancestryllm/api/` | Internal FastAPI control adapter: authenticated health/capability discovery plus the `0.6.0` source-level fixed startup-diagnostics, settings read/patch, credential status/set/delete, provider-configuration, endpoint-validation, consent, Issue #104 job list/status/cancel/SSE/shutdown routes, Issue #110 synchronous transient-chat capability/session/run routes, and Issue #111 fixed stream-start/SSE/cancel routes, strict DTOs and errors, loopback server configuration, and deterministic OpenAPI. Startup diagnostics are side-effect-free, sanitized, and gate mutations when required components are degraded. Configuration routes administer profiles and consent; general job routes adapt a UI-neutral application lifecycle but submit or execute no operation. Chat routes execute only the exact bounded chat use cases after policy and consent preflight; SSE requires strict monotonic schema-v1 events and `Last-Event-ID` replay. Issue #114 supplies five fixed GEDCOM submissions and a result route only with an explicit artifact registry. Issue #115 adds a bounded root-query route to that façade and four separately composed private native intake routes over immutable Main-owned staging. Native intake is read-only and network-free. No route exposes credential values, host paths, complete record trees, a generic command dispatcher, tools, or arbitrary provider dispatch. |
+| `containers/` | Issue #349's minimal production OCI build plus base, Local Desktop, and Host Remote Compose validation models. They contain only a probe gateway and optional dormant worker, publish no host port, attach the data placeholder read-only, and do not activate a deployment profile. |
+| `desktop/` | UI-only Electron adapter governed by ADR-0025. Its bounded first-run and Home-based welcome review, Home, Diagnostics, Settings, Tasks, `0.6.0` source-level Chat, and `0.7.0` source-level GEDCOM intake surfaces use Issue #106's responsive presentation shell and fixed accessibility-state contracts. The sandboxed bridge contains 42 fixed request methods: six control, three opaque file-grant, five settings/credential, six provider-configuration/consent, five task-lifecycle, three local-runtime, four native-action, six chat, and four read-only GEDCOM intake requests, plus validated job-event and chat-event listeners. Main owns native dialogs, file grants, private intake staging, clipboard writes, external-link confirmation, sender-bound private streams, sidecar supervision, runtime controls, diagnostics-directory actions, shutdown decisions, and hardened protocol/CSP/session/window policy. Issues #110/#111 supply fixed transient-chat service and transport boundaries; #112 adds bounded renderer conversation state, strict sequence/replay handling, safe Markdown allowlisting, plain-text copy, and explicit HTTPS-link confirmation without granting renderer network, filesystem, tool, generic IPC, or provider-selection authority. Issue #115 adds read-only source summaries and bounded root queries over the shared GEDCOM service; no raw paths, parser, complete trees, publication, or provider calls enter the renderer. Provider, runtime, task, and chat DTOs contain only reviewed non-secret fields, redacted identities, sanitized lifecycle state, coded failures, and path-free metadata. Root candidates separately carry bounded genealogy display text in transient memory. The host container authority and local-runtime bridge remain Main-only and expose no socket, executable path, arbitrary arguments, or general process capability. No AncestryLLM application container is started. Genealogy mutation, RootsMagic presentation, remote enrollment/hosting, and updating remain excluded. A supported 0.x release requires a target-matched manually installed official unsigned installer and all release assurance gates; unsigned CI artifacts are verification inputs only. |
 | `tests/` | Characterization, regression, privacy, storage, and operations tests using fictional fixtures. |
 | `scripts/` | Executable architecture and repository-safety gates, local benchmark, GEDCOM demo, characterization, and deterministic documentation-site and Wiki publication tooling. |
 | `docs/` | Canonical source for operator documentation published to the [GitHub Pages site](https://sodejm.github.io/AncestryLLM/) and the GitHub Wiki. |
@@ -188,8 +278,8 @@ flowchart TB
     Aggregate["Implemented\nservice-owned genealogy aggregate (#44)"]
     Infra["Infrastructure\nstorage, provider adapters, file readers/writers"]
     External["SQLCipher, keyring, RootsMagic, GEDCOM, provider SDKs"]
-    ControlAPI["0.5.0 source-level control adapter\nFastAPI health/capabilities"]
-    Desktop["0.5.0 bounded Electron adapter\ncontrol surface"]
+    ControlAPI["0.6.0 source-level control adapter\nfixed authenticated routes"]
+    Desktop["0.6.0 bounded Electron adapter\nsupported core plus named source-level gates"]
     Future["Later-roadmap adapters\ndesktop domain API routes"]
 
     Adapters --> Specs
@@ -241,7 +331,7 @@ The intended dependency rules are:
 
 These rules are executable in `scripts/check_architecture_contracts.py` and
 documented with the public-façade and temporary-exception lifecycle in
-[`docs/ARCHITECTURE_CONTRACTS.md`](docs/ARCHITECTURE_CONTRACTS.md). The #42
+[`docs/reference/ARCHITECTURE_CONTRACTS.md`](docs/reference/ARCHITECTURE_CONTRACTS.md). The #42
 migration removed every CLI/REPL compatibility exception; the gate now rejects
 any sibling-adapter import without an explicit, reviewed exception record.
 
@@ -249,37 +339,304 @@ any sibling-adapter import without an explicit, reviewed exception record.
 
 The desktop target is governed by
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md),
-and the bounded 0.5.0 user contract is documented in
-[`docs/DESKTOP_SHELL.md`](docs/DESKTOP_SHELL.md). The source implementation
+and the bounded 0.6.0 user contract is documented in
+[`docs/explanation/DESKTOP_SHELL.md`](docs/explanation/DESKTOP_SHELL.md). The source implementation
 includes Home, Diagnostics, a sanitized capability summary, and local visual
 Settings, plus a bounded first-run Home welcome and temporary Home-based
-welcome review. A supported release claim still requires its distribution and
-target-assurance gates to pass.
+welcome review. Issue #106 adds a reusable responsive application
+shell and presentation contracts. Issue #107 replaces the first-run choice and
+startup recovery presentation with local-only, fail-closed contracts without
+changing the process topology, bridge, service authority, data flow, or trust
+boundaries. Issue #108 adds a settings-only provider-profile, endpoint-test,
+and consent-administration surface through the same existing renderer, preload,
+main, sidecar, and application-service boundaries. A supported release claim
+still requires its distribution and target-assurance gates to pass.
 
 - The sandboxed renderer is untrusted presentation and input. It receives no
   Node.js, Electron, filesystem, network, keyring, provider, database, shell, or
   unrestricted path capability.
+- The Issue #106 shell owns only presentation contracts: `AppRoute`,
+  `NavigationItem`, `CapabilityGate`, `AsyncState`, `CodedErrorView`, semantic
+  tokens, and command/dialog focus behavior. Routes and capability gates consume
+  existing validated state but cannot create authority, select a provider,
+  grant cloud consent, or choose a service operation. The review gallery uses
+  fictional fixtures in development only; production verification rejects its
+  code and copy. This is an implementation of the already accepted renderer
+  adapter, not a new UI-specific command registry or application boundary.
+- Issue #107 presents Local Desktop as the recommended and only available
+  first-run mode. Connect Remote and Host Remote are visible but unavailable;
+  the renderer performs no discovery, public binding, enrollment, container
+  activation, or ambient-profile selection. A degraded report opens read-only
+  Diagnostics instead of bypassing startup policy.
 - A static typed preload bridge calls an Electron main-process
   backend-for-frontend. Main validates the sender/frame/origin, supervises the
-  sidecar, and proxies only declared endpoints. Opaque file grants belong to a
-  later domain adapter and are not exposed by the 0.5.0 shell.
-- The current bridge is frozen to `getAppInfo`, `getStartupDiagnostics`,
-  `getCapabilities`, `retrySidecar`, `getPreferences`, and `updatePreferences`.
+  sidecar, and proxies only declared endpoints. The original control surface is
+  `getAppInfo`, `getStartupDiagnostics`, `getCapabilities`, `retrySidecar`,
+  `getPreferences`, and `updatePreferences`. The `0.6.0` source adds
+  `requestOpenFileGrant`, `requestSaveFileGrant`, `revokeFileGrant`,
+  `getSettings`, `updateSettings`, `getSecretStatus`, `setSecret`,
+  `deleteSecret`, `getProviderConfiguration`, `createProviderProfile`,
+  `validateProviderEndpoint`, `previewConsent`, `createConsent`, and
+  `revokeConsent`. File-grant DTOs contain opaque IDs and safe display metadata,
+  never paths; settings, credential, provider-profile, endpoint-test, and
+  consent DTOs contain only reviewed non-secret metadata, presence-only status,
+  and redacted endpoint identity.
+- Electron main alone owns native file dialogs and the grant-to-path map. It
+  validates regular files, link count, exact purpose, content signature, size,
+  canonical identity, and filesystem fingerprint before issuing random 256-bit
+  grant IDs. Grants are bound to one renderer, purpose, access mode, application
+  session, and one redemption; renderer loss, cross-document navigation,
+  explicit revocation, and restart invalidate them. Trusted same-document
+  application route changes preserve the renderer identity and its grants.
+  Existing-output replacement requires explicit
+  native confirmation and identity revalidation, while main-owned locks prevent
+  concurrent output grants and source/output aliasing.
+- `resolveReadGrant` and `resolveWriteGrant` are main-only adapter operations.
+  The mediated-operation broker consumes those operations behind one
+  transport-neutral `MediatedOperationRequest`/`MediatedOperationResult`
+  contract; it does not add a renderer channel, command registry, or sibling
+  application API. Before execution, Main revalidates the grant and copies an
+  input into an owner-only `0700` operation directory as an immutable `0400`
+  staged file. A trusted local adapter receives only that private staged path,
+  fixed container paths, and an exact mount plan. A trusted remote adapter
+  receives bounded single-use byte streams and never a host or staging path.
+  Every declared output is staged and validated before any destination is
+  published through same-directory atomic replacement. Success, cancellation,
+  failure, expiry, and startup recovery revoke grants and remove only the exact
+  private operation directory. The renderer sees opaque grant/artifact IDs,
+  path-free progress, and stable coded errors. This is a source-level gate for
+  future genealogy adapters, not a supported domain workflow; the selected-file
+  card remains a reusable path-free presentation component.
+- Electron main owns the exact channel map and accepts each request only from
+  the registered `WebContents`, its current main frame, and its exact trusted
+  application URL. Strict runtime schemas and structured-clone byte, item, and
+  depth limits apply in both directions; malformed prototypes, accessors,
+  symbols, sparse arrays, cycles, repeated references, and non-finite values
+  fail closed. Non-coalesced work is limited to four active and eight queued
+  operations per renderer, while capability reads coalesce for at most 32
+  callers. Absolute deadlines, cross-document or unclassifiable navigation,
+  renderer loss, bridge replacement, sidecar-session invalidation, and shutdown
+  cancel work with stable redacted errors. Trusted same-document route changes
+  preserve work while the exact current frame and application URL are still
+  rechecked on every request. An underlying operation retains its active slot
+  until settlement even after its caller times out, preventing hidden work from
+  escaping the concurrency cap.
   Preference updates carry the renderer-visible revision; main owns the storage
   boundary and rejects stale updates. The renderer advances past onboarding
   only after a fresh valid preference snapshot reports completion; malformed,
   unavailable, or conflicting state remains gated.
+  The `0.6.0` settings updates likewise carry an exact revision and replace the
+  complete owner-only `AppConfig` atomically. The renderer uses uncontrolled
+  password inputs, copies and clears a value before invoking the bridge, clears
+  again after every outcome, and retains only presence status. Electron
+  `safeStorage`, renderer storage, preferences, logs, and bridge caches are not
+  credential stores.
+  Provider-profile writes also carry an exact configuration revision and may
+  use only the reviewed built-in cloud endpoint or a loopback Ollama endpoint.
+  The Python service performs a direct numeric-address probe with normal TLS
+  hostname verification, ignores proxies, refuses redirects, resolves DNS both
+  before and after the probe, and stores only a SHA-256 endpoint-identity digest.
+  It rechecks that identity before profile persistence, consent issuance, and
+  provider execution. A consent grant must exactly match the immediately prior
+  preview, including provider, profile, model, every purpose and data class,
+  retention, cost limit, living-person warning, and remote-retention warning.
+  Credential presence alone neither selects a provider nor grants consent.
 - The supervisor retains authenticated session coordinates only in Electron
   main, grants them only while ready, and otherwise exposes a sanitized degraded
-  lifecycle plus a bounded single-flight manual retry. Bootstrap material,
+  lifecycle plus a bounded single-flight manual retry. Manifest-bound integrity
+  failures do not consume the automatic crash-restart budget because unchanged
+  invalid payload bytes cannot self-repair; a repaired payload can use the
+  separate manual retry. Bootstrap material,
   ports, tokens, endpoints, executable or preference-file paths, stderr, raw
   sidecar or bridge errors, and stacks never cross preload or renderer IPC.
+- Electron Main creates one random UUIDv4 per launch and derives one absolute
+  diagnostics directory beneath its application-data root. It supplies both to
+  the packaged sidecar only through the strict private standard-input launch
+  frame. The sidecar rejects a missing, relative, malformed, or additional
+  field and uses that exact Main-derived directory for both Python-owned
+  writers. Electron Main, Python core, and sidecar write separate bounded
+  schema-v1 JSON Lines streams beneath that shared directory. Records accept
+  only cataloged codes and small numeric, boolean, or null metadata; writers
+  refuse symbolic links and cannot block startup, security enforcement,
+  recovery, or shutdown. The renderer receives only fixed zero-argument
+  open-directory and clear actions, never a path or generic filesystem
+  capability. No export, telemetry, network transmission, console forwarding,
+  or CI artifact collection is part of this boundary. The exact sidecar
+  standard-error shutdown receipt remains a separate authoritative protocol
+  and is not inferred from diagnostic JSON or child output.
+- Issue #102 verifies an embedded-digest-bound, target/build-specific full
+  sidecar payload manifest before token generation or process spawn. This
+  detects payload substitution relative to the built Electron main process; it
+  is neither publisher signing nor whole-bundle protection. Project-produced
+  0.x binaries remain unsigned, and Issue #132 owns publisher signing and
+  notarization. The macOS CI verification overlay signs the outer application
+  ad hoc but excludes only `Contents/Resources/sidecar/` from Electron's second
+  signing pass: PyInstaller's nested Mach-O signatures remain intact, the outer
+  signature seals the resource tree, and the payload manifest continues to
+  describe the exact bytes verified before spawn. Verification and spawn are
+  separate filesystem operations, so a narrow local time-of-check/time-of-use
+  replacement residual remains.
+- POSIX launch uses an isolated process group and bounded `SIGTERM`/`SIGKILL`
+  escalation over the complete group. The Windows sidecar joins a
+  kill-on-close Job Object and Electron main requests full-tree termination.
+  The no-shell `taskkill.exe` helper has both a four-second child-process
+  timeout and an independent four-second adapter deadline; helper completion,
+  failure, or timeout is followed by a separate bounded leader-exit check, and
+  only the observed exit proves termination.
+  Closing the final desktop window requests `app.quit()` on every supported OS,
+  including macOS, so the sidecar never remains resident without a visible
+  application window. Electron main installs its `SIGTERM`-to-`app.quit()`
+  handler before asynchronous runtime startup, then idempotently re-arms that
+  same named handler as soon as the Electron-ready runtime owns the supervisor.
+  This prevents Electron/Chromium initialization from leaving `SIGTERM` on its
+  default immediate-termination path. The supervisor and job preflight are
+  owned before payload verification or process launch can yield. Both quit entry
+  points are vetoed until the native job preflight and verified sidecar stop
+  finish. A stop request cancels pre-spawn verification and drains any process
+  launch already in flight within a fixed 20-second supervisor deadline. Main
+  invalidates the publicly usable active session before using captured session
+  credentials for one exact authenticated, bodyless runtime-shutdown request.
+  That hidden route is packaged-only, omitted from OpenAPI, and never exposed to
+  preload or the renderer. Uvicorn begins its normal lifespan drain, but Main
+  still requires an observed leader exit; a response without exit falls back to
+  bounded full-tree termination.
+  Electron uses
+  `app.exit(0)` only from that authorized completion callback, after every owned
+  resource has been released, to avoid a second platform-specific quit cycle.
+  Shutdown fails closed when termination cannot be verified, while clearing the
+  rejected shutdown attempt so a later native quit request can start one fresh,
+  fully verified stop. Every packaged matrix row closes the application window
+  through WebDriver and independently observes that both the packaged Main PID
+  and active sidecar PID disappear within bounded deadlines. Because the secure
+  packaged service session does not expose its child-process exit tuple, the row
+  also performs a separate transport-free launch of the selected packaged
+  runtime: the production package on Windows and the unpublished native
+  verifier package on Linux and macOS. Windows requests native window closure
+  through the launched PID's `CloseMainWindow()` operation; macOS and Linux
+  send `SIGTERM` through the shared production signal-to-quit path. That launch
+  must report the exact native result
+  `{ code: 0, signal: null }`. A timeout, nonzero code, signal termination, or
+  force-kill cleanup never satisfies the clean-shutdown proof. The harness does
+  not use a broadcast, renderer close shortcut, raw CDP browser shutdown, or a
+  verifier-only production backdoor. The implemented drain covers the Uvicorn
+  server and listener, stdio, process tree, temporary
+  launch directory, and Issue #104's application job admission, cooperative
+  cancellation or bounded wait, and encrypted snapshot/event repository.
+  Issue #110 registers its process-memory `ChatService` with sidecar teardown,
+  so shutdown clears every transient session and message. Issue #111 registers
+  `ChatStreamingService` first, cancels and audits each active run before chat
+  content is cleared, and reconciles an interrupted prior-process audit marker
+  once at startup. Other database sessions must register their own drains
+  before their routes ship.
 - A loopback-only FastAPI sidecar authenticates every request before body
   parsing and adapts versioned DTOs to application services. The source-level
-  Issue #11 foundation and Issue #225 packaged runtime implement only
-  authenticated health and capability discovery; domain routers remain
-  separately owned future work. It does not
+  Issue #11 foundation, Issue #225 packaged runtime, and Issue #102 supervision
+  hardening implement authenticated health and capability discovery. The
+  `0.6.0` source-level Issue #105 implementation adds only fixed settings
+  read/patch and credential
+  status/set/delete routes. Issue #107 adds the fixed
+  `/api/v1/startup-diagnostics` route and blocks those mutation routes whenever
+  its side-effect-free startup report contains a blocking component. Issue #108
+  adds fixed provider-configuration, endpoint-test, profile, consent-preview,
+  consent-create, and consent-revoke routes; these administer reviewed state but
+  do not execute a provider. Issue #104 adds fixed authenticated list, status,
+  cancellation, bounded SSE replay, and shutdown-assessment routes around the
+  UI-neutral application job lifecycle. Those routes do not submit a job or
+  execute a domain/provider operation. Issue #110 adds fixed authenticated chat
+  capability, create/get/delete-session, and synchronous run routes. These
+  routes accept only strict schema-v1 DTOs, resolve an exact named profile and
+  model, enforce all resource bounds before provider access, and recheck policy,
+  endpoint identity, credentials, and consent for every run. Issue #111 adds
+  fixed authenticated stream-start, strict SSE replay, and cancellation routes
+  for the same use case. They expose no provider selector, generic dispatch,
+  tools, filesystem, SQL, genealogy, or public streaming surface. Other domain
+  and provider-execution routers remain
+  separately owned future work. The adapter does not
   import CLI or console presentation and is not a public API.
+- Issue #106's responsive renderer shell owns presentation only: persistent
+  navigation and local/offline status, typed routes and async states,
+  deterministic keyboard focus, coded-error views, and capability display.
+  It adds no IPC, filesystem, network, provider, consent, service, or domain
+  authority, and its fictional component gallery is excluded from production.
+- Issue #107 combines the supervisor lifecycle with the sidecar report in
+  Electron main before exposing startup state. The renderer does not request
+  capabilities while degraded, and main rejects preference, settings, and
+  credential mutations with a stable code. One manual retry is permitted per
+  degraded presentation; it re-runs startup checks but does not initialize a
+  database, overwrite a key, rewrite configuration, or fall back to plaintext.
+- Issue #108 presents provider configuration and consent within the existing
+  Settings route. Local and remote choices remain explicit, credential input is
+  blank and write-only, endpoints must pass a separate test before a profile
+  can be saved, and cloud consent shows the full bounded disclosure before an
+  exact atomic grant is issued. Connect Remote and Host Remote remain disabled,
+  and the new surface cannot start provider execution or widen a listener.
+- Issue #109 presents backend-owned job snapshots in Tasks. Electron main owns
+  at most 32 sender-bound authenticated event subscriptions, suppresses stale
+  or duplicate sequences, and closes them on terminal state or sender/session
+  teardown. The renderer reloads snapshots instead of persisting job state,
+  resynchronizes on gaps, announces meaningful changes through one polite
+  atomic live region, and receives only coded errors and path-free artifact
+  metadata. It admits no work and adds no direct artifact, provider, genealogy,
+  or domain authority.
+- Issue #110 implements a Python-sidecar-only synchronous transient-chat
+  boundary. Sessions are capped, retain bounded content only in process memory,
+  and bind one exact stored profile/model plus purpose and data classification.
+  Every run performs fresh policy and consent preflight, uses a fixed
+  nonautonomous system instruction, disables structured/tool output, and emits
+  payload-free audit metadata. Failed runs do not mutate history, and teardown
+  clears all sessions.
+- Issue #111 implements the audited source transport for transient chat.
+  `ChatStreamingService` publishes monotonic schema-v1 `active`, `first-token`,
+  `delta`, `cancelling`, `completed`, `interrupted`, and `failed` events with a
+  256 KiB in-memory replay bound. Electron Main exclusively owns authenticated
+  SSE, enforces renderer/run ownership, rejects redirects, wrong MIME, invalid
+  DTOs, and nonmonotonic sequences, and batches delivery within 16 ms or 4 KiB.
+  Exact JSON-encoded acknowledgement debt is capped at 256 KiB; Main pauses the
+  source and cancels it after a 15-second stall. One interrupted transport may
+  reconnect to the same run from its acknowledged cursor, but provider work is
+  never retried after output begins. Navigation, renderer disposal, sidecar
+  shutdown, and startup reconciliation terminate and audit owned work exactly
+  once.
+- Issue #112 presents that fixed transport through the bounded **Chat**
+  workspace. The renderer creates only compatible profile/model/consent
+  sessions, applies strictly increasing event sequences, deduplicates replay,
+  fails closed on gaps or ownership changes, limits retained and visible
+  turns, and closes transient sessions on teardown. The composer supports
+  multiline input, stop, and regenerate; one polite live region announces
+  material state, and unknown usage or cost is shown as unavailable rather
+  than inferred. Model Markdown is rendered through a closed React element
+  allowlist with raw HTML, images, embeds, unsafe/implicit links, and model
+  actions disabled. Explicit HTTPS destinations are displayed before Electron
+  Main validates and confirms them, and copy writes plain text only. Packaged
+  adversarial pressure, screen-reader, and platform evidence remains Issue
+  #131.
+- Issue #56 implements the service-internal asynchronous provider-stream
+  adapter needed by later chat work. A provider worker starts only after policy,
+  consent, and streaming-capability preflight. A context-preserving off-loop
+  worker publishes through a queue of 16 items by default, with 64 KiB chunks;
+  configuration is capped at 256 items, 1 MiB per chunk, and 16 MiB of queue
+  capacity. An absolute deadline signals cooperative stop while timeouts wrap
+  only bridge waits, so yielded caller work is not cancelled. Success, provider
+  failure, timeout, caller cancellation, and early consumer close record one
+  terminal audit outcome. Structured output continues through `generate()` and
+  its schema validation. Issues #111 and #112 consume the adapter through the
+  private API, Electron Main ownership, and the bounded Chat presentation; no
+  public stream authority is added.
+- Issue #115 adds four fixed read-only GEDCOM intake requests. Main consumes a
+  native file grant into a private immutable stage; the native sidecar verifies
+  its size, fingerprint, and bounded parse through `GedcomJobFacade`. At most
+  eight sources of at most 512 MiB each are retained, including pending work.
+  Summaries expose at most 100 coded findings plus counts; explicit root
+  queries accept 128 characters and return at most 100 candidates (25 per UI
+  page). Finding anchors use the same query boundary to fetch one exact person
+  reference on demand; missing or ambiguous matches fail closed. Their read-only
+  previews cannot change root choices. Opaque continuation cursors bind the job,
+  source, and query. Source
+  order and root choices are transient, and no root is guessed: continuing
+  without one is an explicit choice. Disposal cancels work and drops results;
+  terminal inspection removes staged bytes. No provider, upload, output, or
+  whole-tree renderer response is introduced. Target-matched packaged support
+  and adversarial evidence remain separate release gates, including #131.
 - Python services remain the policy authority. Bounded workers handle
   genealogy parsing and publication; source RootsMagic and GEDCOM invariants
   do not move into the renderer or main process.
@@ -291,7 +648,7 @@ target-assurance gates to pass.
   Windows can display an unknown-publisher or Gatekeeper prompt, so users must
   verify published checksums and release evidence before installation.
   Unsigned CI artifacts and unpacked builds are verification inputs only.
-  Version 0.5.0 has no updater, update feed, background update channel, or
+  Version 0.6.0 has no updater, update feed, background update channel, or
   staged rollout.
 
 The secure-development baseline is OWASP Top 10:2025 plus applicable OWASP ASVS
@@ -302,7 +659,7 @@ are in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 ### Accepted deployment profiles
 
 [ADR-0026](docs/ADR-0026-local-first-container-remote-deployment.md) ratifies
-three later deployment intents while preserving the current runtime boundary:
+three deployment intents while preserving the current runtime boundary:
 
 - **Local Desktop** remains the default. It has no non-loopback listener. A
   future container backend may replace the native sidecar only behind the same
@@ -314,6 +671,103 @@ three later deployment intents while preserving the current runtime boundary:
   one trusted household. Only a validated TLS edge may be public; internal
   gateway, worker, data, administrative, and Docker services remain private
   and independently authenticated. Network membership is not identity.
+
+The `0.6.0` source implements the transport-neutral profile control plane:
+schema-v1 parsing, an absent-profile migration to Local Desktop, optimistic
+revision checks, exact target-bound preview confirmation, atomic Local Desktop
+recovery, mismatch diagnostics, and redacted backup/support metadata. The
+`deployment` command family exposes those capabilities to headless tooling.
+Unknown schemas, malformed topology, stale revisions, endpoint substitution,
+and ambient environment state fail closed. Connect Remote activation remains
+owned by authenticated enrollment in #357; Host Remote activation remains
+owned by the host bootstrap in #348. This layer starts no listener, container,
+supervisor, or remote session and moves no genealogy data.
+
+Issue #363 separately implements the minimum host-only container-control
+interface needed by #348 and #349. Electron Main validates a closed schema-v1
+policy and exact Compose plan, ignores ambient Docker selection, permits only
+an app-owned Unix socket/context/profile, verifies socket ownership and mode
+plus engine identity and compatibility, and performs bounded no-shell
+operations against exactly named and labeled resources. Plans require
+digest-pinned images, a non-root user, read-only root filesystem, dropped
+capabilities, `no-new-privileges`, named volumes, internal networks, and at
+most loopback publications. Start, repair, and uninstall require a short-lived,
+one-use confirmation bound to the exact operation; stop is bounded but
+non-destructive. The renderer, preload, shared DTO layer, and containers receive
+no Docker socket, executable, context, client, or generic process authority.
+Issue #348 connects that foundation to exactly three typed desktop bridge
+methods: `getLocalRuntimeStatus`, `previewLocalRuntime`, and
+`applyLocalRuntime`. The Settings surface and equivalent noninteractive
+commands can inspect, review, install, start, stop, repair, or uninstall the
+local substrate; the renderer receives no Docker socket, executable path,
+process authority, environment, or general command channel, and this wiring
+still supplies no application image, service readiness, secret broker,
+migration, genealogy mount, or deployment-profile activation.
+
+The packaged `macos-arm64-runtime-policy-v1.json` is the single executable
+trust policy. It admits only Apple silicon on macOS 13 or later with hardware
+virtualization and at least 24 GiB free, then selects exact repository, release,
+asset, source URL, byte length, SHA-256, license identity, and license digest
+for every component. Downloaded bytes remain inert until length and digest
+verification passes. Archive extraction rejects links, devices, traversal,
+absolute paths, duplicate members, and unexpected executables before an atomic
+install. No implicit latest version, mirror, package manager, ambient `PATH`,
+alternate architecture, administrator installer, or privilege escalation is
+accepted.
+
+The manager owns Colima profile `ancestryllm-local-arm64`, Docker context
+`colima-ancestryllm-local-arm64`, a configuration root, and a Unix socket
+beneath the application data directory. Every subprocess receives
+an explicit minimal environment; ambient Docker context and configuration are
+ignored. Kubernetes and address publication are disabled, and Docker Desktop
+remains optional as a compatible installation that the manager neither selects
+nor changes. Destructive operations require a revision-bound preview plus an
+exact operation-specific confirmation. Partial `.part` downloads are safe to
+resume, offline mode uses only a complete reverified cache, and uninstall
+offers distinct preserve-children and delete-children plans. This management
+surface does not start an application container.
+
+Native macOS arm64 evidence exercises isolated start, stop, repair,
+preserve-data uninstall, restart, and delete-data uninstall against an
+app-owned Colima profile, then proves exact cleanup and that the ambient
+default context and engine were unchanged. The sanitized receipt is
+[`docs/release-evidence/issue-363-macos-arm64-container-supervisor.json`](docs/release-evidence/issue-363-macos-arm64-container-supervisor.json).
+That evidence establishes the Issue #363 control subset. Issue #348 adds the
+runtime acquisition and lifecycle implementation, but the remaining G5 and G7
+application-image, workload-authentication, data, recovery, and
+independent-review gates still block an application-container availability
+claim.
+
+Issue #349 adds the first production-shaped application images and Compose
+models, but preserves that availability boundary. One image target runs an
+internal probe-only gateway and one optional profile-gated target runs a
+dormant, signal-aware worker. The gateway constructs the existing API with the
+new closed `probe` surface, so only authenticated health and capability routes
+exist; settings, credentials, providers, deployment, genealogy, generic
+commands, and database initialization are absent. Both processes run as UID
+65532 with a read-only root, all capabilities dropped, `no-new-privileges`,
+bounded CPU, memory, PIDs, logs, startup, and shutdown, and no Docker authority.
+The topology has one internal network, publishes no port, permits no host path,
+and attaches its named data placeholder read-only. A short-lived random probe
+credential exists only in a private `/run` tmpfs and is never emitted in
+evidence.
+
+CI builds gateway and worker images separately on native Linux amd64 and arm64
+runners, addresses the resulting images by exact digest, rejects architecture
+or build/version skew, and exercises health, optional-worker readiness, crash
+visibility, graceful termination, read-only and disk-full behavior, log
+redaction, and the absence of a database initializer or migration entrypoint.
+That last control is source-policy evidence, not an executed migration-path
+test. The generated
+schema-v1 inventory accounts for every installed Python distribution and every
+installed Debian package, including normalized license identities and a digest
+of the retained package copyright file. Unknown inventory fields, missing
+licenses, unsafe Compose features, mutable image inputs, unsupported platforms,
+or incomplete lifecycle assertions fail closed. These are source and CI
+verification contracts only. #350 still owns workload authentication and
+network publication; #351 still owns secrets, encrypted storage, migration,
+backup, and recovery. Until those gates pass, no deployment profile may start
+this topology and schema migrations remain disabled.
 
 `provider=none` is incompatible with Connect Remote and Host Remote. It forces
 Local Desktop/local execution and opens no network socket; endpoint state,
@@ -330,8 +784,10 @@ This is not individual multi-user authorization. Unrelated or mutually
 distrusting households require separate hosts, secrets, volumes, and identity
 realms.
 
-Electron Main owns profile state, enrollment, API use, error sanitization, and
-the narrow host lifecycle boundary. The sandboxed renderer receives no Node,
+The shared Python service owns persistent profile state, revision-bound
+transitions, diagnostics, and redacted evidence. Future Electron Main adapters
+own presentation, enrollment API use, error sanitization, and the narrow host
+lifecycle boundary without redefining that service contract. The sandboxed renderer receives no Node,
 filesystem, raw network, Docker socket or client credential, API/enrollment
 bearer, keyring value, provider secret, SQLCipher key, or unrestricted path.
 It uses only a fixed, typed, versioned preload bridge. Profile changes clear
@@ -355,11 +811,21 @@ operator instead owns host, DNS, TLS, identity, firewall, capacity, monitoring,
 updates, backups, and recovery. The project provides no hosting or operations
 SLA for the self-supported profile.
 
-Containerized source ingress is grant-mediated. The host supervisor may render
-only an allowlisted read-only `family_trees` mount resolved from an opaque
-native-dialog grant, revalidated as immutable, and attached only to the worker
-performing the authorized operation. The renderer receives no filesystem path,
-and writable, broad, ungranted, aliased, or additional host mounts fail closed.
+Containerized source ingress is grant-mediated and operation-scoped. The host
+supervisor never mounts a selected family-tree path, home directory, or broad
+`family_trees` directory. Main revalidates the opaque grant's descriptor and
+filesystem fingerprint, copies the source into an owner-only `0700` operation
+directory, and exposes only the immutable `0400` input root read-only plus the
+exact private output root read-write at fixed
+`/run/ancestryllm/operations/<operation>/...` container paths. The complete
+engine-realized mount set must equal the planned set; missing, additional,
+aliased, writable-input, broad, or changed mounts fail closed before execution
+or publication. Only exact operation directories under the fixed
+`mediated-runtime` root are cleaned after success, failure, cancellation, and
+startup recovery; unexpected entries fail closed. Local and remote execution
+share the same serializable mediation DTO while distinct trusted adapters
+receive private staged paths or bounded streams, respectively. The renderer
+receives neither filesystem paths nor mount details.
 
 Cold/warm/remote readiness, shutdown, idle memory, VM ceiling, compressed image
 size, local and remote listener exposure, and offline egress have quantitative
@@ -368,7 +834,7 @@ is required; emulation is labeled and cannot establish native support.
 Local Desktop containers require `G0`, `G5`, and their applicable `G7` evidence.
 Connect Remote requires `G0`, its applicable client-side `G6`, and `G7` evidence.
 Host Remote requires `G0`, `G6`, and its applicable `G7` evidence.
-AB-11 through AB-21 remain fail-closed according to their owning profile; a
+AB-11 through AB-22 remain fail-closed according to their owning profile; a
 failed gate blocks the affected availability or release claim.
 
 GEDCOM parsing, serialization, deterministic sync algorithms, manifests,
@@ -405,6 +871,19 @@ the user configuration and data directories. `ANCESTRYLLM_CONFIG_DIR` and
 limits are clamped to safe ranges, directories are owner-only where the
 platform permits it, and configuration is saved through an fsynced temporary
 file plus `os.replace` with mode `0600`.
+
+The optional schema-v1 `[deployment]` table records only explicit non-secret
+mode, topology, and—after reviewed remote enrollment—canonical endpoint origin
+and endpoint-identity digest. An absent table safely resolves to Local Desktop;
+unknown schemas, fields, topology combinations, and endpoint forms are rejected.
+Environment variables and service discovery cannot select or alter a mode.
+
+The `0.6.0` `SettingsService` publishes a schema version, an optimistic revision,
+and reviewed metadata for exactly five settings: default provider, query row
+and output limits, and query/provider timeouts. A patch must name only those
+fields and carry the current revision; validation completes before one atomic
+whole-file replacement. Unknown fields, secret-shaped fields, and stale
+revisions fail with stable coded errors.
 
 The configuration currently controls:
 
@@ -445,7 +924,7 @@ prompt-toolkit/Rich REPL implemented in `console/shell.py`. Its UI-independent
 `SessionRouter` parses commands from the shared `CommandSpec` metadata, and the
 shell executes parser namespaces through the shared terminal dispatch path
 described in
-[`docs/REPL_ARCHITECTURE.md`](docs/REPL_ARCHITECTURE.md):
+[`docs/explanation/REPL_ARCHITECTURE.md`](docs/explanation/REPL_ARCHITECTURE.md):
 
 - command sets are explicit built-ins loaded only when enabled;
 - `use`, `info`, `show`, `set`, `unset`, `run`, and `back` maintain local
@@ -462,11 +941,60 @@ described in
 The REPL is a sibling adapter over the same executor and application services
 as the one-shot CLI. The transport-neutral DTO, port, artifact, operation,
 invocation, declared result/event, outcome, executor, and stable-error boundary
-is implemented under `application/`. Long-running operations publish bounded,
-strict-JSON progress events through `ProgressPort`, with no UI dependency. The
+is implemented under `application/`. Issue #104 adds the UI-neutral schema-v1
+job lifecycle there: queued, running, cancelling, pending-safe-point,
+completed, failed, and cancelled snapshots; determinate or indeterminate
+progress; monotonic bounded events and replay; idempotent cancellation; exactly
+one terminal result; restart reconciliation; and a bounded shutdown assessment.
+The SQLCipher repository persists snapshots and events, while the internal API
+only adapts list, status, cancel, SSE replay, and shutdown routes. Issue #109
+adds the renderer presentation adapter without moving lifecycle authority: five
+fixed task requests and one validated event listener over main-owned,
+sender/session-bound subscriptions. It adds no job producer, submission route,
+direct artifact action, provider execution, or domain operation. Long-running
+operations publish bounded, strict-JSON progress events through `ProgressPort`,
+with no UI dependency. The
 migration removed the earlier CLI/REPL dependency inversions while retaining
 one-shot grammar, JSON serialization, stable coded errors, consent
 authorization, and network-free `provider=none` behavior.
+
+Issue #110 adds `application/chat.py` as the standard-library-only chat
+contract. Its immutable schema-v1 DTOs bound session creation, messages, run
+summaries, purpose, data classification, and capability reporting without
+depending on FastAPI, Pydantic, provider SDKs, storage, or presentation.
+`llm/chat.py` owns the corresponding use case: exact named-profile resolution,
+fresh policy and consent preflight, synchronous bounded generation, transient
+history, and payload-free audit metadata. The HTTP adapter only validates and
+translates the fixed routes; it does not own policy or session state.
+
+Issue #111 extends that application contract with immutable owner-scoped runs
+and lifecycle events. `llm/chat_streaming.py` owns transient replay,
+cancellation, terminal-state convergence, shutdown, and restart reconciliation;
+the API adapts fixed start/SSE/cancel routes only. Electron Main is the sole SSE
+client and validates ownership, media type, redirects, run identity, and
+monotonic sequence before delivering bounded acknowledged event batches through
+preload. Neither API nor IPC owns provider policy or chat history.
+
+Issue #112 adds renderer-only conversation and presentation state in
+`ChatWorkspace.tsx`, with ordered delivery convergence isolated in
+`chat-state.ts` and model-output parsing isolated in `SafeMarkdown.tsx`.
+Renderer state cannot mint provider authority: session creation still requires
+the sidecar's exact profile/model and current compatible consent. Native action
+requests remain fixed strict bridge methods owned by Electron Main, which writes
+plain text to the clipboard or confirms one normalized HTTPS destination before
+opening it. No renderer component receives network, shell, filesystem, keyring,
+sidecar-session, generic IPC, or HTML clipboard authority.
+
+Issue #56 adds `LLMService.async_stream()` below that application boundary.
+It reuses the same named-profile planning, policy, consent, provider registry,
+execution coordinator, error normalization, and audit repository as
+non-streaming generation. The bridge copies the current cancellation context
+into a daemon worker and bounds communication back to the event loop. Provider
+SDK iterators remain synchronous and may not finish unwinding until their next
+yield or return, so SDK network timeouts remain a required outer bound; the
+worker cannot block process shutdown and its execution lease remains held until
+unwind completes. This method is not an HTTP, IPC, renderer, or public API
+contract.
 
 `ModuleDescriptor` records the module ID, implementation path, actions,
 configuration, and required-service metadata. This is an explicit built-in
@@ -481,7 +1009,7 @@ results, opaque artifact/secret references, and interaction ports for every
 database-session, or host-filesystem objects. `application/errors.py` maps the
 complete pure domain failure set to sanitized stable envelopes. The boundary
 and operation inventory are documented in
-[`docs/APPLICATION_CONTRACTS.md`](docs/APPLICATION_CONTRACTS.md).
+[`docs/reference/APPLICATION_CONTRACTS.md`](docs/reference/APPLICATION_CONTRACTS.md).
 
 `core/errors.py` defines sanitized, coded exceptions with a message,
 remediation, exit code, and serializable details for shipped compatibility.
@@ -506,12 +1034,51 @@ streaming only, with no autonomous tool-use surface.
 ### Secrets
 
 `SecretStore` is the only secret contract. Production uses the OS keyring under
-the `AncestryLLM` service name. Environment injection is a fallback for
-headless/CI use; keyring values take precedence. Tests use `MemorySecretStore`.
-Secret status reports only presence, never values.
+the `AncestryLLM` service name. Environment injection is a read-only fallback
+for CLI/headless/CI use; keyring values take precedence and an
+environment-managed reference cannot be overwritten or deleted through the
+application. The packaged desktop sidecar explicitly selects keyring-only mode,
+so ambient environment values cannot satisfy or replace a desktop credential.
+Normal launches inherit only the minimal platform environment. On Linux,
+Electron Main ignores ambient D-Bus and XDG runtime selectors and binds the
+child to the conventional `unix:path=/run/user/<uid>/bus` endpoint derived from
+the kernel-reported process user ID. This reaches the user's native Secret
+Service without accepting an environment-selected bus; home, cache,
+configuration, and data directories also remain excluded. Electron Main pins
+the child to the native Secret Service backend and ignores ambient Python
+keyring selectors and configuration. Exact-head Linux packaged verification
+uses a separate unpublished package whose compile-time adapter may read an
+owner-only temporary root from a verifier-specific Electron command-line
+switch. The production
+adapter never reads that switch, the production build scanner rejects its
+literal name, and the ordinary package is assembled and verified before the
+verifier package is built. In the verifier, Main validates the Linux-only
+absolute root and derives the sidecar's home, XDG paths, and exact
+`runtime/bus` address from it instead of accepting ambient values. The verifier
+launcher binds its private D-Bus daemon to that owner-only socket. The root is
+never inherited from the packaged process environment. Provider credentials
+and `PATH` remain excluded from the child environment. Release-installer
+verification instead runs the installed production package while staging its
+disposable native service at the owner-only conventional
+`/run/user/<uid>/bus` endpoint that production Main derives. An absent endpoint
+receives an identity-tracked private D-Bus daemon that the verifier removes. An
+existing endpoint is reused only when it is a current-user-and-group,
+non-symlink Unix socket, responds as a session bus, has no Secret Service owner,
+and retains identical device, inode, owner, and group metadata across
+validation. The verifier neither kills nor unlinks a reused bus. Its Secret
+Service home, configuration, data, and control state remain disposable, and
+the production package still does not enable the verifier adapter.
+Tests use `MemorySecretStore`. Secret status reports only `present`, `missing`,
+or `unavailable`, never values.
 
 Registered secret references cover the SQLCipher master key plus OpenAI,
 Anthropic, Gemini, and OpenRouter credentials. Ollama needs no stored API key.
+The `0.6.0` `SecretManagementService` accepts only that exact reference
+allowlist, exposes explicit set/delete operations, and verifies absence before a
+delete succeeds. Keyring unavailable, locked, denied, or unverifiable outcomes
+fail closed with stable redacted errors. Plaintext configuration, Electron
+`safeStorage`, renderer storage, generated contracts, logs, and fixtures are
+not secret stores and never receive credential values.
 
 ### SQLCipher lifecycle
 
@@ -527,16 +1094,25 @@ files. Its lifecycle is fail-closed:
    non-WAL `DELETE` journal mode.
 5. For an existing database, run the strongest available cipher/integrity
    check before use.
-6. Create the schema and require schema revision `0001`.
+6. Inspect the user-table inventory with one bounded `sqlite_master` query.
+   Create revision `0002` only for a truly empty workspace, without per-table
+   driver reflection; require an exact revision-to-table match for an existing
+   workspace; and fail closed on partial or unexpected layouts. Revision
+   `0001` is the sole automatic upgrade path and adds only the job tables.
 
 SQLAlchemy uses one SQLCipher connection factory and `SingletonThreadPool`.
 Sessions are short-lived within service/repository calls. Encrypted backups use
 SQLCipher's online backup API, reuse the matching key, reject an existing
 destination, and set mode `0600`.
 
-Read-only diagnostics check the SQLCipher driver, keyring read path, data
-directory, and existing file permissions without creating a database or
-writing a credential.
+Read-only diagnostics check configuration, the SQLCipher driver, keyring read
+availability, and workspace/data-directory state without creating a database,
+rewriting configuration, changing permissions, or writing a credential. The
+schema-v1 report always contains exactly `config`, `sqlcipher`, `keyring`, and
+`workspace`, plus stable codes, reviewed remediation, restart requirements,
+mutation-blocking state, and non-sensitive normalized OS/architecture values.
+It contains no secret, environment value, hostname, username, full path,
+genealogy record, prompt, payload, response body, or backend exception detail.
 
 ### Persistence model
 
@@ -548,12 +1124,22 @@ The initial schema groups data by responsibility:
 | Prompts | `prompt_templates`, `prompt_versions` | Immutable, incrementing prompt revisions and optional response schemas. |
 | Provider policy | `provider_profiles`, `consent_profiles` | Explicit provider/model configuration and revocable disclosure grants. |
 | Audit | `llm_runs` | Request/response hashes, status, token/cost metadata, and optional encrypted payload retention. |
+| Jobs | `jobs`, `job_events` | Restart-safe bounded job snapshots and event replay. |
 
 The schema has room for identifiers, facts, and relationships, while the
 current public research service exposes only add/list person operations.
-Packaged Alembic-compatible migration files mirror revision `0001`; runtime
-bootstrap currently uses `Base.metadata.create_all()` and rejects any other
-revision. There is not yet a public in-place migration command.
+Packaged Alembic-compatible migration files retain the revision history.
+Runtime bootstrap creates the complete revision `0002` schema only after a
+single inventory query proves that no user table exists. It uses ordered DDL
+without SQLAlchemy's per-table reflection, which avoids native SQLCipher driver
+recursion while preserving atomic bootstrap. The packaged `0001` to `0002`
+migration starts a native SQLite transaction before its first DDL statement so
+a late failure cannot leave either job table or its indexes behind. Existing
+revision `0002` layouts are inventory-validated and reused without DDL; exact
+revision `0001` layouts receive only the reviewed job-table migration. Empty
+version rows, unknown revisions, and incomplete or unexpected table inventories
+return `DATABASE_MIGRATION_REQUIRED` without implicit repair. There is not yet
+a public in-place migration command.
 
 ## LLM boundary, providers, and consent
 
@@ -760,7 +1346,8 @@ loops. `GedcomService` imports only the stable public seams:
   annotations, and Markdown rendering;
 - `serialization.py` owns loss-minimal rendering and validation, delegating
   single-artifact atomic staging to `artifact_publication.py`;
-- `service.py` provides merge, subtree, quality, and sync use cases;
+- `service.py` provides inspect, merge, subtree, quality, and sync use cases
+  through purpose-scoped artifact grants;
 - `sync_kernel.py` owns path-free, immutable stage contracts and the
   deterministic synchronization coordinator;
 - `sync_contracts.py` owns typed commands, results, coded errors, and
@@ -778,6 +1365,29 @@ loops. `GedcomService` imports only the stable public seams:
   synchronization entry points.
   Compatibility updates default to `--provider none`, and rebase never invokes
   a provider.
+
+`application.gedcom_jobs.GedcomJobFacade` is the shared asynchronous boundary
+for those five use cases. It accepts the public request DTOs, submits work to
+the bounded job lifecycle, locks by opaque grant identity, forwards typed
+progress and cooperative cancellation, preserves stable domain error codes,
+and publishes a typed result only after completion. The authenticated FastAPI
+operation adapter exposes five fixed submission routes and one fixed result
+route over that façade when explicitly composed with a trusted artifact
+registry. CLI and REPL adapters compose the same request DTOs and call the
+same `GedcomService`; no transport receives host paths, whole genealogy trees,
+arbitrary callbacks, a generic command registry, or direct private-engine
+access.
+
+Issue #115 composes a separate native-sidecar intake adapter with four fixed
+routes: submit a private stage, read its completed summary, query a bounded
+root-candidate page, and discard the inspection. Its private directory arrives
+through the sidecar launch contract, not the renderer or readiness response.
+Size and SHA-256 accompany the opaque stage identity and are checked against
+the immutable source before returning results. Physical encoding and declared
+GEDCOM version are separate facts. Root candidates expose bounded names,
+source identifiers, dates, and relationship counts, never complete records;
+search text is not retained in lifecycle events or audit metadata. The generic
+operation routes are not enabled merely by starting native intake.
 
 The pure synchronization boundary is implemented by #165, and CORE-24 (#166)
 has physically extracted the concrete behavior from the two historical
@@ -806,10 +1416,12 @@ helpers without making those helpers supported consumer API.
    notes, media, repositories, sources, and custom/vendor lines where possible.
 10. Validate 5.5.5 output and atomically replace the destination.
 
-The deliberate 5.5.1 mode exists for importer compatibility. Root resolution
-accepts a pointer or unique name; ambiguous roots fail rather than select an
-arbitrary person. Output may normalize headers, order, xrefs, dates, and line
-wrapping, but must not overwrite an input file.
+GEDCOM 5.5.5 is the default. The deliberate 5.5.1 mode exists for importer
+compatibility. Root resolution accepts a pointer or unique name; ambiguous
+roots fail rather than select an arbitrary person. Output may normalize
+headers, order, xrefs, dates, and line wrapping, but must not overwrite an
+input file. A missing or cancelled duplicate decision uses the declared
+`retain-both` default, preserving conflicting evidence rather than deleting it.
 
 ### Quality analysis
 
@@ -921,6 +1533,63 @@ plugins:
 - `prepare_pages_source.py` validates the same canonical documentation and
   creates an isolated Jekyll staging tree with layout metadata and Pages-style
   local links. It never changes `docs/`.
+- `scripts/run_dependency_audit.py` exports the complete locked graph,
+  compares its normalized package identities with `uv.lock`, and only then
+  invokes the locked dependency auditor. `scripts/check_gfm_markdown.py`
+  applies the repository's deterministic GFM structural checks to every
+  tracked Markdown file.
+- `scripts/docs_screenshot_manifest.py` validates the closed schema-v1
+  documentation screenshot inventory, fictional offline fixtures, tokenized
+  launch plans, deterministic environment controls, documentation anchors, and
+  repository-relative output allowlist, structurally decoded PNG inventory,
+  rendered Markdown image ownership, and privacy-canary boundary. Issue #465
+  limits the published inventory to two Electron UI-location images and adds
+  explicit inclusion rationale, viewport-bounded crops, per-scenario reviewed
+  appearance, and actual-byte static PNG width, size, and 144-dpi checks.
+  `scripts/docs_screenshots.py` coordinates the Electron and terminal adapters
+  through isolated staging, forwards the selected manifest across both adapter
+  boundaries, rejects Electron capture outside Ubuntu 24.04 x86_64 before staging
+  to match CI text rendering, uses the canonical locked desktop installer,
+  publishes complete sets transactionally with stable repository-readable modes, performs
+  exact-byte drift comparison, and emits a closed hash-only failure report even
+  when a committed asset is missing or invalid. Check mode uses a temporary
+  source snapshot and leaves the repository unchanged. This is repository
+  tooling only: it adds no application command, UI registry, provider behavior,
+  GEDCOM or storage path, internal API route, or Electron bridge.
+- `.agents/skills/docs-screenshot-regeneration/SKILL.md` is repository tooling only
+  and adds a maintainer-facing orchestration layer over that existing manifest
+  and Make boundary. It preflights one requested scenario or surface, preserves
+  unrelated work, invokes the focused canonical capture, and always follows it
+  with the unfiltered drift check. It adds no application runtime surface or
+  independent capture implementation.
+- `desktop/e2e/docs-screenshot-capture.ts` and
+  `desktop/e2e/docs-screenshots.spec.ts` consume that shared contract for the
+  Electron surface. The adapter builds the existing fixture-only desktop
+  lifecycle, launches the real Electron `BrowserWindow`, drives the normal
+  renderer and typed bridge, waits on declared UI text, denies renderer network
+  requests, checks privacy canaries, requires byte-identical captures under light and dark
+  host preferences with the project appearance pinned, crops without resampling,
+  adds canonical PNG density metadata, and
+  atomically writes only allowlisted destinations below an explicit caller
+  output root. The success flow confirms the existing fixture bridge reports
+  `provider=none` with no profiles before it drives the ordinary Home surface;
+  the application event behavior, production runtime bridge, command registry,
+  API, provider, GEDCOM, storage, and packaged Electron boundaries are
+  unchanged. Publication and hosted drift enforcement are owned by the shared
+  orchestrator rather than this adapter.
+- `scripts/docs_terminal_capture.py`, `scripts/docs_terminal_pty.py`, and
+  `scripts/docs_terminal_preflight.py` consume the same manifest for the real
+  one-shot CLI and prompt-toolkit/Rich console. A closed schema-v1 policy pins
+  the VHS and uv container images, native image descriptors, renderer tools,
+  font identity, environment, PTY geometry, and scenario timing. The adapter
+  validates those identities, runs a true PTY and VHS renderer in a non-root,
+  read-only, capability-free, network-disabled native Linux container, and
+  requires two byte-identical captures before atomically publishing only the
+  two allowlisted PNGs. All writable application and terminal state lives in a
+  disposable container mount. This repository-only documentation adapter adds
+  no application command, registry, runtime dependency, provider behavior,
+  GEDCOM or storage path, internal API route, or Electron bridge. Documentation
+  embedding and hosted drift enforcement use the shared orchestrator.
 
 Wiki synchronization rejects symlinks, unsafe navigation, duplicate flattened
 page names, and broken sidebar targets before changing a destination. It owns
@@ -948,11 +1617,56 @@ The Make targets are the command contract:
 | `make lock-check` | Verify `uv` and prove `uv.lock` matches project metadata without installing a group. |
 | `make test` | Pytest regression and characterization suite. |
 | `make lint` | Ruff lint/format, executable architecture contracts, and repository artifact safety. |
+| `make code-docs-check` | Enforce meaningful Python, TypeScript/JavaScript, and Swift file and declaration documentation, including reviewed desktop security boundaries. |
 | `make typecheck` | Strict mypy over `ancestryllm`. |
+| `make typecheck-ty` | Exact ty advisory evaluation over the complete `ancestryllm` source tree, preserving its real status. |
 | `make security` | Dependency audit and curated, content-pinned Semgrep rules spanning Python, secrets, JavaScript/TypeScript, generic command/transport hardening, and GitHub Actions. |
-| `make sbom` | CycloneDX environment SBOM. |
+| `make sbom` | Locked CycloneDX generation plus fail-closed canonicalization into one deterministic project root, an exact dependency graph, and path-free atomic evidence. |
 | `make package` | Locked build-group construction and artifact validation. |
+| `make evaluate-uv-build` | Maintainer-only, fail-closed setuptools versus uv_build artifact comparison for one clean commit. |
 | `make workflow-audit` | Locked security-group GitHub Actions audit. |
+| `make docs-screenshots` | Capture every schema-v1 scenario by default, or one declared scenario or surface through quoted maintainer selectors; validate the publication contract and replace only the selected allowlisted PNG set transactionally. |
+| `make docs-screenshots-check` | Recapture all scenarios in temporary state and compare exact PNG bytes without changing the repository; emit only an optional sanitized hash report on failure. |
+| `make docs-terminal-screenshots` | Run the shared orchestrator for the terminal surface, verify the pinned native VHS toolchain, and capture the real CLI and console twice through a true PTY. |
+
+Version 1 security work has a separate repository-governance contract. The
+schema-v1 policy in `config/version-1-security-policy.json` binds the exact
+Project, repository, issue owners, release iterations, native GitHub dependency
+edges, iteration order, and the #131 release-evidence consumer. The shared
+GraphQL document in `config/release-project-query-v1.graphql` is used by proof,
+readiness, and release workflows. Its verifier rejects missing or contradictory
+edges, cycles, dependencies scheduled after their dependents, premature issue
+closure, pagination that cannot be verified, and unknown policy fields. A
+deterministic report is bound to the canonical policy digest before #131 may
+record the `version-1-security-dependencies` gate as passing.
+
+This contract governs hosted planning and release evidence only; it changes no
+application API, CLI command registry, service DTO, provider contract, GEDCOM
+representation, storage schema, FastAPI contract, or Electron boundary. It
+continues to trust authorized GitHub maintainers and GitHub's Project, issue,
+dependency, API, and token enforcement. Missing access, incomplete data, or a
+mutated policy/report fails closed rather than weakening that residual trust.
+
+Release quality has a separate schema-v1 delivery contract in
+`config/release-quality-policy-v1.json`. It assigns QA, security, performance,
+and diagnostics to named evidence owners; declares their exact commands,
+toolchain versions, readiness and desktop receipt gates, coverage policy,
+native-target performance ceilings, and diagnostic schema and retention
+limits; and permits only explicit, owned, independently approved, unexpired
+exceptions. `scripts/verify_release_quality.py` consumes the release-readiness
+schema-v2 and desktop aggregate schema-v3 artifacts, requires both to describe
+the exact release commit and the canonical policy identity, schema version,
+and digest, and emits one deterministic approval manifest. Release evaluates
+the two source artifacts before packaging, revalidates the retained approval
+and inputs immediately before publication, and verifies build provenance for
+every assembled release asset before any publication path can proceed.
+
+This release-quality boundary is repository delivery governance only. It adds
+no application command, API, DTO, storage, provider, GEDCOM, FastAPI, Electron,
+diagnostic export, network, or telemetry authority. Its performance ceilings
+describe hosted unpacked-native package evidence rather than a runtime
+scheduler or service-level guarantee. Missing, stale, substituted, malformed,
+wrong-head, over-budget, or unapproved-exception evidence blocks delivery.
 
 CI may synchronize a purpose-specific PEP 735 dependency group before running
 a gate, but it invokes the same Make target and cannot vary the actual command
@@ -972,10 +1686,35 @@ Semgrep remains an independently pinned pull-request gate. CodeQL runs on
 pushes, pull requests, and a weekly schedule. Dependabot covers Python and
 GitHub Actions. Pinned action commit SHAs reduce workflow supply-chain drift.
 
+For the 0.6 advisory period, exact `ty 0.0.69` runs separately with
+`continue-on-error: true`; strict mypy with `pydantic.mypy` remains the blocking
+type checker and the release-evidence result remains schema-v1 `mypy`. The
+advisory parity harness uses isolated invalid language and Pydantic fixtures,
+while the complete-tree evaluation records 58 unresolved checker, model, and
+third-party typing diagnostics in CI's narrow quality profile. Installing every
+optional provider SDK resolves five import diagnostics but leaves 53; neither
+profile passes. The conditional 0.7 cutover is a separate architecture decision
+and cannot proceed without full-tree parity and the existing supported Python
+range.
+
+Setuptools remains the production build backend. The locked uv_build 0.12
+candidate is confined to the maintainer-only `make evaluate-uv-build` harness,
+which compares clean-source wheel and sdist contents, semantic metadata,
+installation behavior, reconstruction, and reproducibility under one epoch.
+The 0.6 comparison is incompatible, so package and release paths retain the
+existing setuptools normalization and checks. This tooling-only evaluation
+does not change application packages, command registries, DTOs, providers,
+GEDCOM or RootsMagic handling, storage, FastAPI, or Electron boundaries.
+
 This environment ownership changes repository tooling only and adds no
 python-build-standalone executable trust chain. It does not add an application
 dependency or alter CLI commands, service DTOs, provider selection, GEDCOM
 handling, storage, FastAPI contracts, or Electron boundaries.
+
+The #312 hooks, complete audit export, Markdown validation, installation
+guidance, and VS Code settings are repository tooling only. They add no
+application interface, runtime package, data flow, privilege boundary, cloud
+consent path, or genealogy-format behavior.
 
 Tests are intentionally split by risk:
 
@@ -986,7 +1725,10 @@ Tests are intentionally split by risk:
   the operation modules, owned publication adapters, and preservation behavior;
 - router tests prove bounded read-only RootsMagic SQL and source hash stability;
 - Documentation tests cover Pages staging, Wiki validation, deterministic
-  mirroring, deletion, no-op behavior, commits, and workflow structure;
+  mirroring, deletion, no-op behavior, commits, workflow structure, and the
+  deterministic screenshot manifest, publication inventory, nonmutating drift
+  checks, focused agent orchestration, worktree safety, documentation ownership,
+  and privacy-canary contract;
 - all genealogy fixtures are fictional and isolated under `tests/fixtures/`.
 
 The import-only compatibility façades and their physical owner modules are
@@ -994,18 +1736,20 @@ covered by the standard strict type and Ruff gates without targeted exceptions.
 Changes to a physical owner require focused regression tests and may not expand
 the exact compatibility-import surface.
 
-The pre-commit configuration adds gitleaks, private-key detection, large-file
-checks, format/whitespace checks, and a no-direct-commit-to-`main` guard. CI and
-the repository safety script are authoritative even if a developer has not
-installed local hooks.
+The pre-commit configuration retains local system gitleaks, private-key
+detection, large-file checks, format/whitespace checks, and a
+no-direct-commit-to-`main` guard. Exact-commit upstream Ruff hooks perform only
+check and format-check behavior, and the exact-commit uv hook checks lock
+consistency. CI and the repository safety script are authoritative even if a
+developer has not installed local hooks.
 
 ## Current capability and assurance status
 
 | Area | Current state | Remaining assurance boundary |
 |---|---|---|
 | CLI and interactive console | Implemented prompt-toolkit/Rich adapters share `CommandSpec`, route identity, terminal translation, and `CommandExecutor`; no sibling-adapter import exceptions remain. | Preserve command, JSON, coded-error, exit, consent, offline, and file-safety behavior as services evolve. |
-| Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. | Future adapters may consume these contracts but may not redefine them. |
-| Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
+| Application contracts | Transport-neutral DTOs, ports, operation inventory, opaque artifacts, mediated-operation requests/results, GEDCOM inspect/merge/subtree/quality/sync requests and results, bounded GEDCOM job façade, invocations/outcomes, shared executor, and stable error mapping are implemented and tested. The same path-free contracts support terminal and fixed authenticated HTTP adapters without creating another registry. | Future adapters may consume these contracts but may not redefine them or expose host paths. |
+| Genealogy contract ownership | The service-owned aggregate implements canonical identity, provenance, deterministic change/conflict accounting, quality findings, and stable result semantics; GEDCOM inspect, merge, subtree, quality, and sync services return the transport-neutral contracts. | Preserve these rules as future adapters consume the service surface; do not move them into presentation or provider code. |
 | Encrypted workspace | Implemented and tested for encryption, wrong/missing keys, backup, and diagnostics. | Cross-platform keyring/SQLCipher packaging must be verified per release. |
 | RootsMagic query | Public immutable reader and dedicated query-orchestration boundaries are implemented with physically separated source/schema cores, layered read-only controls, deterministic DTOs, and synthetic tests. | Vendor schema variation and live-file behavior need release testing. |
 | RootsMagic export | Reusable mapping boundary and typed no-publication document are implemented for core tables with explicit loss reports; validation and rollback-safe publication are application-owned behind compatibility façades that preserve public imports. | Coverage is incomplete for every RootsMagic table/version. |
@@ -1013,9 +1757,55 @@ installed local hooks.
 | Incremental update | The staged pure kernel provides deterministic content-addressed plans, coded loss reports, replayable decisions, application-port cancellation/progress, atomic commit contracts, and explicit recovery; concrete contracts, algorithms, manifest validation, publication/recovery, orchestration, and legacy argument translation have physical owners. `incremental.py` is import-only compatibility, and exactly two imports in one explicit test assert retained re-exports. | Multi-generation and broad non-person paths need release evidence. |
 | LLM policy/adapters | Policy and offline behavior are tested; adapters are explicit. | Live provider compatibility, uniform timeouts, and cost-cap enforcement are not CI-proven. |
 | External GEDCOM interoperability | Output supports 5.5.5 and a 5.5.1 fallback. | Ancestry/Geni/MyHeritage import claims require manual release evidence. |
-| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The isolated `0.5.0` foundation implements authenticated `/api/v1/health` and `/api/v1/capabilities`, strict shared error and version contracts, fail-closed loopback configuration, deterministic OpenAPI, Issue #228's bounded Home, Diagnostics, sanitized capability-summary, and local visual Settings shell, Issue #229's renderer-only first-run welcome and Home-based revisit over Issue #227's main-owned `onboardingCompleted` preference, Issue #226's exact six-method validated bridge and main-only capabilities client, a fixed `app://` asset/CSP boundary, global session/window denials, fuse/ASAR package inspection, Issue #225's private native-sidecar bootstrap, supervision, smoke testing, and unsigned unpacked package assembly, plus Issue #227's bounded main-owned durable preferences under Electron's OS app-data directory. No genealogy integration, domain or generic command route, updater, update feed, or background update channel exists. | A v0.5 support or release claim requires a target-matched manually installed official unsigned installer with its disclosure, published checksums, SBOM/provenance, installation, platform-execution, packaged-assurance, and exact-head gates. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. |
-| Container and advanced remote deployment profiles | ADR-0026 accepts Local Desktop, Connect Remote, and single-household Host Remote as a target architecture. No container or remote profile is implemented or supported. | G5-G7, linked issues, native-platform budgets, operator runbooks, license/SBOM/provenance evidence, and independent review must pass before availability. |
+| Electron/internal API runtime | ADR-0025 was accepted and #98 is closed. The `0.6.0` source implements authenticated health and capability discovery, strict shared contracts, fail-closed loopback configuration, deterministic OpenAPI, the bounded Home/Diagnostics/Settings shell, first-run onboarding, six fixed control methods, the private native sidecar, payload verification, bounded supervision, process-tree cleanup, and durable main-owned preferences. Issue #103 adds the opaque file-grant broker, and Issue #352 adds a path-free mediated-operation contract, private immutable staging, bounded local/remote adapter contexts, exact transient mount validation, validate-before-publish output handling, and cleanup/recovery without adding a renderer route. Issues #104-#109 add restart-safe job lifecycle, write-only credential/settings routes, responsive shell, startup diagnostics, provider profiles/consent, and a bounded Tasks presentation through fixed validated bridges. Issue #110 adds fixed synchronous transient-chat capability/session/run routes over exact-profile, fresh-consent provider execution; content remains bounded process memory, failures do not append history, audit metadata excludes payloads, and the model receives no tools. Issue #111 adds fixed stream-start/SSE/cancel routes and a Main/preload source bridge with sender/run authorization, monotonic validation, bounded batching and acknowledgement debt, stall cancellation, and one same-run replay reconnect. Issue #112 adds the bounded Chat presentation, strict ordered renderer convergence, safe Markdown allowlisting, explicit Main-owned HTTPS-link confirmation, plain-text copy, accessible announcements, and transient session cleanup. Issue #112 itself added no renderer network, filesystem, tool, genealogy, domain or generic command route, updater, update feed, or background update channel. Issue #114 added five fixed authenticated GEDCOM job-submission routes and one typed result route over the transport-neutral application façade, without a renderer bridge. Issue #115 adds source-level read-only GEDCOM intake, bounded root search and explicit selection through four fixed native bridge requests, without publication or provider authority. | A positive packaged-support claim for the named source-level surfaces still requires target-matched packaged verification and Issue #131's adversarial evidence. Issue #352 supplies the source-level mediation, private-stage, exact-mount, bounded-stream, and per-destination atomic-publication boundary; Issue #114 supplies the concrete source-level GEDCOM service and authenticated API adapter, and #115 supplies the read-only intake and root-selection presentation. Integrated container-worker execution, complete parser-worker budgets, transactional workflow recovery, supported packaged presentation, and target-matched adversarial evidence remain with #118, #131, #364, and #365. Issues #110-#112 supply the bounded source-level provider-call, chat-transport, and safe-presentation boundaries, while native endpoint-network instrumentation, stalled-provider/renderer evidence, packaged XSS/link/copy cases, target-matched screen-reader evidence, and broader adversarial evidence remain #131. macOS and Windows can display an unknown-publisher or Gatekeeper prompt, so users must verify published checksums and release evidence before installation. Unsigned CI artifacts are verification inputs only. The manifest binding is not publisher signing or whole-bundle protection; #132 owns signing/notarization, and hosted exact-head Windows evidence remains the native process-tree proof. |
+| Deployment profiles and future runtimes | The source-level schema-v1 profile control plane implements Local Desktop as the safe default plus explicit, unavailable Connect Remote and single-household Host Remote intents. Issue #363 adds an Electron-Main-only container-control foundation with exact policy/plan validation and isolated native macOS arm64 lifecycle evidence. Issue #348 adds policy-bound acquisition and user-visible lifecycle management for an app-owned macOS arm64 Colima/Lima and Docker tool substrate. Issue #349 adds native Linux amd64/arm64 OCI and Compose evidence for a private probe gateway and optional dormant worker, with no published port and migration disabled. None of these activate a deployment profile or supported application container, and no remote runtime is supported. | The remaining G5-G7 controls, workload identity, secret/data lifecycle, operator activation runbooks, native packaged evidence, and independent review must pass before application-runtime availability. |
 | Browser, general public API, multi-user, or multi-tenant runtime | Not accepted. | A separate ADR would require authentication, authorization, CSRF, tenant isolation, deployment, and server-operations design. |
+
+## CORE-40 multi-adapter façade consumption and extraction evaluation
+
+Implemented adapter consumption is scoped to the boundaries below; complete
+typed DTO parity across terminal and HTTP adapters is not yet proven. The
+packaged Electron 0.6 support boundary is narrower: Home, Diagnostics, Settings, and onboarding form the supported core;
+named provider, Tasks, and Chat surfaces remain source-level gates until
+target-matched packaged evidence passes. Read-only GEDCOM intake and root
+selection (`#115`) are implemented source-level gates with the same packaged
+evidence requirement. Genealogy mutation and RootsMagic desktop adapters remain
+future work and must consume the same application-service contracts rather than
+redefine behavior.
+
+- CLI and REPL dispatch through shared `CommandSpec`, `CommandInvocation`, and
+  `CommandExecutor` boundaries. Typed application façade coverage varies by
+  operation: RootsMagic terminal commands still use path-based service
+  convenience methods, so this shared dispatch does not prove complete DTO parity.
+- Within the authenticated FastAPI adapter (`#11`, `#114`), GEDCOM routes
+  translate strict OpenAPI/Pydantic payloads into transport-neutral application
+  operation requests and results; OpenAPI/Pydantic ownership remains adapter local.
+  The RootsMagic HTTP adapter tracked by `#119` remains future work.
+- The bounded Electron control shell keeps file grants, sidecar lifecycle, and
+  settings/keyring authority in Main/application layers. The sandboxed renderer
+  owns presentation only. Fixed authenticated routes and validated bridge
+  requests do not make source-level provider, Tasks, or Chat surfaces supported
+  packaged features;
+  those surfaces require target-matched evidence before a support claim.
+
+The extraction evaluation for GEDCOM and RootsMagic used the required criteria:
+independent consumer evidence, release cadence and dependency reduction impact,
+API stability and compatibility burden, test/security ownership and
+vulnerability-response obligations, SemVer/changelog load, cross-repository
+coordination cost, and `#131` parity/adversarial evidence readiness.
+
+The accepted dispositions in [ADR-0027](docs/ADR-0027-core-package-extraction-decision.md)
+feed CORE-42 `#170`:
+
+- GEDCOM: keep internal now (defer extraction). It remains the first extraction
+  candidate if an independent consumer and measured dependency/release-surface
+  reduction justify the added operational burden.
+- RootsMagic: keep internal (decline extraction). Existing internal façades serve
+  the current consumers; a separate release train would increase release and
+  vulnerability-response surface without a demonstrated compensating benefit.
+
+This evaluation must not delay or redefine signing and notarization scope tracked
+by `#132`.
 
 ## Non-goals and prohibited shortcuts
 

@@ -1,0 +1,2 @@
+/* Defines the representative accessible renderer theme fixture. */
+:root {}

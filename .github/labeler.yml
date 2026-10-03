@@ -1,3 +1,4 @@
+# Maps changed repository paths to the pull-request labels used by maintainers.
 documentation:
   - changed-files:
       - any-glob-to-any-file:

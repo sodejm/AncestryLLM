@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _PRODUCTION_ORIGIN = "https://sodejm.github.io"
 
@@ -331,6 +334,7 @@ def validate_site(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the validate rendered docs command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", type=Path, required=True)
     parser.add_argument("--baseurl", default="/AncestryLLM")
@@ -340,6 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the validate rendered docs command and return its exit status."""
     args = build_parser().parse_args(argv)
     errors = validate_site(
         args.site,

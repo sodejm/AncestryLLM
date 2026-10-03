@@ -1,3 +1,5 @@
+"""Verify Dependabot covers every locked package ecosystem under review."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,8 +17,15 @@ def _ecosystem_block(configuration: str, ecosystem: str) -> str:
 
 def test_dependabot_batches_routine_updates_without_delaying_security_fixes() -> None:
     configuration = DEPENDABOT_PATH.read_text(encoding="utf-8")
+    configuration_lines = configuration.splitlines()
+    first_declaration = next(
+        index for index, line in enumerate(configuration_lines) if line and not line.startswith("#")
+    )
 
-    assert configuration.startswith("version: 2\nupdates:\n")
+    assert configuration_lines[first_declaration : first_declaration + 2] == [
+        "version: 2",
+        "updates:",
+    ]
     assert configuration.count('package-ecosystem: "') == 2
 
     for ecosystem in ("uv", "github-actions"):

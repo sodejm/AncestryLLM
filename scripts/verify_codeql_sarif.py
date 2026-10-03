@@ -64,6 +64,7 @@ def verify_codeql_sarif(directory: Path) -> tuple[Path, ...]:
 
 
 def main() -> int:
+    """Run the verify codeql sarif command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", required=True, type=Path)
     args = parser.parse_args()

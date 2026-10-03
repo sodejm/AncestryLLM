@@ -20,11 +20,14 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from types import ModuleType
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,10 @@ RULE_BUNDLES = (
                 size=487_962,
             ),
             RuleRevision(
+                sha256="e9f042a0c53c33e67ad43288b548a52a20b23dc3f0feea7bfffaba17cc63949a",
+                size=487_962,
+            ),
+            RuleRevision(
                 sha256="c475a61f25c07ed68fbe20b1f0747a89218063a9ba85465999c53db57255017a",
                 size=487_962,
             ),
@@ -87,8 +94,60 @@ RULE_BUNDLES = (
                 size=487_962,
             ),
             RuleRevision(
+                sha256="2fd889488c318acc98cdf84fc3736ed5b9b20c68ca5ea619af35cac716f961e7",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="5bf4a3a5080baa129b0080d2deb1edbe140464a48bced044901c69fdf581d71d",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="babf8c5994a3074d041077174ae3f5d14a88e807084ece1a53a29c7cbbdf5851",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="18d4f94e9cbd3944c752dcad2d9b643b562d37abe12705c61176fd9a7cc1f0c1",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="a8a155d58dc346b4358e9f9e347d93c0869a542304a216b9f63701ea1d737b12",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="c8a84a1877ad8c93e189377b80c798ed27aec80ee85a977409af05a526c54b4b",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="c030c27616041435f0c1f7bfc6d18b9241401c3c1936ad7380229b692c8473d6",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="84f7b1202051b2d4beb6861b5de46e652bd56c7bebc90e128f0cf64fc1d54934",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="7476830701b31be1c4a76432e23950b86ec76635888103877ca24708e7c01c76",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="449934d9be1f6f2ea91ff5175a8629cc93c38f8f52ca3da44e43089bcca44260",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="f2855115c92ee2e01f6cc769ec86eaf1a50cc65bb12adb8e4fa01edeec04e71d",
+                size=487_962,
+            ),
+            RuleRevision(
                 sha256="084e9272b4297bbdc7afcd0b8ece70816f2e9c9973639b26eab2c071456ccc6b",
                 size=432_695,
+            ),
+            RuleRevision(
+                sha256="8a3d322e2e4c33ea25652239eba734b6d8418227af7ff3cd6a1d53e371f80e56",
+                size=487_962,
+            ),
+            RuleRevision(
+                sha256="10aaa4c312789cc5834d721e71ed20a4fce6251abbc43a21218cf6633cc88e21",
+                size=487_962,
             ),
         ),
     ),
@@ -471,8 +530,9 @@ def run_scan(targets: list[str]) -> int:
             config_path = Path(temp_dir) / f"{bundle.name}.yml"
             download_rule_bundle(bundle, config_path)
             rule_groups.append(_selected_bundle_rules(bundle, config_path.read_bytes()))
-        for archive in RULE_ARCHIVES:
-            rule_groups.append(_archive_rules(archive, _download_rule_archive(archive)))
+        rule_groups.extend(
+            _archive_rules(archive, _download_rule_archive(archive)) for archive in RULE_ARCHIVES
+        )
 
         rules, duplicate_count = _deduplicate_rules(rule_groups)
         config_path = Path(temp_dir) / "reviewed-rules.yml"
@@ -500,6 +560,7 @@ def run_scan(targets: list[str]) -> int:
 
 
 def main(arguments: list[str] | None = None) -> int:
+    """Run the run pinned semgrep command and return its exit status."""
     parser = argparse.ArgumentParser(
         description=("Run lockfile-pinned Semgrep with content-pinned registry rule bundles.")
     )

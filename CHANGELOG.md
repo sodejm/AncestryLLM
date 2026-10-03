@@ -6,6 +6,87 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Versioned release-quality policy and exact-head approval evidence covering
+  QA, security, performance, and diagnostics ownership, commands, inputs, and
+  fail-closed exceptions.
+- Transport-neutral GEDCOM inspect, merge, subtree, quality, and sync DTOs; a
+  bounded typed job façade; and fixed authenticated submission/result API routes.
+- Source-level read-only desktop GEDCOM intake with ordered temporary sources,
+  bounded validation summaries, physical encoding and fingerprint metadata,
+  on-demand single-person finding previews, paged individual search, and explicit
+  root or no-root selection. This adds no
+  import, merge, export, provider call, or packaged-support claim.
+- Opt-in hidden-window Electron source checks that avoid showing app windows
+  or taking keyboard focus, while keeping native-focus and packaged checks
+  separate and ordinary desktop launches visible.
+
+### Changed
+
+- Desktop release evidence now pins its Python, Node.js, pnpm, Vitest, and
+  WebdriverIO versions; enforces V8 coverage, accessibility, source Webdriver,
+  target-specific packaged-performance ceilings, and privacy-safe diagnostic
+  canaries; and records those results in the aggregate receipt.
+- CLI and REPL GEDCOM entry points now compose the same application contracts,
+  with GEDCOM 5.5.5 as the default and deliberate 5.5.1 compatibility retained.
+- GEDCOM inspection recognizes BOM-marked UTF-16, reads the GEDCOM version from
+  `HEAD/GEDC/VERS` rather than a producer version, and reports extension
+  preservation and in-memory date normalization without changing source bytes.
+
+### Security
+
+- Release and release-readiness workflows now verify the policy-bound
+  release-quality approval against the exact commit and both source artifacts.
+  Release verifies it again immediately before publication so stale, edited,
+  substituted, incomplete, or excepted-without-approval evidence fails closed.
+- Added purpose-scoped opaque grants, path-free results/progress/errors,
+  explicit provider and consent enforcement, network-free `provider=none`, a
+  conservative retain-both decision fallback, cancellation preservation, and
+  validated atomic publication for GEDCOM operations.
+
+## [0.6.0] - 2026-08-14
+
+### Added
+
+- Desktop Tasks destination backed by strict job snapshots, bounded
+  sender-owned event subscriptions, cooperative cancellation, coded redacted
+  errors, reload resynchronization, and grant-mediated artifact presentation.
+- Synchronous transient-chat service and authenticated private API
+  with exact named-profile/model selection, fresh policy and consent checks,
+  strict resource limits, memory-only content, privacy-minimal audit metadata,
+  and no tool, filesystem, database, shell, plugin, genealogy, or autonomous
+  authority.
+- Verified repository-local `uv` bootstrap, purpose-specific PEP 735 dependency
+  groups, system-Python-only environment ownership, and advisory `ty` evidence
+  alongside authoritative strict mypy checking.
+- Source-level desktop settings, provider-consent, task-lifecycle, transient-chat,
+  local-runtime, and container-control foundations with fixed Main-owned
+  boundaries and explicit packaged-runtime gates.
+
+### Changed
+
+- Hardened packaged sidecar integrity, startup, authenticated graceful shutdown,
+  SQLCipher migration, process-tree supervision, and native Windows ARM64 and
+  Linux verification.
+- Expanded Ruff 0.16.1 rules in reviewed batches while retaining provider-import,
+  Pydantic, GEDCOM, cross-platform, and cancellation regression contracts.
+- Completed the Diátaxis documentation cutover, deterministic Pages and Wiki
+  publishing contracts, and fictional provider-none screenshot evidence.
+- Retained setuptools after the `uv_build` evaluation found artifact drift, and
+  retained mypy after the `ty` advisory failed the complete cutover gate.
+
+### Security
+
+- Sanitized and canonicalized release SBOM evidence so it contains one project
+  root, a complete deterministic dependency graph, and no local runner path or
+  volatile document identity.
+- Preserved network-free `provider=none`, explicit provider consent, immutable
+  RootsMagic inputs, loss-minimal GEDCOM behavior, and fail-closed release gates.
+- Kept application containers, remote hosting, publisher signing, automatic
+  updating, and unsupported packaged desktop surfaces unavailable pending their
+  separately documented evidence gates.
+
 ## [0.5.0] - 2026-08-04
 
 ### Added
@@ -149,7 +230,8 @@ All notable changes to AncestryLLM are recorded here. The project follows
   SHM files without a WAL; and bounds schema-assisted query prompts with the stable
   `ROOTSMAGIC_SCHEMA_PROMPT_TOO_LARGE` error before any provider call.
 
-[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sodejm/AncestryLLM/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sodejm/AncestryLLM/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sodejm/AncestryLLM/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sodejm/AncestryLLM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sodejm/AncestryLLM/compare/v0.2.0...v0.3.0

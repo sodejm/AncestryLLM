@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import posixpath
 import re
 from dataclasses import dataclass
@@ -12,6 +13,10 @@ _BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _EXTERNAL_SCHEMES = frozenset({"http", "https", "mailto", "tel"})
 _URL_SAFE = "/:@-._~!$&'()*+,;="
+_ATX_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(?P<title>.*?)[ \t]*#*[ \t]*$")
+_SETEXT_HEADING = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+_EXPLICIT_HEADING_ID = re.compile(r"[ \t]+\{#(?P<identifier>[^}]+)\}[ \t]*$")
+_HTML_ANCHOR = re.compile(r"\b(?:id|name)=[\"'](?P<identifier>[^\"']+)[\"']", re.IGNORECASE)
 
 
 class DocumentationLinkError(ValueError):
@@ -46,6 +51,56 @@ def split_destination(destination: str) -> tuple[str, str]:
 def encode_path(path: PurePosixPath | str) -> str:
     """Encode a canonical POSIX path for a Markdown URL."""
     return quote(str(path), safe=_URL_SAFE)
+
+
+def source_anchors(markdown: str) -> set[str]:
+    """Return deterministic Kramdown-style heading and explicit HTML anchors."""
+    anchors: set[str] = set()
+    counts: dict[str, int] = {}
+    fence: str | None = None
+    previous_line: str | None = None
+
+    def add_heading(title: str) -> None:
+        explicit = _EXPLICIT_HEADING_ID.search(title)
+        if explicit is not None:
+            anchors.add(explicit.group("identifier"))
+            return
+        title = re.sub(r"!?(?:\[([^]]*)\])\([^)]*\)", r"\1", title)
+        title = re.sub(r"<[^>]+>", "", title)
+        title = re.sub(r"[`*_~]", "", html.unescape(title)).casefold().strip()
+        identifier = re.sub(r"[^\w -]", "", title, flags=re.UNICODE)
+        identifier = re.sub(r"[ _]+", "-", identifier)
+        if not identifier:
+            return
+        occurrence = counts.get(identifier, 0)
+        counts[identifier] = occurrence + 1
+        anchors.add(identifier if occurrence == 0 else f"{identifier}-{occurrence}")
+
+    for line in markdown.splitlines():
+        stripped = line.lstrip()
+        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence_match is not None:
+            marker = fence_match.group(1)[0]
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            previous_line = None
+            continue
+        if fence is not None:
+            continue
+        anchors.update(match.group("identifier") for match in _HTML_ANCHOR.finditer(line))
+        if _SETEXT_HEADING.match(line) is not None and previous_line and previous_line.strip():
+            add_heading(previous_line)
+            previous_line = None
+            continue
+        heading = _ATX_HEADING.match(line)
+        if heading is not None:
+            add_heading(heading.group("title"))
+            previous_line = None
+            continue
+        previous_line = line
+    return anchors
 
 
 class SourceIndex:

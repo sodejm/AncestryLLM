@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = [
     "DataClass",
@@ -20,6 +22,8 @@ __all__ = [
 
 
 class DataClass(StrEnum):
+    """Enumerate the supported data class values."""
+
     PUBLIC_GENEALOGY = "public_genealogy"
     DECEASED_PERSON = "deceased_person"
     LIVING_PERSON = "living_person"
@@ -30,6 +34,8 @@ class DataClass(StrEnum):
 
 
 class Message(BaseModel):
+    """Represent one validated role and content pair sent to an LLM provider."""
+
     model_config = ConfigDict(frozen=True)
 
     role: str = Field(pattern=r"^(system|user|assistant)$")
@@ -57,6 +63,7 @@ class ProviderExecution(BaseModel):
 
     @model_validator(mode="after")
     def validate_bounds(self) -> ProviderExecution:
+        """Validate generation limits before a provider request is admitted."""
         if self.max_pending < self.max_concurrency:
             raise ValueError("max_pending must be greater than or equal to max_concurrency")
         if isinstance(self.keep_alive, str):
@@ -69,6 +76,8 @@ class ProviderExecution(BaseModel):
 
 
 class GenerationRequest(BaseModel):
+    """Carry consent-checked messages and generation limits to an LLM provider."""
+
     model_config = ConfigDict(frozen=True)
 
     provider_id: str
@@ -86,6 +95,8 @@ class GenerationRequest(BaseModel):
 
 
 class ProviderCapabilities(BaseModel):
+    """Describe the generation, streaming, and context limits of a provider."""
+
     model_config = ConfigDict(frozen=True)
 
     provider_id: str
@@ -97,6 +108,8 @@ class ProviderCapabilities(BaseModel):
 
 
 class GenerationResult(BaseModel):
+    """Return provider text, usage metadata, and a stable request identifier."""
+
     model_config = ConfigDict(frozen=True)
 
     provider_id: str
@@ -111,9 +124,17 @@ class GenerationResult(BaseModel):
 
 
 class LLMProvider(Protocol):
+    """Define the LLM provider boundary used by application adapters."""
+
     @property
-    def capabilities(self) -> ProviderCapabilities: ...
+    def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities exposed by the LLM provider."""
+        ...
 
-    def generate(self, request: GenerationRequest) -> GenerationResult: ...
+    def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Generate a response through the LLM provider."""
+        ...
 
-    def stream(self, request: GenerationRequest) -> Iterator[str]: ...
+    def stream(self, request: GenerationRequest) -> Iterator[str]:
+        """Stream response chunks through the LLM provider."""
+        ...

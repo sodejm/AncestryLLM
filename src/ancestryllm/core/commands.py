@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
     "BUILTIN_MODULES",
@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 
-class ArgumentType(str, Enum):
+class ArgumentType(StrEnum):
     """Serializable value types understood by command transports."""
 
     STRING = "string"
@@ -33,7 +33,7 @@ class ArgumentType(str, Enum):
     PATH = "path"
 
 
-class ArgumentAction(str, Enum):
+class ArgumentAction(StrEnum):
     """Transport-neutral argument collection behavior."""
 
     STORE = "store"
@@ -41,7 +41,7 @@ class ArgumentAction(str, Enum):
     STORE_TRUE = "store_true"
 
 
-class ArgumentCardinality(str, Enum):
+class ArgumentCardinality(StrEnum):
     """Supported variable argument cardinalities."""
 
     OPTIONAL = "optional"
@@ -49,7 +49,7 @@ class ArgumentCardinality(str, Enum):
     REMAINDER = "remainder"
 
 
-class CompletionKind(str, Enum):
+class CompletionKind(StrEnum):
     """Semantic completion sources for a future interactive transport."""
 
     NONE = "none"
@@ -90,6 +90,7 @@ class ArgumentSpec:
 
     @property
     def positional(self) -> bool:
+        """Return whether the command argument is positional."""
         return not self.flags
 
 
@@ -266,6 +267,42 @@ GLOBAL_ARGUMENTS: tuple[ArgumentSpec, ...] = (
 _GEDCOM_VERSIONS = ("5.5.5", "5.5.1")
 _SCOPES = ("connected", "ancestors", "descendants")
 _PROVIDERS = ("ollama", "openai", "anthropic", "gemini", "openrouter")
+_DEPLOYMENT_MODES = ("local-desktop", "connect-remote", "host-remote-server")
+_DEPLOYMENT_TARGET_ARGUMENTS = (
+    ArgumentSpec(
+        "mode",
+        "Exact target deployment mode",
+        ("--mode",),
+        choices=_DEPLOYMENT_MODES,
+        required=True,
+        completion=CompletionKind.CHOICES,
+    ),
+    ArgumentSpec(
+        "schema_version",
+        "Deployment contract schema version",
+        ("--schema-version",),
+        ArgumentType.INTEGER,
+        required=True,
+    ),
+    ArgumentSpec(
+        "expected_revision",
+        "Expected non-secret configuration revision",
+        ("--expected-revision",),
+        ArgumentType.INTEGER,
+        required=True,
+    ),
+    ArgumentSpec(
+        "endpoint_origin",
+        "Exact enrolled HTTPS origin for Connect to Remote",
+        ("--endpoint-origin",),
+        sensitive=True,
+    ),
+    ArgumentSpec(
+        "endpoint_identity_sha256",
+        "Reviewed endpoint identity SHA-256 for Connect to Remote",
+        ("--endpoint-identity-sha256",),
+    ),
+)
 
 
 COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
@@ -952,6 +989,59 @@ COMMAND_SPECIFICATIONS: dict[str, CommandSpec] = {
                         "Consent grant name",
                         ("--consent",),
                         completion=CompletionKind.CONSENT,
+                    ),
+                ),
+            ),
+        ),
+    ),
+    "deployment": CommandSpec(
+        "deployment",
+        "Explicit deployment profile control plane",
+        (
+            ActionSpec("modes", "List reviewed deployment choices and prerequisites"),
+            ActionSpec("status", "Show the stored deployment profile and revision"),
+            ActionSpec(
+                "preview",
+                "Preview an exact profile switch without changing configuration",
+                _DEPLOYMENT_TARGET_ARGUMENTS,
+            ),
+            ActionSpec(
+                "switch",
+                "Apply a separately previewed profile switch",
+                (
+                    *_DEPLOYMENT_TARGET_ARGUMENTS,
+                    ArgumentSpec(
+                        "confirm",
+                        "Exact target-bound confirmation returned by preview",
+                        ("--confirm",),
+                        required=True,
+                        sensitive=True,
+                    ),
+                    ArgumentSpec(
+                        "unattended",
+                        "Acknowledge that this command has no interactive confirmation",
+                        ("--unattended",),
+                        default=False,
+                        required=True,
+                        action=ArgumentAction.STORE_TRUE,
+                    ),
+                ),
+            ),
+            ActionSpec(
+                "diagnose",
+                "Compare stored intent with this local runtime safely",
+            ),
+            ActionSpec(
+                "metadata",
+                "Emit redacted deployment metadata for reviewed evidence",
+                (
+                    ArgumentSpec(
+                        "purpose",
+                        "Evidence consumer",
+                        ("--purpose",),
+                        choices=("backup", "support"),
+                        required=True,
+                        completion=CompletionKind.CHOICES,
                     ),
                 ),
             ),

@@ -837,7 +837,7 @@ def test_growth_or_replacement_during_consumption_is_rejected(
     if replace_source:
         replacement = tmp_path / "replacement.txt"
         replacement.write_text("replacement\n", encoding="utf-8")
-        os.replace(replacement, source)
+        replacement.replace(source)
     else:
         with source.open("a", encoding="utf-8") as handle:
             handle.write("growth\n")
@@ -861,7 +861,7 @@ def test_replacement_between_preflight_and_open_is_rejected(
 
     def inspect_then_replace(path: str | Path, kind: FileKind) -> FileSnapshot:
         snapshot = original_inspect(path, kind)
-        os.replace(replacement, source)
+        replacement.replace(source)
         return snapshot
 
     monkeypatch.setattr(policy, "inspect", inspect_then_replace)
@@ -905,7 +905,7 @@ def test_copy_to_preserves_a_preexisting_destination_symlink(
         destination.symlink_to(sentinel)
     except OSError:
         pytest.skip("Symbolic links are unavailable on this filesystem.")
-    link_target = os.readlink(destination)
+    link_target = destination.readlink()
     policy = FileIngressPolicy()
     fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
 
@@ -918,7 +918,7 @@ def test_copy_to_preserves_a_preexisting_destination_symlink(
         )
 
     assert destination.is_symlink()
-    assert os.readlink(destination) == link_target
+    assert destination.readlink() == link_target
     if not dangling:
         assert sentinel.read_bytes() == b"symlink target sentinel\n"
 
@@ -941,7 +941,7 @@ def test_copy_to_removes_only_its_own_failed_destination(
         _kind: FileKind,
         _expected: FileSnapshot,
     ) -> None:
-        os.replace(replacement, destination)
+        replacement.replace(destination)
         raise FileIngressError(
             "FILE_INPUT_CHANGED",
             "The gedcom input changed while it was being consumed.",
@@ -2416,7 +2416,7 @@ def test_first_claim_requires_the_atomic_writers_identity_token(tmp_path: Path) 
     staged = staging_path(target)
     replacement = tmp_path / "replacement.ged"
     replacement.write_bytes(b"untrusted replacement\n")
-    os.replace(replacement, staged)
+    replacement.replace(staged)
 
     with pytest.raises(OSError, match="identity token is required"):
         publication_module.claim_staged_path(staged)
@@ -2449,7 +2449,7 @@ def test_reserved_writer_never_clobbers_a_foreign_staging_replacement(
     replacement_payload = b"concurrent stage replacement\n"
     replacement = tmp_path / "concurrent-writer.ged"
     replacement.write_bytes(replacement_payload)
-    os.replace(replacement, staged)
+    replacement.replace(staged)
 
     with pytest.raises(OSError, match="reservation was replaced"):
         if writer_kind == "gedcom":
@@ -2604,7 +2604,7 @@ def test_keyboard_interrupt_rolls_back_each_bundle_install_boundary(
             if installs == interrupt_after_install:
                 raise KeyboardInterrupt
             return
-        os.replace(source, destination)
+        Path(source).replace(destination)
 
     with pytest.raises(KeyboardInterrupt):
         publish_staged_bundle(
@@ -2634,7 +2634,7 @@ def test_quarantine_discard_does_not_use_a_public_check_then_path_unlink(
         path_unlinks.append(path)
         replacement = tmp_path / "replacement.ged"
         replacement.write_bytes(b"replacement\n")
-        os.replace(replacement, path)
+        replacement.replace(path)
         original_path_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", race_public_unlink)
@@ -3268,7 +3268,7 @@ def test_target_replaced_after_backup_is_preserved_without_publication(
         backup = artifact.backup
         assert backup is not None
         backups.append(backup)
-        os.replace(replacement, artifact.target)
+        replacement.replace(artifact.target)
 
     monkeypatch.setattr(publication_module, "_backup_target", backup_then_replace)
 
@@ -3291,7 +3291,7 @@ def test_target_replaced_before_rollback_is_preserved_with_recovery_files(
     replacement.write_bytes(b"concurrent\n")
 
     def replace_then_fail() -> None:
-        os.replace(replacement, target)
+        replacement.replace(target)
         raise RuntimeError("fictional validation failure")
 
     with pytest.raises(OSError, match="concurrent replacement"):
@@ -3335,7 +3335,7 @@ def test_replaced_backup_is_never_restored_or_deleted(
         backup_path = backups[0].path
         replacement = tmp_path / "concurrent-backup.ged"
         replacement.write_bytes(b"concurrent backup\n")
-        os.replace(replacement, backup_path)
+        replacement.replace(backup_path)
         if fail_validation:
             raise RuntimeError("fictional validation failure")
 
@@ -3380,7 +3380,7 @@ def test_service_cleanup_preserves_a_replacement_at_its_staging_name(
         )
         replacement = tmp_path / "concurrent-stage.ged"
         replacement.write_bytes(b"concurrent\n")
-        os.replace(replacement, output_stage)
+        replacement.replace(output_stage)
         replacements.append(output_stage)
         raise OSError("fictional report write failure")
 
@@ -3750,7 +3750,7 @@ def test_failed_commit_verification_preserves_a_foreign_target_replacement(
         destination: Path,
     ) -> Any:
         nonlocal swapped
-        os.replace(replacement, destination)
+        replacement.replace(destination)
         swapped = True
         return original_verify(prepared, destination)
 
@@ -3953,8 +3953,9 @@ def test_candidate_copy_return_interruption_uses_registered_ownership(
         destination: Path,
         *,
         owner: Any = None,
+        created: Any = None,
     ) -> Any:
-        original_copy(source, destination, owner=owner)
+        original_copy(source, destination, owner=owner, created=created)
         raise error_type("fictional candidate return interruption")
 
     monkeypatch.setattr(
@@ -4878,7 +4879,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     target.symlink_to(victim)
     staged = _staged_bytes(target, b"new\n")
     original_link = publication_module.os.link
-    original_symlink = publication_module.os.symlink
+    original_restore = publication_module._restore_symlink_no_clobber
     raced = False
 
     def deny_symlink_hardlinks(
@@ -4892,27 +4893,20 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
         original_link(source, destination, follow_symlinks=follow_symlinks)
 
     def create_concurrent_target_before_restore(
-        source: str | bytes,
-        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-        target_is_directory: bool = False,
-        *,
-        dir_fd: int | None = None,
-    ) -> None:
+        source: publication_module._OwnedPath,
+        destination: Path,
+        restoration: publication_module._Artifact | None,
+    ) -> publication_module._OwnedPath:
         nonlocal raced
-        if Path(destination) == target and not raced:
+        if destination == target and not raced:
             target.write_bytes(b"concurrent\n")
             raced = True
-        original_symlink(
-            source,
-            destination,
-            target_is_directory=target_is_directory,
-            dir_fd=dir_fd,
-        )
+        return original_restore(source, destination, restoration)
 
     monkeypatch.setattr(publication_module.os, "link", deny_symlink_hardlinks)
     monkeypatch.setattr(
-        publication_module.os,
-        "symlink",
+        publication_module,
+        "_restore_symlink_no_clobber",
         create_concurrent_target_before_restore,
     )
 
@@ -4931,7 +4925,7 @@ def test_symlink_restore_fallback_never_clobbers_an_appearing_target(
     assert raced
     assert target.read_bytes() == b"concurrent\n"
     assert victim.read_bytes() == b"victim\n"
-    assert len(recovery) == 2
+    assert len(recovery) == 1  # The journaled displacement retains the original symlink.
     assert all(path.is_symlink() for path in recovery)
     for path in recovery:
         path.unlink()
@@ -5061,3 +5055,30 @@ def test_rootsmagic_missing_paths_use_sanitized_stable_errors(tmp_path: Path) ->
     assert relative_error.value.code == "ROOTSMAGIC_TREE_NOT_FOUND"
     assert str(explicit) not in explicit_error.value.render()
     assert "private-relative-name" not in relative_error.value.render()
+
+
+def test_windows_ingress_uses_descriptor_consistent_path_metadata(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    source = tmp_path / "fictional.ged"
+    source.write_bytes(b"0 HEAD\n0 TRLR\n")
+    observed = []
+
+    def native_stat(path):
+        observed.append(path)
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            return os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def legacy_stat(path):
+        raise AssertionError("Windows lstat ctime is not descriptor change time")
+
+    monkeypatch.setattr(publication_module, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(publication_module, "_windows_path_stat", native_stat, raising=False)
+    monkeypatch.setattr(ingress_module, "os", SimpleNamespace(**{**vars(os), "lstat": legacy_stat}))
+    policy = FileIngressPolicy()
+    fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
+    policy.assert_unchanged(source, FileKind.GEDCOM, fingerprint.snapshot)
+    assert len(observed) >= 2

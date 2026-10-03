@@ -11,24 +11,48 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
 
+from ancestryllm.application.deployment import DeploymentService
+from ancestryllm.application.dto import ArtifactAccess
+from ancestryllm.application.operations import (
+    ChangeSummary,
+    MergeResult,
+    QualityResult,
+    QualitySummary,
+    SubtreeResult,
+    SyncResult,
+)
 from ancestryllm.cli import _descriptor_payload, main
 from ancestryllm.console.presentation import PresentationAdapter, to_plain
 from ancestryllm.console.router import RouteKind, SessionRouter
 from ancestryllm.core.commands import BUILTIN_MODULES, COMMAND_SPECIFICATIONS
-from ancestryllm.core.context import AppContext
+from ancestryllm.core.deployment import DeploymentProfile
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.modules import ModuleRegistry
-from ancestryllm.gedcom.service import GedcomSyncResult
 from ancestryllm.storage.diagnostics import diagnose_storage
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ancestryllm.core.context import AppContext
 
 
 def _expected_tree_ref(tree: Path) -> str:
     return f"tree_{hashlib.sha256(os.fsencode(str(tree.resolve(strict=True)))).hexdigest()}"
+
+
+def _deployment_profile_payload(profile: DeploymentProfile) -> dict[str, object]:
+    return {
+        "schema_version": profile.schema_version,
+        "mode_code": profile.mode.value,
+        "topology_code": profile.topology.value,
+        "endpoint_origin": profile.endpoint_origin,
+        "endpoint_identity_sha256": profile.endpoint_identity_sha256,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +80,13 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
         "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n0 @I1@ INDI\n1 NAME Ada /Example/\n0 TRLR\n",
         encoding="utf-8",
     )
+    gedcom_snapshot = tmp_path / "fictional-snapshot.ged"
+    gedcom_snapshot.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "fictional-private-manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
     ocr = tmp_path / "fictional-ocr.txt"
     ocr.write_text("Ada Example was born in Fiction County.", encoding="utf-8")
     schema = tmp_path / "fictional-schema.json"
@@ -64,24 +95,140 @@ def fictional_files(tmp_path: Path) -> dict[str, Path]:
     rootsmagic.write_bytes(b"fictional RootsMagic database")
     return {
         "gedcom": gedcom,
+        "gedcom_snapshot": gedcom_snapshot,
+        "manifest": manifest,
         "ocr": ocr,
         "rootsmagic": rootsmagic,
         "schema": schema,
         "output": tmp_path / "fictional-output.ged",
         "report": tmp_path / "fictional-report.json",
         "backup": tmp_path / "fictional-backup.db",
+        "release_root": tmp_path / "fictional-release",
     }
 
 
 @pytest.fixture
-def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
+def command_cases(
+    fictional_files: dict[str, Path], app_context: AppContext
+) -> tuple[CommandCase, ...]:
     gedcom = str(fictional_files["gedcom"])
+    gedcom_snapshot = str(fictional_files["gedcom_snapshot"])
     output = str(fictional_files["output"])
     report = str(fictional_files["report"])
     ocr = str(fictional_files["ocr"])
     schema = str(fictional_files["schema"])
     backup = str(fictional_files["backup"])
+    deployment = DeploymentService(app_context.config)
+    local = DeploymentProfile.local()
+    deployment_preview = deployment.preview(
+        local,
+        schema_version=local.schema_version,
+        expected_revision=app_context.config.revision,
+    )
+    target_arguments = (
+        "--mode",
+        local.mode.value,
+        "--schema-version",
+        str(local.schema_version),
+        "--expected-revision",
+        str(app_context.config.revision),
+    )
+    deployment_modes = deployment.modes()
+    deployment_snapshot = deployment.snapshot()
+    deployment_diagnostic = deployment.diagnose()
+    deployment_metadata = deployment.metadata("support")
     return (
+        CommandCase(
+            "deployment",
+            "modes",
+            (),
+            {
+                "modes": tuple(
+                    {
+                        "mode_code": item.mode.value,
+                        "label": item.label,
+                        "summary": item.summary,
+                        "consequences": item.consequences,
+                        "prerequisites": item.prerequisites,
+                        "default": item.default,
+                        "recommended": item.recommended,
+                        "advanced": item.advanced,
+                    }
+                    for item in deployment_modes
+                )
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "status",
+            (),
+            {
+                "schema_version": deployment_snapshot.schema_version,
+                "revision": deployment_snapshot.revision,
+                "profile": _deployment_profile_payload(deployment_snapshot.profile),
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "preview",
+            target_arguments,
+            {
+                "schema_version": deployment_preview.schema_version,
+                "expected_revision": deployment_preview.expected_revision,
+                "current": _deployment_profile_payload(deployment_preview.current),
+                "target": _deployment_profile_payload(deployment_preview.target),
+                "consequences": deployment_preview.consequences,
+                "confirmation": deployment_preview.confirmation,
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "switch",
+            (
+                *target_arguments,
+                "--confirm",
+                deployment_preview.confirmation,
+                "--unattended",
+            ),
+            {
+                "schema_version": deployment_snapshot.schema_version,
+                "revision": deployment_snapshot.revision,
+                "profile": _deployment_profile_payload(deployment_snapshot.profile),
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "diagnose",
+            (),
+            {
+                "schema_version": deployment_diagnostic.schema_version,
+                "revision": deployment_diagnostic.revision,
+                "status_code": deployment_diagnostic.status,
+                "diagnostics": tuple(
+                    {
+                        "diagnostic_code": item.code,
+                        "status_code": item.status,
+                        "message": item.message,
+                        "remediation": item.remediation,
+                    }
+                    for item in deployment_diagnostic.diagnostics
+                ),
+            },
+        ),
+        CommandCase(
+            "deployment",
+            "metadata",
+            ("--purpose", "support"),
+            {
+                "schema_version": deployment_metadata.schema_version,
+                "purpose_code": deployment_metadata.purpose,
+                "deployment_schema_version": deployment_metadata.deployment_schema_version,
+                "config_revision": deployment_metadata.config_revision,
+                "mode_code": deployment_metadata.mode.value,
+                "topology_code": deployment_metadata.topology.value,
+                "endpoint_identity_sha256": deployment_metadata.endpoint_identity_sha256,
+            },
+        ),
         CommandCase(
             "rootsmagic",
             "list",
@@ -124,7 +271,7 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
         CommandCase(
             "gedcom",
             "merge",
-            (gedcom, "--output", output, "--quality-report", report),
+            (gedcom, gedcom_snapshot, "--output", output, "--quality-report", report),
             OpaqueArtifactExpectation(
                 (
                     ("gedcom_merge", "text/vnd.familysearch.gedcom"),
@@ -154,8 +301,37 @@ def command_cases(fictional_files: dict[str, Path]) -> tuple[CommandCase, ...]:
         CommandCase(
             "gedcom",
             "sync",
-            ("update", "--manifest", "fictional-private-manifest.json", "--dry-run"),
-            GedcomSyncResult(exit_code=0, output=""),
+            (
+                "update",
+                "--master",
+                gedcom,
+                "--manifest",
+                str(fictional_files["manifest"]),
+                "--snapshot",
+                f"fictional:other={gedcom_snapshot}",
+                "--release-root",
+                str(fictional_files["release_root"]),
+                "--no-quality-report",
+                "--dry-run",
+            ),
+            {
+                "committed": False,
+                "artifacts": (),
+                "changes": {
+                    "created": 0,
+                    "updated": 0,
+                    "unchanged": 0,
+                    "conflicts": 0,
+                    "warnings": 0,
+                },
+                "quality": {
+                    "information": 0,
+                    "warnings": 0,
+                    "errors": 0,
+                    "resolved": 0,
+                },
+                "provenance": (),
+            },
         ),
         CommandCase(
             "ocr",
@@ -321,42 +497,95 @@ def mocked_action_services(
 
     monkeypatch.setattr(RootsMagicService, "export", export_rootsmagic)
 
-    def merge_gedcom(
-        _self: GedcomService,
-        _inputs: list[Path],
-        output: Path,
-        **kwargs: Any,
-    ) -> SimpleNamespace:
-        quality_report = kwargs["quality_path"]
-        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        if quality_report is not None:
-            quality_report.write_text("# Fictional quality report\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output, quality_path=quality_report)
+    zero_changes = ChangeSummary(0, 0, 0, 0, 0)
+    zero_quality = QualitySummary(0, 0, 0, 0)
 
-    def subtree_gedcom(
-        _self: GedcomService,
-        _source: Path,
-        output: Path,
+    def execute_merge(
+        service: GedcomService,
+        request: Any,
         **_kwargs: Any,
-    ) -> SimpleNamespace:
+    ) -> MergeResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.merge",
+            access=ArtifactAccess.WRITE,
+        )
         output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
-        return SimpleNamespace(output_path=output)
+        quality_report = None
+        if request.quality_report is not None:
+            quality_path = registry.resolve(
+                request.quality_report,
+                operation="gedcom.merge",
+                access=ArtifactAccess.WRITE,
+            )
+            quality_path.write_text("# Fictional quality report\n", encoding="utf-8")
+            quality_report = registry.describe_output(
+                request.quality_report,
+                operation="gedcom.merge",
+            )
+        return MergeResult(
+            gedcom=registry.describe_output(request.output, operation="gedcom.merge"),
+            quality_report=quality_report,
+            root_person_ref=request.root_person_ref,
+            changes=zero_changes,
+            quality=zero_quality,
+            provenance=(),
+        )
 
-    def quality_gedcom(
-        _self: GedcomService,
-        _source: Path,
-        output: Path,
+    def execute_subtree(
+        service: GedcomService,
+        request: Any,
         **_kwargs: Any,
-    ) -> Path:
+    ) -> SubtreeResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.subtree",
+            access=ArtifactAccess.WRITE,
+        )
+        output.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+        return SubtreeResult(
+            gedcom=registry.describe_output(request.output, operation="gedcom.subtree"),
+            root_person_ref=request.root_person_ref,
+            changes=zero_changes,
+            provenance=(),
+        )
+
+    def execute_quality(
+        service: GedcomService,
+        request: Any,
+        **_kwargs: Any,
+    ) -> QualityResult:
+        registry = service._require_artifacts()
+        output = registry.resolve(
+            request.output,
+            operation="gedcom.quality",
+            access=ArtifactAccess.WRITE,
+        )
         output.write_text("# Fictional quality report\n", encoding="utf-8")
-        return output
+        return QualityResult(
+            report=registry.describe_output(request.output, operation="gedcom.quality"),
+            quality=zero_quality,
+        )
 
-    monkeypatch.setattr(GedcomService, "merge", merge_gedcom)
-    monkeypatch.setattr(GedcomService, "subtree", subtree_gedcom)
-    monkeypatch.setattr(GedcomService, "quality", quality_gedcom)
-    monkeypatch.setattr(
-        GedcomService, "sync", lambda _self, _args: GedcomSyncResult(exit_code=0, output="")
-    )
+    def execute_sync(
+        _service: GedcomService,
+        _request: Any,
+        **_kwargs: Any,
+    ) -> SyncResult:
+        return SyncResult(
+            committed=False,
+            artifacts=(),
+            changes=zero_changes,
+            quality=zero_quality,
+            provenance=(),
+        )
+
+    monkeypatch.setattr(GedcomService, "execute_merge", execute_merge)
+    monkeypatch.setattr(GedcomService, "execute_subtree", execute_subtree)
+    monkeypatch.setattr(GedcomService, "execute_quality", execute_quality)
+    monkeypatch.setattr(GedcomService, "execute_sync", execute_sync)
     monkeypatch.setattr(
         OcrService,
         "extract",
@@ -530,6 +759,28 @@ def test_stable_service_error_code_and_exit_are_preserved(app_context: AppContex
     assert "[PROMPT_STABLE_FAILURE] Safe fictional failure." in capsys.readouterr().err
 
 
+def test_nonlocal_profile_blocks_ordinary_commands_but_keeps_recovery_available(
+    app_context: AppContext, capsys
+) -> None:
+    app_context.config.default_provider = "openai"
+    app_context.config.deployment = DeploymentProfile.connect_remote(
+        endpoint_origin="https://remote.example",
+        endpoint_identity_sha256="a" * 64,
+    )
+
+    assert main(["modules", "list"], app_context) == 2
+    error = capsys.readouterr().err
+    assert "[DEPLOYMENT_RUNTIME_MISMATCH]" in error
+    assert "remote.example" not in error
+
+    assert main(["--json", "deployment", "status"], app_context) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["profile"]["mode_code"] == "connect-remote"
+    assert main(["--json", "deployment", "diagnose"], app_context) == 0
+    diagnostic = json.loads(capsys.readouterr().out)
+    assert diagnostic["status_code"] == "failed"
+
+
 @pytest.mark.parametrize(
     ("arguments", "error_text"),
     (
@@ -537,6 +788,21 @@ def test_stable_service_error_code_and_exit_are_preserved(app_context: AppContex
         (["people", "add"], "the following arguments are required"),
         (["rootsmagic", "query", "--tree", "fictional"], "one of the arguments"),
         (["providers", "create", "p", "--provider", "none", "--model", "m"], "invalid choice"),
+        (
+            [
+                "deployment",
+                "switch",
+                "--mode",
+                "local-desktop",
+                "--schema-version",
+                "1",
+                "--expected-revision",
+                "0",
+                "--confirm",
+                "confirm-deployment-fictional",
+            ],
+            "the following arguments are required",
+        ),
     ),
 )
 def test_parser_failures_have_documented_exit_two(
@@ -950,6 +1216,37 @@ def test_database_json_results_hide_host_paths(
     assert "DATABASE_DIRECTORY_MISSING" in {item["code"] for item in diagnostic_result}
     assert str(private_parent) not in diagnostic_output
     assert "PRIVATE-HOST-DATABASE-PATH" not in diagnostic_output
+
+
+def test_database_backup_collision_cli_error_hides_host_paths(
+    app_context: AppContext,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_parent = tmp_path / "PRIVATE-USERNAME-CANARY" / "PRIVATE-HOME-CANARY"
+    private_parent.mkdir(parents=True)
+    destination = private_parent / "PRIVATE-FICTIONAL-FAMILY-BACKUP.db"
+    destination.write_bytes(b"existing encrypted backup sentinel")
+
+    assert main(["database", "backup", str(destination)], app_context) == 1
+
+    captured = capsys.readouterr()
+    rendered = captured.out + captured.err
+    normalized_rendered = " ".join(rendered.split())
+    assert "[BACKUP_EXISTS] The backup destination already exists." in normalized_rendered
+    assert (
+        "How to fix: Choose a different destination or remove the existing item before retrying."
+        in normalized_rendered
+    )
+    for private_value in (
+        str(destination),
+        destination.name,
+        "PRIVATE-USERNAME-CANARY",
+        "PRIVATE-HOME-CANARY",
+        str(app_context.database.path),
+    ):
+        assert private_value not in rendered
+    assert destination.read_bytes() == b"existing encrypted backup sentinel"
 
 
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:

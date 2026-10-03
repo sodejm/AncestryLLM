@@ -1,3 +1,4 @@
+/** Installs the fail-closed permission and download policy on an Electron session. */
 interface PermissionTarget {
   setPermissionRequestHandler(handler: (contents: unknown, permission: unknown, callback: (allowed: boolean) => void) => void): void
   setPermissionCheckHandler(handler: (contents: unknown, permission: unknown, requestingOrigin: string) => boolean): void
@@ -6,6 +7,9 @@ interface PermissionTarget {
   on(event: 'will-download', handler: (event: { preventDefault(): void }, item: { cancel(): void }) => void): void
 }
 
+/**
+ * Denies renderer permissions, device access, display capture, and downloads for the lifetime of the session.
+ */
 export function installSessionPolicy(target: PermissionTarget): void {
   target.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   target.setPermissionCheckHandler(() => false)

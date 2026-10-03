@@ -16,7 +16,8 @@ class CommandEvent(Protocol):
 
 
 # Preserve the established ProgressUpdate contract while naming its event role.
-ProgressEvent: TypeAlias = ProgressUpdate
+# This must remain a callable class alias; a PEP 695 TypeAliasType is not callable.
+ProgressEvent: TypeAlias = ProgressUpdate  # noqa: UP040
 
 
 __all__ = ["CommandEvent", "ProgressEvent"]

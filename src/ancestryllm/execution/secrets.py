@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from ancestryllm.application._secrets import SecretGrantRegistry
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.common import optional_text, structured_result, text
+
+if TYPE_CHECKING:
+    from ancestryllm.application._secrets import SecretGrantRegistry
+    from ancestryllm.core.context import AppContext
 
 _DEFAULT_NAMES = (
     "openai.api_key",
@@ -20,11 +24,14 @@ _DEFAULT_NAMES = (
 
 
 class SecretsExecutor:
+    """Dispatch secret-management commands without exposing secret values."""
+
     def __init__(self, context: AppContext, grants: SecretGrantRegistry) -> None:
         self._context = context
         self._grants = grants
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch secret writes, deletion, and presence checks without reading values."""
         action = invocation.key.action
         if action == "set":
             name = text(invocation, "name")

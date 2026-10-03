@@ -1,15 +1,51 @@
+/** Configures isolated Electron main, preload, and renderer builds for each lifecycle. */
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
-const fixtureBuild = ['dev', 'build:e2e'].includes(process.env.npm_lifecycle_event ?? '')
+const lifecycle = process.env.npm_lifecycle_event ?? ''
+const fixtureBuild = ['dev', 'dev:gallery', 'build:e2e'].includes(lifecycle)
+const packagedFileGrantBuild = lifecycle === 'build:packaged-file-grants'
+const packagedNativeVerificationBuild = [
+  'build:packaged-native-verification',
+  'build:packaged-file-grants',
+].includes(lifecycle)
+const mainAliases = {
+  ...(lifecycle === 'build:e2e'
+    ? { './window-presentation': resolve('e2e/window-presentation.fixture.ts') }
+    : {}),
+  ...(fixtureBuild
+    ? { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') }
+    : {}),
+  ...(packagedFileGrantBuild
+    ? { './native-file-dialogs': resolve('e2e/native-file-dialogs.packaged-verification.ts') }
+    : {}),
+  ...(packagedNativeVerificationBuild
+    ? { './native-verification': resolve('e2e/native-verification.packaged-verification.ts') }
+    : {}),
+}
+const sidecarManifest = resolve(
+  'build',
+  'sidecar',
+  `${process.platform}-${process.arch}`,
+  'sidecar-manifest.json',
+)
+const sidecarManifestSha256 = existsSync(sidecarManifest)
+  ? createHash('sha256').update(readFileSync(sidecarManifest)).digest('hex')
+  : null
 
+/** Builds isolated main, preload, and renderer bundles with reviewed externals and no source maps. */
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
-    ...(fixtureBuild
-      ? { resolve: { alias: { './runtime-bridge': resolve('src/main/runtime-bridge.fixture.ts') } } }
+    define: {
+      __ANCESTRYLLM_SIDECAR_MANIFEST_SHA256__: JSON.stringify(sidecarManifestSha256),
+    },
+    ...(Object.keys(mainAliases).length > 0
+      ? { resolve: { alias: mainAliases } }
       : {}),
     build: { sourcemap: false },
   },

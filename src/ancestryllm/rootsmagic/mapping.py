@@ -7,10 +7,8 @@ import json
 import re
 import unicodedata
 from collections import defaultdict, deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import AncestryError, FileIngressError
@@ -24,6 +22,10 @@ from ancestryllm.rootsmagic.core import (
     semantic_row_key,
     semantic_value,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 def _value(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -76,8 +78,7 @@ def _text_lines(level: int, tag: str, value: Any) -> list[str]:
         return []
     first = f"{level} {tag}" + (f" {parts[0]}" if parts[0] else "")
     result = [first]
-    for part in parts[1:]:
-        result.append(f"{level + 1} CONT" + (f" {part}" if part else ""))
+    result.extend(f"{level + 1} CONT" + (f" {part}" if part else "") for part in parts[1:])
     return result
 
 
@@ -295,6 +296,8 @@ def _event_lines(
 
 @dataclass(slots=True)
 class ExportReport:
+    """Summarize deterministic RootsMagic export coverage and loss diagnostics."""
+
     profile: str
     destination: str
     people_read: int
@@ -313,6 +316,7 @@ class ExportReport:
         omitted_records: dict[str, int] | None = None,
         sqlite_snapshot: str,
     ) -> str:
+        """Render the export report as deterministic Markdown."""
         lines = [
             "# RootsMagic GEDCOM Export Report",
             "",
@@ -369,6 +373,7 @@ class RootsMagicUnmappedColumns:
     columns: tuple[str, ...]
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic unmapped columns as a plain mapping."""
         return {"table": self.table, "columns": list(self.columns)}
 
 
@@ -388,6 +393,7 @@ class RootsMagicLossReport:
     omitted_records: tuple[tuple[str, int], ...]
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic loss report as a plain mapping."""
         return {
             "profile": self.profile,
             "destination": self.destination,
@@ -417,6 +423,7 @@ class RootsMagicGedcomDocument:
         return self.document.lines
 
     def as_mapping(self) -> dict[str, object]:
+        """Serialize the RootsMagic GEDCOM document as a plain mapping."""
         return {
             "source_ref": self.source_ref,
             "document": {
@@ -491,6 +498,8 @@ def _structured_loss_report(
 
 
 class RootsMagicMapper:
+    """Map immutable RootsMagic rows into loss-minimal GEDCOM structures."""
+
     def __init__(self, reader: RootsMagicReader) -> None:
         self.reader = reader
 
@@ -1076,9 +1085,11 @@ class RootsMagicMapper:
                 lines.append(f"1 HUSB {person_map[father]}")
             if mother in person_map:
                 lines.append(f"1 WIFE {person_map[mother]}")
-            for child_id in children_by_family.get(family_id, []):
-                if child_id in person_map:
-                    lines.append(f"1 CHIL {person_map[child_id]}")
+            lines.extend(
+                f"1 CHIL {person_map[child_id]}"
+                for child_id in children_by_family.get(family_id, [])
+                if child_id in person_map
+            )
             if profile == "preservation":
                 lines.extend(_extension_lines(row, _KNOWN_COLUMNS["family"], level=1))
             append_owned_payload(

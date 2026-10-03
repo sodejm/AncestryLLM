@@ -1,0 +1,10 @@
+"""Exercises missing Python declaration documentation."""
+
+
+class PublicService:
+    def execute(self) -> None:
+        pass
+
+
+def build_result() -> str:
+    return "result"

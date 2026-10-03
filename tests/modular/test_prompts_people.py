@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.domain.models import LivingStatus
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 
 def test_prompt_versions_are_immutable_and_rendered_safely(app_context: AppContext) -> None:

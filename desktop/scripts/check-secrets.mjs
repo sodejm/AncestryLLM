@@ -1,3 +1,4 @@
+/** Scans packaged desktop output for credential patterns and forbidden secret material. */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 const patterns = [/AKIA[0-9A-Z]{16}/, /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/, /sk-[A-Za-z0-9_-]{20,}/]

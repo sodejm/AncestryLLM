@@ -1,0 +1,3 @@
+"""Documents the representative Python fixture module."""
+
+VALUE = 1

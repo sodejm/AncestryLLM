@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import unicodedata
+from typing import TYPE_CHECKING
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.llm.contracts import DataClass, GenerationRequest, Message
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
+
+if TYPE_CHECKING:
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
 
 GENEALOGY_SCHEMA = {
     "type": "object",
@@ -52,6 +55,8 @@ def normalize_transcription(text: str) -> str:
 
 
 class OcrService:
+    """Coordinate OCR operations across the application boundary."""
+
     def __init__(self, llm: LLMService) -> None:
         self.llm = llm
 
@@ -63,6 +68,7 @@ class OcrService:
         model: str,
         consent: ConsentGrant | None = None,
     ) -> dict[str, object]:
+        """Extract text from an image through the configured OCR adapter."""
         cancellation_checkpoint()
         cleaned = normalize_transcription(text)
         cancellation_checkpoint()

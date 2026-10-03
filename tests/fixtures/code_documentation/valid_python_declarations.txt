@@ -1,0 +1,30 @@
+"""Exercises complete Python declaration documentation."""
+
+__all__ = ["PublicService", "build_result", "_ExportedService", "_exported_helper"]
+
+
+class PublicService:
+    """Run a representative public service operation."""
+
+    def execute(self) -> None:
+        """Execute the representative service operation."""
+
+
+def build_result() -> str:
+    """Build the representative service result."""
+    return "result"
+
+
+def _private_helper() -> None:
+    pass
+
+
+class _ExportedService:
+    """Represent a private-named service intentionally included in the public API."""
+
+    def run(self) -> None:
+        """Run the exported service operation."""
+
+
+def _exported_helper() -> None:
+    """Run the private-named helper intentionally included in the public API."""

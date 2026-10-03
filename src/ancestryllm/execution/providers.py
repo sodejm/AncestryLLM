@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.results import SuccessResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.execution.common import (
     boolean,
     key_values,
@@ -15,12 +16,18 @@ from ancestryllm.execution.common import (
 )
 from ancestryllm.llm.contracts import DataClass
 
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
+
 
 class ProvidersExecutor:
+    """Dispatch provider-configuration commands through the application boundary."""
+
     def __init__(self, context: AppContext) -> None:
         self._context = context
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch provider-profile and consent lifecycle commands."""
         action = invocation.key.action
         if action == "list":
             value: object = {

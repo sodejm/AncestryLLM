@@ -1,3 +1,5 @@
+"""Verify repository safety checks reject credentials and private genealogy artifacts."""
+
 from __future__ import annotations
 
 import shutil

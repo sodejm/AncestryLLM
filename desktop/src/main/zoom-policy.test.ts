@@ -1,3 +1,4 @@
+/** Verifies keyboard zoom shortcuts stay bounded and platform appropriate. */
 import { describe, expect, it, vi } from 'vitest'
 import {
   installKeyboardZoom,

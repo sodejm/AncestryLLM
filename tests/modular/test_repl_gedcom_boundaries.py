@@ -9,6 +9,7 @@ import shlex
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
@@ -18,10 +19,12 @@ from prompt_toolkit.output import DummyOutput
 
 from ancestryllm.cli import build_parser, dispatch
 from ancestryllm.core.cancellation import cancellation_checkpoint
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobState
 from ancestryllm.gedcom import quality
+
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
 GEDCOM_FIXTURE = Path(__file__).parents[1] / "fixtures" / "gedcom_merge" / "quality-source-a.ged"
 

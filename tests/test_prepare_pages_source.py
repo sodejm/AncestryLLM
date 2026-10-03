@@ -71,6 +71,22 @@ def test_prepare_pages_source_preserves_docs_and_rewrites_build_copy(tmp_path: P
     assert not (destination / "Home.md").exists()
 
 
+def test_prepare_pages_source_rewrites_soft_wrapped_link_labels(tmp_path: Path) -> None:
+    source = tmp_path / "docs"
+    destination = tmp_path / "pages-source"
+    _write_docs(source)
+    (source / "Guide.md").write_text(
+        "# Guide\n\n[API\nreference](api/README.md)\n",
+        encoding="utf-8",
+    )
+
+    pages_source.prepare_pages_source(source, destination)
+
+    assert "[API\nreference](api/README.html)" in (destination / "Guide.md").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_prepare_pages_source_rejects_broken_markdown_targets(tmp_path: Path) -> None:
     source = tmp_path / "docs"
     destination = tmp_path / "pages-source"

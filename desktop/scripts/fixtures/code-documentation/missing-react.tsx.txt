@@ -1,0 +1,5 @@
+/** Defines a fixture with an undocumented exported React component. */
+
+export function MissingComponent(): null {
+  return null
+}

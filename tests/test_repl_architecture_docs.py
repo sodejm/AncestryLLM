@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REPL_ARCHITECTURE = ROOT / "docs" / "REPL_ARCHITECTURE.md"
+REPL_ARCHITECTURE = ROOT / "docs" / "explanation" / "REPL_ARCHITECTURE.md"
 
 
 def _text() -> str:

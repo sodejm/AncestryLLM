@@ -14,7 +14,7 @@ import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -147,7 +147,7 @@ def validate_exception_records(
     """Validate owned, reasoned, expiring exceptions against canonical links."""
     if not isinstance(records, list):
         return [ExternalLinkIssue("external-link exceptions must be a list")]
-    current = today or date.today()
+    current = today or datetime.now(UTC).date()
     errors: list[ExternalLinkIssue] = []
     seen: set[str] = set()
     for position, record in enumerate(records, start=1):
@@ -296,6 +296,7 @@ def check_external_url(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the check external doc links command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--exceptions", type=Path, required=True)
@@ -305,6 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the check external doc links command and return its exit status."""
     args = build_parser().parse_args(argv)
     if not 1 <= args.workers <= _MAX_WORKERS:
         print(f"external-links: workers must be between 1 and {_MAX_WORKERS}", file=sys.stderr)

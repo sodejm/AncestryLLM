@@ -1,3 +1,4 @@
+/** Verifies packaged desktop output contains the exact renderer-ready evidence record. */
 import { describe, expect, it } from 'vitest'
 import { WINDOW_READY_RECORD, outputContainsWindowReadyRecord } from './window-readiness'
 

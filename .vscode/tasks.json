@@ -1,0 +1,188 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Setup: Python environment",
+      "detail": "Verify uv and install the locked Python development environment.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "setup"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Python: test suite",
+      "detail": "Run the canonical pytest suite with coverage.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "test"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Python: lint and repository checks",
+      "detail": "Check Python style, documentation, architecture, and repository safety.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "lint"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Python: type check",
+      "detail": "Run strict mypy against the application package.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "typecheck"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Security: audit dependencies and source",
+      "detail": "Run the canonical dependency audit and static security scan.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "security"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Verify: all pre-push gates",
+      "detail": "Run tests, lint, type checking, and security before pushing.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "pre-push"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Setup: desktop dependencies",
+      "detail": "Install the locked Electron development dependencies.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "desktop-install"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Desktop: check and build",
+      "detail": "Lint, type check, test, and build the Electron desktop.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "desktop-check"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Python: interactive console",
+      "detail": "Open the interactive ancestry console.",
+      "type": "process",
+      "command": "make",
+      "args": [
+        "console"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Desktop: development server",
+      "detail": "Start Electron with live reload; stop with Ctrl+C in its terminal.",
+      "type": "process",
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "desktop",
+        "dev"
+      ],
+      "windows": {
+        "command": "pnpm.cmd"
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

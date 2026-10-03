@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ancestryllm.org/schemas/desktop-diagnostic-v1.schema.json",
+  "title": "AncestryLLM privacy-safe desktop diagnostic event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp",
+    "run_id",
+    "code",
+    "severity",
+    "component",
+    "app_version",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ancestryllm.desktop-diagnostic/1"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+      "enum": [
+        "APP_EXIT_AUTHORIZED",
+        "APP_LAUNCH_REQUESTED",
+        "BRIDGE_ROUTE_REJECTED",
+        "BRIDGE_SENDER_REJECTED",
+        "CONFIGURATION_DEGRADED",
+        "DIAGNOSTIC_WRITER_DEGRADED",
+        "DIAGNOSTIC_WRITER_UNAVAILABLE",
+        "ELECTRON_READY",
+        "JOBS_SHUTDOWN_PREP_FAILED",
+        "JOBS_SHUTDOWN_PREP_REQUESTED",
+        "JOBS_SHUTDOWN_PREP_SUCCEEDED",
+        "PYTHON_CORE_BOOTSTRAP_STARTED",
+        "PYTHON_CORE_READY",
+        "RENDERER_WINDOW_READY",
+        "SIDECAR_BOOTSTRAP_STARTED",
+        "SIDECAR_HEALTH_REJECTED",
+        "SIDECAR_HEALTH_SUCCEEDED",
+        "SIDECAR_INCOMPATIBLE",
+        "SIDECAR_MANUAL_RETRY_FAILED",
+        "SIDECAR_MANUAL_RETRY_REQUESTED",
+        "SIDECAR_MANUAL_RETRY_SUCCEEDED",
+        "SIDECAR_READINESS_ACCEPTED",
+        "SIDECAR_READINESS_REJECTED",
+        "SIDECAR_RESTART_EXHAUSTED",
+        "SIDECAR_RESTART_FAILED",
+        "SIDECAR_RESTART_REQUESTED",
+        "SIDECAR_RESTART_SUCCEEDED",
+        "SIDECAR_SERVER_READY",
+        "SIDECAR_SESSION_INVALIDATED",
+        "SIDECAR_SHUTDOWN_REQUESTED",
+        "SIDECAR_SPAWN_FAILED",
+        "SIDECAR_SPAWN_REQUESTED",
+        "SIDECAR_SPAWN_SUCCEEDED",
+        "SIDECAR_STARTUP_TIMEOUT",
+        "SIDECAR_TERMINATION_FAILED",
+        "SIDECAR_TERMINATION_REQUESTED",
+        "SIDECAR_TERMINATION_SUCCEEDED",
+        "SIDECAR_VERIFICATION_REJECTED",
+        "SIDECAR_VERIFICATION_STARTED",
+        "SIDECAR_VERIFICATION_SUCCEEDED"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "debug",
+        "info",
+        "warning",
+        "error"
+      ]
+    },
+    "component": {
+      "enum": [
+        "electron-main",
+        "python-core",
+        "desktop-sidecar"
+      ]
+    },
+    "app_version": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$"
+    },
+    "metadata": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {
+        "allOf": [
+          {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          {
+            "not": {
+              "pattern": "(content|database|email|error|exception|family|gedcom|key|message|name|path|person|prompt|query|secret|stack|token|url)"
+            }
+          }
+        ]
+      },
+      "additionalProperties": {
+        "type": [
+          "boolean",
+          "integer",
+          "null"
+        ],
+        "minimum": -1000000000,
+        "maximum": 1000000000
+      }
+    }
+  }
+}

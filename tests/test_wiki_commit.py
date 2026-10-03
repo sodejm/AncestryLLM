@@ -5,8 +5,10 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "commit_wiki_changes.py"
 _SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567"

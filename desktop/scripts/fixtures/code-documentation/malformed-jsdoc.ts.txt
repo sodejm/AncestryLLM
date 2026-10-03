@@ -1,0 +1,9 @@
+/** Defines a fixture with malformed JSDoc syntax. */
+
+/**
+ * Returns the input value.
+ * @param {string=} value The value to return.
+ */
+export function malformedDocumentation(value: string): string {
+  return value
+}

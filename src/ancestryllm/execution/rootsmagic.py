@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
 from ancestryllm.application.operations import TreeRecord
-from ancestryllm.application.ports import ProgressPort
 from ancestryllm.application.results import FileArtifactResult
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.execution.common import (
     consent,
@@ -24,6 +21,12 @@ from ancestryllm.execution.common import (
     table_result,
     text,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.application.ports import ProgressPort
+    from ancestryllm.core.context import AppContext
 
 _EXPORT_OPERATION = "rootsmagic.export"
 _GEDCOM_MEDIA_TYPE = "text/vnd.familysearch.gedcom"
@@ -92,6 +95,8 @@ def _resolve_tree_ref(service: _TreeLister, selection: str) -> str | Path:
 
 
 class RootsMagicExecutor:
+    """Dispatch read-only RootsMagic commands through the application boundary."""
+
     def __init__(
         self,
         context: AppContext,
@@ -102,6 +107,7 @@ class RootsMagicExecutor:
         self._progress = progress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch immutable RootsMagic inspection and GEDCOM export operations."""
         from ancestryllm.rootsmagic.service import RootsMagicService
 
         service = RootsMagicService(

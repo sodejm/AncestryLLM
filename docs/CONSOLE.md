@@ -15,7 +15,9 @@ logic path.
 
 At the root prompt, use `modules` to inspect available modules or `use MODULE`
 to enter a module context. The active-module prompt makes the current context
-visible:
+visible. The bare `modules` command renders a compact chooser with each module's
+display name, `use MODULE` command, and description. For the complete stable
+machine-readable descriptor list, run `modules list --json` instead.
 
 ```text
 ancestry > modules
@@ -61,6 +63,11 @@ operation to reach a safe boundary; `cancellation_deferred_by` contains only a
 privacy-safe operation label. Repeated cancellation requests are idempotent.
 Acknowledged cancellation uses `JOB_CANCELLED`. An invalid exit response uses
 `REPL_EXIT_DECISION_REQUIRED` and keeps the session open.
+
+The `resource_keys` in public job snapshots are manager-local opaque references
+for correlating jobs that contend for the same resource. They are not filesystem
+paths and are not stable across application sessions. The scheduler retains the
+underlying resource identifiers privately only while coordinating locks.
 
 Active jobs render above the prompt through Rich `Live` while prompt-toolkit's
 supported stdout patch keeps asynchronous updates from overwriting input.

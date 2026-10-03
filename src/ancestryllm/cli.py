@@ -7,10 +7,8 @@ import getpass
 import json
 import sys
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING
 
-from ancestryllm.application.results import CommandResult
-from ancestryllm.core.commands import ModuleDescriptor
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
@@ -19,6 +17,12 @@ from ancestryllm.terminal.dispatch import dispatch as _terminal_dispatch
 from ancestryllm.terminal.entrypoint import run_repl
 from ancestryllm.terminal.parser import build_parser
 from ancestryllm.terminal.presentation import PresentationAdapter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from ancestryllm.application.results import CommandResult
+    from ancestryllm.core.commands import ModuleDescriptor
 
 __all__ = ["build_parser", "dispatch", "main", "run_tokens"]
 
@@ -61,12 +65,14 @@ def dispatch(
 
 
 def run_tokens(context: AppContext, tokens: Sequence[str]) -> int:
+    """Execute parsed CLI tokens through the canonical command boundary."""
     parser = build_parser()
     args = parser.parse_args(list(tokens))
     return dispatch(args, context)
 
 
 def main(argv: Sequence[str] | None = None, context: AppContext | None = None) -> int:
+    """Run the CLI command and return its exit status."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
         repl_options: argparse.Namespace | None = argparse.Namespace(config=None, json=False)

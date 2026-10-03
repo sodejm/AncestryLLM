@@ -28,13 +28,16 @@ class JobProgressDisplay:
 
     @property
     def active(self) -> bool:
+        """Return the job progress records currently displayed by the console."""
         return self._live is not None
 
     @property
     def renderable(self) -> Table:
+        """Render the current job progress state for the terminal."""
         return self._render()
 
     def handle(self, snapshot: JobSnapshot) -> None:
+        """Execute the job progress display operation and return its typed result."""
         with self._lock:
             if snapshot.state in _ACTIVE_STATES:
                 self._active[snapshot.job_id] = snapshot
@@ -127,6 +130,7 @@ class JobProgressDisplay:
         )
 
     def close(self) -> None:
+        """Release resources owned by the job progress display."""
         with self._lock:
             try:
                 self._stop_live()

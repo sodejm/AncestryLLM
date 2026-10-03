@@ -8,7 +8,6 @@ import sys
 from types import ModuleType
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -111,9 +110,7 @@ def test_openrouter_uses_shared_timeout_and_retry_contract(
         "key", provider_id="openrouter", base_url=REMOTE_ENDPOINTS["openrouter"]
     )._client(7.5)
 
-    timeout = captured["timeout"]
-    assert isinstance(timeout, httpx.Timeout)
-    assert timeout.connect == timeout.read == timeout.write == timeout.pool == 7.5
+    assert captured["timeout"] == 7.5
     assert captured["max_retries"] == 0
     assert captured["base_url"] == REMOTE_ENDPOINTS["openrouter"]
 

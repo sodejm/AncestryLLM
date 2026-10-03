@@ -1,3 +1,4 @@
+# Verifies the Electron shell, packaged sidecar, and native desktop platform matrix.
 name: Desktop verification
 
 on:
@@ -23,11 +24,13 @@ defaults:
 
 env:
   EXPECTED_HEAD: ${{ inputs.commit_sha || github.sha }}
+  EVENT_NAME: ${{ github.event_name }}
 
 jobs:
   changes:
     name: Desktop change classifier
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       desktop: ${{ steps.classify.outputs.desktop }}
     steps:
@@ -40,9 +43,17 @@ jobs:
         id: classify
         shell: bash
         run: |
-          git fetch --no-tags origin main
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"
+          if test "$EVENT_NAME" = "push"; then
+            git fetch --no-tags origin main
+            test "$EXPECTED_HEAD" = "$(git rev-parse refs/remotes/origin/main)"
+          elif test "$EVENT_NAME" = "workflow_dispatch"; then
+            test "$EXPECTED_HEAD" = "$GITHUB_SHA"
+          else
+            echo "unsupported desktop verification event: $EVENT_NAME" >&2
+            exit 2
+          fi
           echo "desktop=true" >> "$GITHUB_OUTPUT"
 
   desktop-security:
@@ -50,6 +61,10 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VERIFICATION_RUNNER: ubuntu-24.04
+      VERIFICATION_SIDECAR_TARGET: none
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -69,17 +84,29 @@ jobs:
         with:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-desktop-security
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26.5.0"
-      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: "11.9.0"
       - name: Install locked dependencies
         shell: bash
         run: |
           uv sync --locked --no-default-groups --group test
-          pnpm --dir desktop install --frozen-lockfile
+          node desktop/scripts/install-locked.mjs
+      - name: Verify release tool versions
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
+          --output "$RECEIPTS_DIR/runner-versions.json"
+          --gate runnerVersionsPassed
+          -- node desktop/scripts/verify-release-toolchain.mjs
       - name: Verify API and workflow contracts
         shell: bash
         env:
@@ -87,29 +114,84 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/api-contract.json" \
+            --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --gate apiContractPassed \
             --gate authBeforeParsingPassed \
+            --gate diagnosticsContractPassed \
             --gate domainRoutesAbsentPassed \
             --gate providerNoneNetworkFreePassed \
             --gate redactionPassed \
-            -- uv run --no-sync python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_verification_wrong_sidecar.py
+            -- uv run --no-sync python -m pytest tests/api tests/test_build_verification_sidecar.py tests/test_desktop_workflow_contract.py tests/test_structured_diagnostics.py tests/test_verification_wrong_sidecar.py
       - name: Verify desktop source
-        shell: bash
-        run: |
-          pnpm --dir desktop run lint
-          pnpm --dir desktop run typecheck
-      - name: Verify desktop tests
         shell: bash
         env:
           RECEIPTS_DIR: desktop/verification/security/receipts
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
-          --output "$RECEIPTS_DIR/desktop-tests.json"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
+          --output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --gate desktopLintPassed
+          --gate desktopTypecheckPassed
+          --gate jsStaticAnalysisPassed
+          -- pnpm --dir desktop run verify:source
+      - name: Verify desktop tests and coverage
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
+          --output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --gate desktopCoveragePassed
           --gate ipcSenderValidationPassed
-          -- pnpm --dir desktop run test
+          --gate sidecarCompatibilityPassed
+          --gate sidecarIntegrityPassed
+          -- pnpm --dir desktop run test:coverage
+      - name: Verify desktop accessibility
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
+          --output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --gate accessibilityPassed
+          -- pnpm --dir desktop run test:accessibility
+      - name: Verify source WebdriverIO scenarios
+        shell: bash
+        env:
+          RECEIPTS_DIR: desktop/verification/security/receipts
+        run: >-
+          node desktop/scripts/verification-receipt.mjs
+          --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
+          --output "$RECEIPTS_DIR/source-webdriver.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
+          --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
+          --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --gate sourceWebdriverPassed
+          -- pnpm --dir desktop run test:e2e
       - name: Verify production build inspection
         shell: bash
         env:
@@ -117,9 +199,15 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/build-inspection.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --gate buildInspectionPassed
           -- pnpm --dir desktop run build
       - name: Verify dependency audit
@@ -129,9 +217,15 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/audit.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --allow-output "$RECEIPTS_DIR/build-inspection.json"
           --gate auditPassed
           -- pnpm --dir desktop run audit
@@ -142,9 +236,15 @@ jobs:
         run: >-
           node desktop/scripts/verification-receipt.mjs
           --git-head "$EXPECTED_HEAD"
+          --runner "$VERIFICATION_RUNNER"
+          --sidecar-target "$VERIFICATION_SIDECAR_TARGET"
           --output "$RECEIPTS_DIR/secrets.json"
+          --allow-output "$RECEIPTS_DIR/runner-versions.json"
           --allow-output "$RECEIPTS_DIR/api-contract.json"
+          --allow-output "$RECEIPTS_DIR/desktop-source.json"
           --allow-output "$RECEIPTS_DIR/desktop-tests.json"
+          --allow-output "$RECEIPTS_DIR/accessibility.json"
+          --allow-output "$RECEIPTS_DIR/source-webdriver.json"
           --allow-output "$RECEIPTS_DIR/build-inspection.json"
           --allow-output "$RECEIPTS_DIR/audit.json"
           --gate secretsPassed
@@ -157,9 +257,15 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/sbom.json" \
+            --allow-output "$RECEIPTS_DIR/runner-versions.json" \
             --allow-output "$RECEIPTS_DIR/api-contract.json" \
+            --allow-output "$RECEIPTS_DIR/desktop-source.json" \
             --allow-output "$RECEIPTS_DIR/desktop-tests.json" \
+            --allow-output "$RECEIPTS_DIR/accessibility.json" \
+            --allow-output "$RECEIPTS_DIR/source-webdriver.json" \
             --allow-output "$RECEIPTS_DIR/build-inspection.json" \
             --allow-output "$RECEIPTS_DIR/audit.json" \
             --allow-output "$RECEIPTS_DIR/secrets.json" \
@@ -248,6 +354,10 @@ jobs:
             package_boundary: unpacked-native
             package_args: --linux --dir --x64
     runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 45
+    env:
+      VERIFICATION_RUNNER: ${{ matrix.runner }}
+      VERIFICATION_SIDECAR_TARGET: ${{ matrix.sidecar_target }}
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -300,6 +410,12 @@ jobs:
           actual_os="Ubuntu $VERSION_ID"
           test "$actual_os" = "$EXPECTED_OS"
           echo "actual_os=$actual_os" >> "$GITHUB_OUTPUT"
+      - name: Install native Linux keyring verifier
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus gnome-keyring libsecret-tools
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -309,7 +425,7 @@ jobs:
         with:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-desktop-${{ matrix.runner }}
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26.5.0"
           architecture: ${{ matrix.runtime_arch }}
@@ -321,18 +437,17 @@ jobs:
           if ($nodeArch -ne 'arm64') { throw "expected arm64 Node.js runtime, found $nodeArch" }
           $pythonPlatform = python -c "import sysconfig; print(sysconfig.get_platform())"
           if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
-      - uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: "11.9.0"
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
-          uv sync --locked --no-default-groups --extra desktop-build --no-install-project --no-build
+          uv sync --locked --no-default-groups --extra desktop-build --group test --no-install-project --no-build
           uv pip install --python .venv --no-deps --editable .
       - name: Install locked desktop dependencies
         shell: bash
-        run: |
-          pnpm --dir desktop install --frozen-lockfile
+        run: node desktop/scripts/install-locked.mjs
       - name: Build and smoke-test native sidecar
         shell: bash
         env:
@@ -340,18 +455,28 @@ jobs:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
           RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
         run: |
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --gate sidecarProcessTreeGuardPassed \
+            -- uv run --no-sync python -m pytest -q tests/api/test_sidecar_bootstrap.py
           uv run --no-sync python scripts/build_sidecar.py --expected-target "$SIDECAR_TARGET"
           sidecar_executable="desktop/build/sidecar/$SIDECAR_TARGET/ancestryllm-sidecar/ancestryllm-sidecar"
           if [[ "$SIDECAR_TARGET" == win32-* ]]; then sidecar_executable="$sidecar_executable.exe"; fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --gate sidecarSmokePassed \
             -- uv run --no-sync python scripts/smoke_sidecar.py "$sidecar_executable"
           uv run --no-sync python scripts/build_verification_sidecar.py --expected-target "$SIDECAR_TARGET"
-          wrong_build_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"
-          if [[ "$SIDECAR_TARGET" == win32-* ]]; then wrong_build_sidecar="$wrong_build_sidecar.exe"; fi
-          echo "ANCESTRYLLM_WRONG_BUILD_SIDECAR=$wrong_build_sidecar" >> "$GITHUB_ENV"
+          substituted_sidecar="$GITHUB_WORKSPACE/desktop/build/verification-sidecar/$SIDECAR_TARGET/ancestryllm-wrong-build-sidecar"
+          if [[ "$SIDECAR_TARGET" == win32-* ]]; then substituted_sidecar="$substituted_sidecar.exe"; fi
+          echo "ANCESTRYLLM_SUBSTITUTED_SIDECAR=$substituted_sidecar" >> "$GITHUB_ENV"
       - name: Build production Electron application
         shell: bash
         run: pnpm --dir desktop run build
@@ -365,14 +490,38 @@ jobs:
         env:
           SIDECAR_TARGET: ${{ matrix.sidecar_target }}
         run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release
+      - name: Build packaged native-verification application
+        if: runner.os != 'Windows'
+        shell: bash
+        run: pnpm --dir desktop run build:packaged-native-verification
+      - name: Assemble packaged native-verification application
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: pnpm --dir desktop exec electron-builder --config electron-builder.native-verification.yml $PACKAGE_ARGS
+      - name: Verify packaged native-verification sidecar resource
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+        run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-native-verification
+      - name: Select packaged runtime
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            echo "PACKAGED_RELEASE_ROOT=desktop/release-native-verification" >> "$GITHUB_ENV"
+          else
+            echo "PACKAGED_RELEASE_ROOT=desktop/release" >> "$GITHUB_ENV"
+          fi
       - name: Prepare Chromium sandbox for unpacked Linux verification
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          packaged_app="$(node desktop/scripts/find-packaged-app.mjs)"
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs "$PACKAGED_RELEASE_ROOT")"
           sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"
           case "$sandbox_path" in
-            "$GITHUB_WORKSPACE/desktop/release"/*) ;;
+            "$GITHUB_WORKSPACE/$PACKAGED_RELEASE_ROOT"/*) ;;
             *)
               echo "::error::Unexpected Chromium sandbox path"
               exit 1
@@ -389,64 +538,92 @@ jobs:
           ROW_ROOT: desktop/verification/${{ matrix.runner }}
           RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
         run: |
-          packaged_app="$(node desktop/scripts/find-packaged-app.mjs)"
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs "$PACKAGED_RELEASE_ROOT")"
           mkdir -p "$ROW_ROOT"
           export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
           export ANCESTRYLLM_PACKAGED_METRICS="$GITHUB_WORKSPACE/$ROW_ROOT/packaged-metrics.json"
           export ANCESTRYLLM_WITHHOLD_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-withhold-retry.json"
           export ANCESTRYLLM_RESTART_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-restart-exhaustion-quit.json"
-          export ANCESTRYLLM_MISMATCH_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch.json"
-          export ANCESTRYLLM_MISMATCH_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-version-mismatch-diagnostics.json"
+          export ANCESTRYLLM_INTEGRITY_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution.json"
+          export ANCESTRYLLM_INTEGRITY_DIAGNOSTICS="$GITHUB_WORKSPACE/$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json"
           package_launcher=()
-          if [[ "$RUNNER_OS" == "Linux" ]]; then package_launcher=(xvfb-run --auto-servernum); fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --gate packageRuntimePassed \
             --gate rendererZeroEgressCanaryPassed \
-            --gate normalLaunchDebugSurfaceAbsentPassed \
             --artifact metrics="$ANCESTRYLLM_PACKAGED_METRICS" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "exercises first run, persistence, corrupt preferences, security, and resource evidence"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
-            --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
+            --gate normalLaunchDebugSurfaceAbsentPassed \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "launches the selected packaged runtime normally without a debugging transport"
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --gate packagedSidecarWithholdRetryPassed \
             --artifact faultEvidence="$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "withholds and restores the packaged sidecar through Diagnostics retry"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             --gate packagedSidecarRestartExhaustionQuitPassed \
             --artifact faultEvidence="$ANCESTRYLLM_RESTART_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
-              --grep "restarts a killed packaged sidecar, exhausts the budget, and cleans up on quit"
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "exhausts packaged sidecar restarts and exits cleanly"
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
-            --output "$RECEIPTS_DIR/packaged-sidecar-version-mismatch.json" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
             --allow-output "$ANCESTRYLLM_PACKAGED_METRICS" \
             --allow-output "$ANCESTRYLLM_WITHHOLD_EVIDENCE" \
             --allow-output "$ANCESTRYLLM_RESTART_EVIDENCE" \
-            --gate packagedSidecarVersionMismatchPassed \
-            --artifact faultEvidence="$ANCESTRYLLM_MISMATCH_EVIDENCE" \
-            --artifact failureDiagnostics="$ANCESTRYLLM_MISMATCH_DIAGNOSTICS" \
-            --artifact wrongBuildSidecar="$ANCESTRYLLM_WRONG_BUILD_SIDECAR" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-packaged-tests.mjs \
-              --grep "rejects a target-native wrong-build packaged sidecar"
+            --gate packagedSidecarIntegritySubstitutionPassed \
+            --artifact faultEvidence="$ANCESTRYLLM_INTEGRITY_EVIDENCE" \
+            --artifact failureDiagnostics="$ANCESTRYLLM_INTEGRITY_DIAGNOSTICS" \
+            --artifact substitutedSidecar="$ANCESTRYLLM_SUBSTITUTED_SIDECAR" \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "rejects a substituted packaged sidecar before launch"
       - name: Inspect packaged Electron fuses
         shell: bash
         env:
@@ -455,20 +632,99 @@ jobs:
         run: |
           node desktop/scripts/verification-receipt.mjs \
             --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
             --output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
             --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
             --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
             --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-sidecar-version-mismatch.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
             --allow-output "$ROW_ROOT/packaged-metrics.json" \
             --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
             --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
-            --allow-output "$ROW_ROOT/sidecar-version-mismatch.json" \
-            --allow-output "$ROW_ROOT/sidecar-version-mismatch-diagnostics.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
             --gate fusesInspectedPassed \
             --artifact fuseInspection="$ROW_ROOT/fuse-inspection.json" \
-            -- node desktop/scripts/inspect-package-fuses.mjs --output "$ROW_ROOT/fuse-inspection.json"
+            -- node desktop/scripts/inspect-package-fuses.mjs --root "$PACKAGED_RELEASE_ROOT" --output "$ROW_ROOT/fuse-inspection.json"
+      - name: Build packaged file-grant verification application
+        shell: bash
+        run: pnpm --dir desktop run build:packaged-file-grants
+      - name: Assemble packaged file-grant verification application
+        shell: bash
+        env:
+          PACKAGE_ARGS: ${{ matrix.package_args }}
+        run: pnpm --dir desktop exec electron-builder --config electron-builder.file-grant-verification.yml $PACKAGE_ARGS
+      - name: Verify packaged file-grant sidecar resource
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.sidecar_target }}
+        run: node desktop/scripts/verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-file-grant-verification
+      - name: Prepare Chromium sandbox for packaged file-grant verification
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
+          sandbox_path="$(dirname "$packaged_app")/chrome-sandbox"
+          case "$sandbox_path" in
+            "$GITHUB_WORKSPACE/desktop/release-file-grant-verification"/*) ;;
+            *)
+              echo "::error::Unexpected packaged file-grant Chromium sandbox path"
+              exit 1
+              ;;
+          esac
+          test ! -L "$sandbox_path"
+          test -f "$sandbox_path"
+          sudo chown root:root -- "$sandbox_path"
+          sudo chmod 4755 -- "$sandbox_path"
+          test "$(stat -c '%U:%G:%a' -- "$sandbox_path")" = "root:root:4755"
+      - name: Exercise packaged file-grant mediation
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
+          mkdir -p "$ROW_ROOT/file-grant-fixtures"
+          printf '0 HEAD\n0 TRLR\n' > "$ROW_ROOT/file-grant-fixtures/input.ged"
+          printf 'existing output\n' > "$ROW_ROOT/file-grant-fixtures/existing-output.ged"
+          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
+          export ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1
+          export ANCESTRYLLM_FILE_GRANT_OPEN_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-fixtures/input.ged"
+          export ANCESTRYLLM_FILE_GRANT_SAVE_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-fixtures/existing-output.ged"
+          export ANCESTRYLLM_FILE_GRANT_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/file-grant-mediation.json"
+          package_launcher=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/packaged-file-grants.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
+            --allow-output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --allow-output "$ROW_ROOT/packaged-metrics.json" \
+            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
+            --allow-output "$ROW_ROOT/fuse-inspection.json" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/input.ged" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
+            --gate packagedFileGrantSmokePassed \
+            --artifact fileGrantEvidence="$ANCESTRYLLM_FILE_GRANT_EVIDENCE" \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "mediates opaque packaged open and save file grants"
       - name: Record target evidence
         shell: bash
         env:
@@ -495,7 +751,8 @@ jobs:
             --fuse-inspection "$ROW_ROOT/fuse-inspection.json" \
             --withhold-evidence "$ROW_ROOT/sidecar-withhold-retry.json" \
             --restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
-            --mismatch-evidence "$ROW_ROOT/sidecar-version-mismatch.json" \
+            --integrity-evidence "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --file-grant-evidence "$ROW_ROOT/file-grant-mediation.json" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
       - name: Upload partial native-package diagnostics
@@ -518,6 +775,7 @@ jobs:
     if: ${{ always() }}
     needs: [changes, desktop-security, native-package]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Validate prerequisite results
         shell: bash
@@ -545,7 +803,7 @@ jobs:
         if: needs.changes.outputs.desktop == 'true'
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: needs.changes.outputs.desktop == 'true'
         with:
           node-version: "26.5.0"

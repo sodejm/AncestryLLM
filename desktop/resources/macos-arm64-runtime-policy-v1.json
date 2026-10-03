@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "target": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "minimum_macos_major": 13,
+    "minimum_free_gib": 24
+  },
+  "ownership": {
+    "profile": "ancestryllm-local-arm64",
+    "context": "colima-ancestryllm-local-arm64"
+  },
+  "resources": {
+    "minimum_cpus": 2,
+    "maximum_cpus": 4,
+    "minimum_memory_gib": 4,
+    "maximum_memory_gib": 8,
+    "disk_gib": 20
+  },
+  "vm_image": {
+    "version": "0.10.4",
+    "repository": "abiosoft/colima-core",
+    "asset_name": "ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz",
+    "url": "https://github.com/abiosoft/colima-core/releases/download/v0.10.4/ubuntu-24.04-minimal-cloudimg-arm64-docker.raw.gz",
+    "sha256": "1fc0354f4f99734ce3886628cc7af8b0437c1a1d391b126bd09cba0df35ee53f",
+    "sha512": "32242674b046b5057e60c4aba334b51e3665f05412cda89ed081cc2de153ae5c41f6b105b5c442cbe48d78e2cc21e9ba1950e406b6fb4fc2fd1dd2259240abbd",
+    "size_bytes": 332354401
+  },
+  "components": [
+    {
+      "name": "colima",
+      "version": "0.10.3",
+      "repository": "abiosoft/colima",
+      "license": {
+        "spdx_id": "MIT",
+        "url": "https://raw.githubusercontent.com/abiosoft/colima/v0.10.3/LICENSE",
+        "sha256": "e5ce0844732e29a77f349cc332fcb6ab75617393f9e565ac6509c7b681d95eea",
+        "size_bytes": 1071
+      },
+      "artifact": {
+        "asset_name": "colima-Darwin-arm64",
+        "url": "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64",
+        "sha256": "980ad8bf61a4ca370243f4cb41401a61276dcd2c2502bee7b9b86f9250169f34",
+        "size_bytes": 15656320,
+        "archive_format": "binary",
+        "install": [
+          {
+            "source_path": "colima-Darwin-arm64",
+            "install_path": "bin/colima",
+            "sha256": "980ad8bf61a4ca370243f4cb41401a61276dcd2c2502bee7b9b86f9250169f34",
+            "size_bytes": 15656320,
+            "executable": true
+          }
+        ],
+        "excluded_members": []
+      }
+    },
+    {
+      "name": "lima",
+      "version": "2.2.0",
+      "repository": "lima-vm/lima",
+      "license": {
+        "spdx_id": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/lima-vm/lima/v2.2.0/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_bytes": 11358
+      },
+      "artifact": {
+        "asset_name": "lima-2.2.0-Darwin-arm64.tar.gz",
+        "url": "https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz",
+        "sha256": "bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3",
+        "size_bytes": 37586365,
+        "archive_format": "tar.gz",
+        "install": [
+          {
+            "source_path": "bin/limactl",
+            "install_path": "bin/limactl",
+          "sha256": "f19a4fca3875e1017a5285672be4a62699c1e55918fb6a7afce86a14199e10d9",
+            "size_bytes": 32669616,
+            "executable": true
+          },
+          {
+            "source_path": "share/lima/lima-guestagent.Linux-aarch64.gz",
+            "install_path": "share/lima/lima-guestagent.Linux-aarch64.gz",
+          "sha256": "d3fda5670ef5fcf14094efec95d410021cd4c585a2a1b6a16a97131f73fbe2f1",
+            "size_bytes": 7275764,
+            "executable": false
+          }
+        ],
+        "excluded_members": [
+          {
+            "source_path": "share/doc/lima/templates",
+            "type": "symlink",
+            "link_target": "../../lima/templates"
+          }
+        ]
+      }
+    },
+    {
+      "name": "docker-cli",
+      "version": "29.7.2",
+      "repository": "docker/cli",
+      "license": {
+        "spdx_id": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/docker/cli/v29.7.2/LICENSE",
+        "sha256": "2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0",
+        "size_bytes": 10765
+      },
+      "artifact": {
+        "asset_name": "docker-29.7.2.tgz",
+        "url": "https://download.docker.com/mac/static/stable/aarch64/docker-29.7.2.tgz",
+        "sha256": "b8683ed19d1f06048a496f9b8429e2c71d0b088d475b7487c054ea3666c02a3c",
+        "size_bytes": 18920558,
+        "archive_format": "tar.gz",
+        "install": [
+          {
+            "source_path": "docker/docker",
+            "install_path": "bin/docker",
+            "sha256": "a078469d8b77683b81e1604ee35af488ef143a8a0230897f05f0839b2f42d1dd",
+            "size_bytes": 41503762,
+            "executable": true
+          }
+        ],
+        "excluded_members": []
+      }
+    },
+    {
+      "name": "docker-buildx",
+      "version": "0.36.1",
+      "repository": "docker/buildx",
+      "license": {
+        "spdx_id": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/docker/buildx/v0.36.1/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_bytes": 11358
+      },
+      "artifact": {
+        "asset_name": "buildx-v0.36.1.darwin-arm64",
+        "url": "https://github.com/docker/buildx/releases/download/v0.36.1/buildx-v0.36.1.darwin-arm64",
+        "sha256": "214cdc36788602862dbc82b523d58648b4585c7b0ff95218b0817c44db5573d7",
+        "size_bytes": 62541920,
+        "archive_format": "binary",
+        "install": [
+          {
+            "source_path": "buildx-v0.36.1.darwin-arm64",
+            "install_path": "docker-config/cli-plugins/docker-buildx",
+            "sha256": "214cdc36788602862dbc82b523d58648b4585c7b0ff95218b0817c44db5573d7",
+            "size_bytes": 62541920,
+            "executable": true
+          }
+        ],
+        "excluded_members": []
+      }
+    },
+    {
+      "name": "docker-compose",
+      "version": "5.4.0",
+      "repository": "docker/compose",
+      "license": {
+        "spdx_id": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/docker/compose/v5.4.0/LICENSE",
+        "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+        "size_bytes": 11357
+      },
+      "artifact": {
+        "asset_name": "docker-compose-darwin-aarch64",
+        "url": "https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-darwin-aarch64",
+        "sha256": "bc3d1fd4c01e3af9b481fc5ea153ea7c006c77eb39be78e9af3e2e8ebecc0d61",
+        "size_bytes": 46852962,
+        "archive_format": "binary",
+        "install": [
+          {
+            "source_path": "docker-compose-darwin-aarch64",
+            "install_path": "docker-config/cli-plugins/docker-compose",
+            "sha256": "bc3d1fd4c01e3af9b481fc5ea153ea7c006c77eb39be78e9af3e2e8ebecc0d61",
+            "size_bytes": 46852962,
+            "executable": true
+          }
+        ],
+        "excluded_members": []
+      }
+    }
+  ]
+}

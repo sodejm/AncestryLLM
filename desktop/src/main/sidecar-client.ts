@@ -1,14 +1,155 @@
+/** Implements the authenticated, bounded HTTP client for the native sidecar. */
 import { request as httpRequest, type IncomingMessage } from 'node:http'
-import { DESKTOP_PROTOCOL_VERSION, type CapabilityManifest } from '../shared-contract/desktop'
-import { parseCapabilitiesResult } from '../shared-contract/runtime'
+import { StringDecoder } from 'node:string_decoder'
+import type { GedcomIntakeClient } from './gedcom-intake-broker'
+import { parseGedcomRootQuery } from '../shared-contract/gedcom'
+import {
+  DESKTOP_PROTOCOL_VERSION,
+  type ApplicationSettings,
+  type ApplicationSettingsPatch,
+  type CapabilityManifest,
+  type ChatCapability,
+  type ChatEvent,
+  type ChatSession,
+  type ChatSessionClosure,
+  type ChatSessionCreateRequest,
+  type ChatSessionRequest,
+  type ChatStreamCancelRequest,
+  type ChatStreamRun,
+  type ChatStreamStartRequest,
+  type ConsentCreateRequest,
+  type ConsentPreview,
+  type ConsentPreviewRequest,
+  type ConsentRevokeRequest,
+  type JobEvent,
+  type JobEventSubscriptionRequest,
+  type JobList,
+  type JobRequest,
+  type JobSnapshot,
+  type ProviderConfiguration,
+  type ProviderEndpointValidation,
+  type ProviderEndpointValidationRequest,
+  type ProviderProfileCreateRequest,
+  type SecretReference,
+  type SecretReferenceRequest,
+  type SecretSetRequest,
+  type SecretStatus,
+  type StartupDiagnosticReport,
+} from '../shared-contract/desktop'
+import {
+  parseCapabilitiesResult,
+  parseChatCapabilityResult,
+  parseChatEventResult,
+  parseChatSessionResult,
+  parseChatStreamRunResult,
+  parseConsentPreviewResult,
+  parseJobEventResult,
+  parseJobListResult,
+  parseJobSnapshotResult,
+  parseJobRequest,
+  parseGedcomInspectionResult,
+  parseGedcomRootPageResult,
+  parseGedcomDiscardResult,
+  parseProviderConfigurationResult,
+  parseProviderEndpointValidationResult,
+  parseSecretStatusResult,
+  parseSettingsResult,
+  parseStartupDiagnosticReport,
+} from '../shared-contract/runtime'
 import type { AuthenticatedSidecarSession } from './sidecar-supervisor'
 
-const CAPABILITIES_PATH = '/api/v1/capabilities'
+const CAPABILITIES_PATH = '/api/v1/capabilities' as const
+const STARTUP_DIAGNOSTICS_PATH = '/api/v1/startup-diagnostics' as const
+const SETTINGS_PATH = '/api/v1/settings' as const
+const PROVIDER_CONFIGURATION_PATH = '/api/v1/provider-configuration' as const
+const PROVIDER_PROFILES_PATH = '/api/v1/provider-profiles' as const
+const PROVIDER_ENDPOINT_VALIDATION_PATH = '/api/v1/provider-endpoints/validate' as const
+const CONSENT_PREVIEW_PATH = '/api/v1/consents/preview' as const
+const CONSENTS_PATH = '/api/v1/consents' as const
+const JOBS_PATH = '/api/v1/jobs' as const
+const JOB_SHUTDOWN_PATH = '/api/v1/jobs/shutdown' as const
+const RUNTIME_SHUTDOWN_PATH = '/api/v1/runtime/shutdown' as const
+const CHAT_CAPABILITY_PATH = '/api/v1/chat/capability' as const
+const CHAT_SESSIONS_PATH = '/api/v1/chat/sessions' as const
+const GEDCOM_INTAKE_PATH = '/api/v1/gedcom/intake' as const
 const MAX_RESPONSE_BYTES = 1_048_576
+const MAX_REQUEST_BYTES = 65_600
 const REQUEST_TIMEOUT_MS = 3_000
+const JOB_EVENT_INACTIVITY_TIMEOUT_MS = 45_000
+const CHAT_EVENT_INACTIVITY_TIMEOUT_MS = 45_000
 
-export type SidecarClientFailure = 'unavailable' | 'request_failed' | 'invalid_response'
+type SecretOperation = 'status' | 'set' | 'delete'
+type SidecarPath =
+  | typeof CAPABILITIES_PATH
+  | typeof STARTUP_DIAGNOSTICS_PATH
+  | typeof SETTINGS_PATH
+  | typeof PROVIDER_CONFIGURATION_PATH
+  | typeof PROVIDER_PROFILES_PATH
+  | typeof PROVIDER_ENDPOINT_VALIDATION_PATH
+  | typeof CONSENT_PREVIEW_PATH
+  | typeof CONSENTS_PATH
+  | typeof JOBS_PATH
+  | typeof JOB_SHUTDOWN_PATH
+  | typeof RUNTIME_SHUTDOWN_PATH
+  | typeof CHAT_CAPABILITY_PATH
+  | typeof CHAT_SESSIONS_PATH
+  | typeof GEDCOM_INTAKE_PATH
+  | `/api/v1/gedcom/intake/${string}`
+  | `/api/v1/jobs/${string}`
+  | `/api/v1/jobs/${string}/cancel`
+  | `/api/v1/jobs/${string}/events`
+  | `/api/v1/chat/sessions/${string}`
+  | `/api/v1/chat/sessions/${string}/streams`
+  | `/api/v1/chat/sessions/${string}/streams/${string}/cancel`
+  | `/api/v1/chat/sessions/${string}/streams/${string}/events`
+  | `/api/v1/consents/${string}/revoke`
+  | `/api/v1/secrets/${SecretReference}/${SecretOperation}`
 
+/** Stable failures that may cross from the authenticated sidecar client to main-process callers. */
+export type SidecarClientFailure =
+  | 'unavailable'
+  | 'request_failed'
+  | 'invalid_response'
+  | 'cancelled'
+  | 'settings_conflict'
+  | 'settings_invalid'
+  | 'secret_store_unavailable'
+  | 'secret_environment_managed'
+  | 'secret_invalid'
+  | 'provider_configuration_conflict'
+  | 'provider_configuration_invalid'
+  | 'endpoint_rejected'
+  | 'consent_invalid'
+  | 'consent_preview_stale'
+  | 'startup_mutation_blocked'
+  | 'job_id_invalid'
+  | 'job_not_found'
+  | 'job_event_cursor_invalid'
+  | 'job_event_replay_expired'
+  | 'job_service_unavailable'
+  | 'job_subscriber_limit'
+  | 'job_subscription_closed'
+  | 'job_event_stream_failed'
+  | 'chat_session_invalid'
+  | 'chat_session_not_found'
+  | 'chat_session_limit'
+  | 'chat_session_busy'
+  | 'chat_session_service_unavailable'
+  | 'chat_stream_not_found'
+  | 'chat_stream_cursor_invalid'
+  | 'chat_stream_replay_expired'
+  | 'chat_stream_service_unavailable'
+  | 'chat_stream_limit'
+  | 'chat_event_stream_interrupted'
+  | 'chat_event_stream_failed'
+  | 'GEDCOM_INTAKE_INVALID'
+  | 'GEDCOM_INTAKE_CAPACITY'
+  | 'GEDCOM_JOB_RESULT_UNAVAILABLE'
+  | 'GEDCOM_ROOT_CURSOR_INVALID'
+
+/**
+ * Reports a stable coded failure from authenticated local sidecar lifecycle and process isolation without leaking sensitive host details.
+ */
 export class SidecarClientError extends Error {
   constructor(readonly reason: SidecarClientFailure) {
     super(reason)
@@ -16,45 +157,176 @@ export class SidecarClientError extends Error {
   }
 }
 
+/** Bounded response captured from one authenticated loopback request. */
 export interface SidecarHttpResponse {
   statusCode: number
   contentType: string
   body: string
 }
 
+/** Method and optional serialized JSON body for an allowlisted sidecar route. */
+export interface SidecarRequestOptions {
+  method: 'DELETE' | 'PATCH' | 'POST'
+  body?: string
+}
+
+/**
+ * Main-process transport for an authenticated request to the fixed `SidecarPath` set.
+ *
+ * Implementations must preserve the supplied abort signal and return only bounded response data.
+ */
 export type SidecarRequest = (
   session: Readonly<AuthenticatedSidecarSession>,
-  path: typeof CAPABILITIES_PATH,
+  path: SidecarPath,
+  signal?: AbortSignal,
+  options?: Readonly<SidecarRequestOptions>,
 ) => Promise<SidecarHttpResponse>
 
+/**
+ * Typed main-process API over the authenticated loopback sidecar session.
+ *
+ * Every response is schema-validated before it is returned to the desktop-control boundary.
+ */
+export interface SidecarClient {
+  getStartupDiagnostics(signal?: AbortSignal): Promise<Readonly<StartupDiagnosticReport>>
+  getCapabilities(signal?: AbortSignal): Promise<CapabilityManifest>
+  getSettings(signal?: AbortSignal): Promise<ApplicationSettings>
+  updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal): Promise<ApplicationSettings>
+  getSecretStatus(request: SecretReferenceRequest, signal?: AbortSignal): Promise<SecretStatus>
+  setSecret(request: SecretSetRequest, signal?: AbortSignal): Promise<SecretStatus>
+  deleteSecret(request: SecretReferenceRequest, signal?: AbortSignal): Promise<SecretStatus>
+  getProviderConfiguration(signal?: AbortSignal): Promise<ProviderConfiguration>
+  createProviderProfile(
+    request: ProviderProfileCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderConfiguration>
+  validateProviderEndpoint(
+    request: ProviderEndpointValidationRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderEndpointValidation>
+  previewConsent(request: ConsentPreviewRequest, signal?: AbortSignal): Promise<ConsentPreview>
+  createConsent(request: ConsentCreateRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
+  revokeConsent(request: ConsentRevokeRequest, signal?: AbortSignal): Promise<ProviderConfiguration>
+  prepareJobShutdown(
+    action: JobShutdownAction,
+    signal?: AbortSignal,
+  ): Promise<JobShutdownAssessment>
+  listJobs(signal?: AbortSignal): Promise<Readonly<JobList>>
+  getJob(request: JobRequest, signal?: AbortSignal): Promise<Readonly<JobSnapshot>>
+  cancelJob(request: JobRequest, signal?: AbortSignal): Promise<Readonly<JobSnapshot>>
+  streamJobEvents(
+    request: JobEventSubscriptionRequest,
+    listener: (event: Readonly<JobEvent>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
+  getChatCapability(signal?: AbortSignal): Promise<Readonly<ChatCapability>>
+  createChatSession(
+    request: ChatSessionCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatSession>>
+  closeChatSession(
+    request: ChatSessionRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatSessionClosure>>
+  startChatStream(
+    request: ChatStreamStartRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatStreamRun>>
+  cancelChatStream(
+    request: ChatStreamCancelRequest,
+    signal?: AbortSignal,
+  ): Promise<Readonly<ChatStreamRun>>
+  streamChatEvents(
+    request: ChatEventStreamRequest,
+    listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
+}
+
+/** Identifies the exact chat run and cursor from which authenticated event delivery resumes. */
+export interface ChatEventStreamRequest {
+  readonly schema_version: 1
+  readonly session_id: string
+  readonly run_id: string
+  readonly after: number
+}
+
+/** Main-process-only flow control over the authenticated HTTP response. */
+export interface ChatEventFlowControl {
+  pause(): void
+  resume(): void
+}
+
+/** Sidecar shutdown preparation choice: wait for active work or request safe cancellation. */
+export type JobShutdownAction = 'wait' | 'cancel'
+
+/** Successful sidecar acknowledgement that no active jobs block application shutdown. */
+export interface JobShutdownAssessment {
+  readonly schema_version: 1
+  readonly safe_to_quit: true
+  readonly active_jobs: readonly []
+}
+
+/**
+ * Sends one bounded, authenticated request to an allowlisted sidecar route.
+ *
+ * The caller supplies a `SidecarPath`, so arbitrary renderer-controlled URLs
+ * cannot reach this transport. Request and response sizes, deadlines, aborts,
+ * and loopback authority headers are enforced before data crosses the process
+ * boundary.
+ */
 function requestFixedRoute(
   sidecar: Readonly<AuthenticatedSidecarSession>,
-  path: typeof CAPABILITIES_PATH,
+  path: SidecarPath,
+  signal?: AbortSignal,
+  options?: Readonly<SidecarRequestOptions>,
 ): Promise<SidecarHttpResponse> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new SidecarClientError('cancelled'))
+      return
+    }
+    const body = options?.body
+    const bodyBytes = body === undefined ? 0 : Buffer.byteLength(body, 'utf8')
+    if (bodyBytes > MAX_REQUEST_BYTES) {
+      reject(new SidecarClientError('request_failed'))
+      return
+    }
     let responseStream: IncomingMessage | undefined
     let settled = false
+    const abort = () => {
+      const error = new SidecarClientError('cancelled')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }
     const finish = <T>(callback: (value: T) => void, value: T) => {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
       callback(value)
     }
     const resolveOnce = (value: SidecarHttpResponse) => finish(resolve, value)
     const rejectOnce = (error: unknown) => finish(reject, error)
+    const headers: Record<string, string | number> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${sidecar.bearerToken}`,
+      Connection: 'close',
+      Host: `${sidecar.host}:${sidecar.port}`,
+      'X-Ancestry-API-Version': sidecar.contract,
+      'X-Ancestry-App-Build': sidecar.appBuild,
+    }
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      headers['Content-Length'] = bodyBytes
+    }
     const request = httpRequest({
       hostname: sidecar.host,
       port: sidecar.port,
       path,
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${sidecar.bearerToken}`,
-        Connection: 'close',
-        Host: `${sidecar.host}:${sidecar.port}`,
-        'X-Ancestry-API-Version': sidecar.contract,
-        'X-Ancestry-App-Build': sidecar.appBuild,
-      },
+      method: options?.method ?? 'GET',
+      headers,
       timeout: REQUEST_TIMEOUT_MS,
     }, (response) => {
       responseStream = response
@@ -88,41 +360,1095 @@ function requestFixedRoute(
       request.destroy(error)
       rejectOnce(error)
     }, REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    if (body !== undefined) request.write(body)
     request.end()
   })
 }
 
-export function createSidecarCapabilitiesClient(dependencies: Readonly<{
+/** Requests a bodyless graceful shutdown from the authenticated packaged sidecar. */
+export async function requestSidecarRuntimeShutdown(
+  session: Readonly<AuthenticatedSidecarSession>,
+  request: SidecarRequest = requestFixedRoute,
+): Promise<void> {
+  let response: SidecarHttpResponse
+  try {
+    response = await request(session, RUNTIME_SHUTDOWN_PATH, undefined, { method: 'POST' })
+  } catch (error) {
+    if (error instanceof SidecarClientError) throw error
+    throw new SidecarClientError('request_failed')
+  }
+  if (response.statusCode !== 204 || response.body !== '') {
+    throw new SidecarClientError('invalid_response')
+  }
+}
+
+function secretPath(reference: SecretReference, operation: SecretOperation): SidecarPath {
+  return `/api/v1/secrets/${reference}/${operation}`
+}
+
+function consentRevokePath(name: string): SidecarPath {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$/.test(name)) {
+    throw new SidecarClientError('consent_invalid')
+  }
+  return `/api/v1/consents/${name}/revoke`
+}
+
+function jobPath(jobId: string, suffix: '' | '/cancel' | '/events' = ''): SidecarPath {
+  if (!/^j[0-9]{6,12}$/.test(jobId)) throw new SidecarClientError('job_id_invalid')
+  return `/api/v1/jobs/${jobId}${suffix}`
+}
+
+function validateChatSessionId(sessionId: string): void {
+  if (!/^chat_[a-f0-9]{32}$/.test(sessionId)) {
+    throw new SidecarClientError('chat_session_not_found')
+  }
+}
+
+function chatSessionPath(sessionId: string): SidecarPath {
+  validateChatSessionId(sessionId)
+  return `/api/v1/chat/sessions/${sessionId}`
+}
+
+function chatStreamPath(sessionId: string): SidecarPath
+function chatStreamPath(
+  sessionId: string,
+  runId: string,
+  suffix: '/cancel' | '/events',
+): SidecarPath
+function chatStreamPath(
+  sessionId: string,
+  runId?: string,
+  suffix?: '/cancel' | '/events',
+): SidecarPath {
+  validateChatSessionId(sessionId)
+  if (runId === undefined) return `/api/v1/chat/sessions/${sessionId}/streams`
+  if (!/^run_[a-f0-9]{32}$/.test(runId)) {
+    throw new SidecarClientError('chat_stream_not_found')
+  }
+  if (suffix === '/cancel') return `/api/v1/chat/sessions/${sessionId}/streams/${runId}/cancel`
+  if (suffix === '/events') return `/api/v1/chat/sessions/${sessionId}/streams/${runId}/events`
+  throw new SidecarClientError('chat_stream_not_found')
+}
+
+/** Accepts only bounded response bodies explicitly labelled as JSON. */
+function validJsonResponse(response: Readonly<SidecarHttpResponse>): boolean {
+  return /^application\/json(?:\s*;|$)/i.test(response.contentType)
+    && Buffer.byteLength(response.body, 'utf8') <= MAX_RESPONSE_BYTES
+}
+
+/**
+ * Parses an authenticated sidecar response through its exact shared-contract
+ * validator and collapses malformed or unexpected data to a stable error.
+ */
+function parseJson<T>(
+  response: Readonly<SidecarHttpResponse>,
+  parse: (value: unknown) => { ok: boolean; data?: Readonly<T> },
+): Readonly<T> {
+  if (!validJsonResponse(response)) throw new SidecarClientError('invalid_response')
+  try {
+    const result = parse({
+      ok: true,
+      protocolVersion: DESKTOP_PROTOCOL_VERSION,
+      data: JSON.parse(response.body) as unknown,
+    })
+    if (!result.ok || result.data === undefined) throw new SidecarClientError('invalid_response')
+    return result.data
+  } catch {
+    throw new SidecarClientError('invalid_response')
+  }
+}
+
+function settingsFailure(statusCode: number): SidecarClientError {
+  if (statusCode === 409) return new SidecarClientError('settings_conflict')
+  if (statusCode === 400 || statusCode === 422) return new SidecarClientError('settings_invalid')
+  return new SidecarClientError('request_failed')
+}
+
+function secretFailure(statusCode: number): SidecarClientError {
+  if (statusCode === 409) return new SidecarClientError('secret_environment_managed')
+  if (statusCode === 400 || statusCode === 422) return new SidecarClientError('secret_invalid')
+  if (statusCode === 503) return new SidecarClientError('secret_store_unavailable')
+  return new SidecarClientError('request_failed')
+}
+
+function failureCode(response: Readonly<SidecarHttpResponse>): string | undefined {
+  if (!validJsonResponse(response)) return undefined
+  try {
+    const payload = JSON.parse(response.body) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
+    const code = (payload as Readonly<Record<string, unknown>>).code
+    return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(code) ? code : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function gedcomFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'GEDCOM_INTAKE_INVALID'
+    || code === 'GEDCOM_INTAKE_CAPACITY'
+    || code === 'GEDCOM_JOB_RESULT_UNAVAILABLE'
+    || code === 'GEDCOM_ROOT_CURSOR_INVALID') {
+    return new SidecarClientError(code)
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function providerFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'PROVIDER_CONFIGURATION_CONFLICT') {
+    return new SidecarClientError('provider_configuration_conflict')
+  }
+  if (code?.startsWith('ENDPOINT_')) return new SidecarClientError('endpoint_rejected')
+  if (code?.startsWith('PROVIDER_') || [400, 404, 409, 422].includes(response.statusCode)) {
+    return new SidecarClientError('provider_configuration_invalid')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function endpointFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code?.startsWith('ENDPOINT_') || [400, 403, 409, 422, 502, 503].includes(response.statusCode)) {
+    return new SidecarClientError('endpoint_rejected')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function consentFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'PROVIDER_CONFIGURATION_CONFLICT') {
+    return new SidecarClientError('provider_configuration_conflict')
+  }
+  if (code === 'CONSENT_PREVIEW_STALE') return new SidecarClientError('consent_preview_stale')
+  if (code?.startsWith('CONSENT_') || code?.startsWith('PROVIDER_PROFILE_')
+    || [400, 404, 409, 422].includes(response.statusCode)) {
+    return new SidecarClientError('consent_invalid')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function jobFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
+  if (code === 'JOB_ID_INVALID') return new SidecarClientError('job_id_invalid')
+  if (code === 'JOB_NOT_FOUND' || response.statusCode === 404) {
+    return new SidecarClientError('job_not_found')
+  }
+  if (code === 'JOB_EVENT_CURSOR_INVALID') {
+    return new SidecarClientError('job_event_cursor_invalid')
+  }
+  if (code === 'JOB_EVENT_REPLAY_EXPIRED' || response.statusCode === 410) {
+    return new SidecarClientError('job_event_replay_expired')
+  }
+  if (code === 'JOB_SUBSCRIBER_LIMIT' || response.statusCode === 429) {
+    return new SidecarClientError('job_subscriber_limit')
+  }
+  if (code === 'JOB_SUBSCRIPTION_CLOSED') {
+    return new SidecarClientError('job_subscription_closed')
+  }
+  if (code === 'JOB_SERVICE_CLOSED' || code === 'JOB_SERVICE_UNAVAILABLE'
+    || response.statusCode === 503) {
+    return new SidecarClientError('job_service_unavailable')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function chatFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
+  if (code === 'CHAT_SESSION_NOT_FOUND') {
+    return new SidecarClientError('chat_session_not_found')
+  }
+  if (code === 'CHAT_STREAM_NOT_FOUND' || response.statusCode === 404) {
+    return new SidecarClientError('chat_stream_not_found')
+  }
+  if (code === 'CHAT_STREAM_CURSOR_INVALID') {
+    return new SidecarClientError('chat_stream_cursor_invalid')
+  }
+  if (code === 'CHAT_STREAM_REPLAY_EXPIRED' || response.statusCode === 410) {
+    return new SidecarClientError('chat_stream_replay_expired')
+  }
+  if (code === 'CHAT_SESSION_BUSY'
+    || code === 'CHAT_SESSION_LIMIT'
+    || code === 'CHAT_STREAM_LIMIT'
+    || response.statusCode === 429) {
+    return new SidecarClientError('chat_stream_limit')
+  }
+  if (code === 'CHAT_STREAM_SERVICE_CLOSED'
+    || code === 'CHAT_STREAM_SERVICE_NOT_READY'
+    || code === 'CHAT_STREAM_SERVICE_UNAVAILABLE'
+    || response.statusCode === 503) {
+    return new SidecarClientError('chat_stream_service_unavailable')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function chatSessionFailure(response: Readonly<SidecarHttpResponse>): SidecarClientError {
+  const code = failureCode(response)
+  if (code === 'STARTUP_MUTATION_BLOCKED') {
+    return new SidecarClientError('startup_mutation_blocked')
+  }
+  if (code === 'CHAT_SESSION_NOT_FOUND' || response.statusCode === 404) {
+    return new SidecarClientError('chat_session_not_found')
+  }
+  if (code === 'CHAT_SESSION_BUSY' || response.statusCode === 409) {
+    return new SidecarClientError('chat_session_busy')
+  }
+  if (code === 'CHAT_SESSION_LIMIT' || response.statusCode === 429) {
+    return new SidecarClientError('chat_session_limit')
+  }
+  if (code === 'CHAT_SESSION_SERVICE_CLOSED'
+    || code === 'CHAT_SESSION_SERVICE_NOT_READY'
+    || code === 'CHAT_SESSION_SERVICE_UNAVAILABLE'
+    || response.statusCode === 503) {
+    return new SidecarClientError('chat_session_service_unavailable')
+  }
+  if (code === 'CHAT_SESSION_INVALID'
+    || code?.startsWith('PROVIDER_')
+    || code?.startsWith('CONSENT_')
+    || response.statusCode === 400
+    || response.statusCode === 422) {
+    return new SidecarClientError('chat_session_invalid')
+  }
+  return new SidecarClientError('request_failed')
+}
+
+function parseJobStreamFailure(payload: unknown): SidecarClientError {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return new SidecarClientError('job_event_stream_failed')
+  }
+  const record = payload as Readonly<Record<string, unknown>>
+  const keys = Object.keys(record).sort()
+  if (keys.length !== 4
+    || keys[0] !== 'code'
+    || keys[1] !== 'message'
+    || keys[2] !== 'remediation'
+    || keys[3] !== 'schema_version'
+    || record.schema_version !== 1
+    || record.code !== 'JOB_EVENT_REPLAY_EXPIRED'
+    || record.message !== 'The bounded job-event replay window is no longer available.'
+    || record.remediation !== 'Fetch the current job snapshot, then reconnect from its sequence.') {
+    return new SidecarClientError('job_event_stream_failed')
+  }
+  return new SidecarClientError('job_event_replay_expired')
+}
+
+/**
+ * Streams a single authenticated job-event route with bounded buffering,
+ * monotonic sequence validation, inactivity deadlines, and terminal framing.
+ */
+function streamFixedJobEvents(
+  sidecar: Readonly<AuthenticatedSidecarSession>,
+  subscription: JobEventSubscriptionRequest,
+  listener: (event: Readonly<JobEvent>) => void,
+  inactivityTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new SidecarClientError('cancelled'))
+      return
+    }
+    if (!/^sub_[a-f0-9]{32}$/.test(subscription.subscription_id)
+      || !Number.isInteger(subscription.after)
+      || subscription.after < 0
+      || subscription.after > 9_999_999_999) {
+      reject(new SidecarClientError('job_event_cursor_invalid'))
+      return
+    }
+
+    const path = jobPath(subscription.job_id, '/events')
+    let responseStream: IncomingMessage | undefined
+    let settled = false
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let buffer = ''
+    let lastSequence = subscription.after
+    let terminalSeen = false
+    const decoder = new StringDecoder('utf8')
+
+    const cleanup = () => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
+    }
+    const resolveOnce = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+    const rejectOnce = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error instanceof SidecarClientError
+        ? error
+        : new SidecarClientError('job_event_stream_failed'))
+    }
+    const abort = () => {
+      const error = new SidecarClientError('cancelled')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }
+    const failStream = (error: SidecarClientError) => {
+      rejectOnce(error)
+      responseStream?.destroy()
+      request.destroy()
+    }
+    const resetDeadline = (timeoutMs: number) => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      deadline = setTimeout(() => {
+        failStream(new SidecarClientError('job_event_stream_failed'))
+      }, timeoutMs)
+    }
+    const resetInactivityDeadline = () => resetDeadline(inactivityTimeoutMs)
+
+    const processFrame = (frame: string) => {
+      const lines = frame.split('\n')
+      if (lines.every((line) => line.startsWith(':'))) {
+        resetInactivityDeadline()
+        return
+      }
+      if (terminalSeen) throw new SidecarClientError('job_event_stream_failed')
+      const fields = new Map<string, string>()
+      for (const line of lines) {
+        const separator = line.indexOf(': ')
+        if (separator <= 0) throw new SidecarClientError('job_event_stream_failed')
+        const name = line.slice(0, separator)
+        if (!['id', 'event', 'data'].includes(name) || fields.has(name)) {
+          throw new SidecarClientError('job_event_stream_failed')
+        }
+        fields.set(name, line.slice(separator + 2))
+      }
+      const eventName = fields.get('event')
+      const data = fields.get('data')
+      if (eventName === undefined || data === undefined) {
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+      let payload: unknown
+      try {
+        payload = JSON.parse(data) as unknown
+      } catch {
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+      if (eventName === 'resync-required') {
+        if (fields.size !== 2 || fields.has('id')) {
+          throw new SidecarClientError('job_event_stream_failed')
+        }
+        throw parseJobStreamFailure(payload)
+      }
+      const id = fields.get('id')
+      if (fields.size !== 3 || id === undefined || !/^[1-9][0-9]{0,9}$/.test(id)) {
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+      const result = parseJobEventResult({
+        ok: true,
+        protocolVersion: DESKTOP_PROTOCOL_VERSION,
+        data: payload,
+      })
+      if (!result.ok || result.data === undefined
+        || result.data.kind !== eventName
+        || result.data.snapshot.job_id !== subscription.job_id
+        || result.data.sequence !== Number(id)
+        || result.data.sequence <= lastSequence) {
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+      lastSequence = result.data.sequence
+      terminalSeen = result.data.kind === 'terminal'
+      listener(result.data)
+      if (!settled) resetInactivityDeadline()
+    }
+
+    const processBuffer = (final = false) => {
+      buffer = buffer.replaceAll('\r\n', '\n')
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_RESPONSE_BYTES || buffer.includes('\r')) {
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        if (frame.length > 0) processFrame(frame)
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (final && buffer.length > 0) throw new SidecarClientError('job_event_stream_failed')
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${sidecar.bearerToken}`,
+      Connection: 'close',
+      Host: `${sidecar.host}:${sidecar.port}`,
+      'X-Ancestry-API-Version': sidecar.contract,
+      'X-Ancestry-App-Build': sidecar.appBuild,
+    }
+    if (subscription.after > 0) headers['Last-Event-ID'] = String(subscription.after)
+    const request = httpRequest({
+      hostname: sidecar.host,
+      port: sidecar.port,
+      path,
+      method: 'GET',
+      headers,
+    }, (response) => {
+      responseStream = response
+      const contentType = Array.isArray(response.headers['content-type'])
+        ? (response.headers['content-type'][0] ?? '')
+        : (response.headers['content-type'] ?? '')
+      if (response.statusCode !== 200 || !/^text\/event-stream(?:\s*;|$)/i.test(contentType)) {
+        const chunks: Buffer[] = []
+        let bytes = 0
+        response.on('data', (chunk: Buffer | string) => {
+          const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          bytes += value.length
+          if (bytes > MAX_RESPONSE_BYTES) {
+            failStream(new SidecarClientError('invalid_response'))
+            return
+          }
+          chunks.push(value)
+        })
+        response.on('end', () => {
+          if (settled) return
+          rejectOnce(jobFailure({
+            statusCode: response.statusCode ?? 0,
+            contentType,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }))
+        })
+        response.on('error', rejectOnce)
+        return
+      }
+      resetInactivityDeadline()
+      response.on('data', (chunk: Buffer | string) => {
+        if (settled) return
+        try {
+          buffer += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          processBuffer()
+        } catch (error) {
+          failStream(error instanceof SidecarClientError
+            ? error
+            : new SidecarClientError('job_event_stream_failed'))
+        }
+      })
+      response.on('end', () => {
+        if (settled) return
+        try {
+          buffer += decoder.end()
+          processBuffer(true)
+          resolveOnce()
+        } catch (error) {
+          rejectOnce(error)
+        }
+      })
+      response.on('error', rejectOnce)
+    })
+    request.on('error', rejectOnce)
+    resetDeadline(REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    request.end()
+  })
+}
+
+/**
+ * Streams a single authenticated chat-event route while enforcing bounded
+ * framing, monotonic cursors, backpressure, cancellation, and terminal state.
+ */
+function streamFixedChatEvents(
+  sidecar: Readonly<AuthenticatedSidecarSession>,
+  subscription: Readonly<ChatEventStreamRequest>,
+  listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+  inactivityTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new SidecarClientError('cancelled'))
+      return
+    }
+    if (subscription.schema_version !== 1
+      || !Number.isSafeInteger(subscription.after)
+      || subscription.after < 0) {
+      reject(new SidecarClientError('chat_stream_cursor_invalid'))
+      return
+    }
+
+    const path = chatStreamPath(subscription.session_id, subscription.run_id, '/events')
+    let responseStream: IncomingMessage | undefined
+    let settled = false
+    let paused = false
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let buffer = ''
+    let lastSequence = subscription.after
+    let terminalSeen = false
+    const decoder = new StringDecoder('utf8')
+
+    const cleanup = () => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
+    }
+    const resolveOnce = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+    const rejectOnce = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error instanceof SidecarClientError
+        ? error
+        : new SidecarClientError('chat_event_stream_failed'))
+    }
+    const abort = () => {
+      const error = new SidecarClientError('cancelled')
+      responseStream?.destroy(error)
+      request.destroy(error)
+      rejectOnce(error)
+    }
+    const failStream = (error: SidecarClientError) => {
+      rejectOnce(error)
+      responseStream?.destroy()
+      request.destroy()
+    }
+    const resetDeadline = (timeoutMs: number) => {
+      if (deadline !== undefined) clearTimeout(deadline)
+      deadline = setTimeout(() => {
+        failStream(new SidecarClientError('chat_event_stream_interrupted'))
+      }, timeoutMs)
+    }
+    const resetInactivityDeadline = () => resetDeadline(inactivityTimeoutMs)
+    const flow = Object.freeze<ChatEventFlowControl>({
+      pause() {
+        if (settled || paused || responseStream === undefined) return
+        paused = true
+        if (deadline !== undefined) clearTimeout(deadline)
+        responseStream.pause()
+      },
+      resume() {
+        if (settled || !paused || responseStream === undefined) return
+        paused = false
+        try {
+          processBuffer()
+          if (settled || paused) return
+          resetInactivityDeadline()
+          responseStream.resume()
+        } catch (error) {
+          failStream(error instanceof SidecarClientError
+            ? error
+            : new SidecarClientError('chat_event_stream_failed'))
+        }
+      },
+    })
+
+    const processFrame = (frame: string) => {
+      const lines = frame.split('\n')
+      if (lines.every((line) => line.startsWith(':'))) {
+        resetInactivityDeadline()
+        return
+      }
+      if (terminalSeen) throw new SidecarClientError('chat_event_stream_failed')
+      const fields = new Map<string, string>()
+      for (const line of lines) {
+        const separator = line.indexOf(': ')
+        if (separator <= 0) throw new SidecarClientError('chat_event_stream_failed')
+        const name = line.slice(0, separator)
+        if (!['id', 'event', 'data'].includes(name) || fields.has(name)) {
+          throw new SidecarClientError('chat_event_stream_failed')
+        }
+        fields.set(name, line.slice(separator + 2))
+      }
+      const id = fields.get('id')
+      const eventName = fields.get('event')
+      const data = fields.get('data')
+      if (fields.size !== 3 || id === undefined || eventName === undefined || data === undefined
+        || !/^[1-9][0-9]{0,15}$/.test(id)) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      let payload: unknown
+      try {
+        payload = JSON.parse(data) as unknown
+      } catch {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      const result = parseChatEventResult({
+        ok: true,
+        protocolVersion: DESKTOP_PROTOCOL_VERSION,
+        data: payload,
+      })
+      const sequence = Number(id)
+      if (!Number.isSafeInteger(sequence)
+        || !result.ok
+        || result.data === undefined
+        || result.data.type !== eventName
+        || result.data.run_id !== subscription.run_id
+        || result.data.sequence !== sequence
+        || result.data.sequence !== lastSequence + 1) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      lastSequence = result.data.sequence
+      terminalSeen = ['completed', 'interrupted', 'failed'].includes(result.data.type)
+      listener(result.data, flow)
+      if (!settled) resetInactivityDeadline()
+    }
+
+    const processBuffer = (final = false) => {
+      buffer = buffer.replaceAll('\r\n', '\n')
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_RESPONSE_BYTES || buffer.includes('\r')) {
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0 && !paused) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        if (frame.length > 0) processFrame(frame)
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (final && buffer.length > 0) throw new SidecarClientError('chat_event_stream_failed')
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${sidecar.bearerToken}`,
+      Connection: 'close',
+      Host: `${sidecar.host}:${sidecar.port}`,
+      'X-Ancestry-API-Version': sidecar.contract,
+      'X-Ancestry-App-Build': sidecar.appBuild,
+    }
+    if (subscription.after > 0) headers['Last-Event-ID'] = String(subscription.after)
+    const request = httpRequest({
+      hostname: sidecar.host,
+      port: sidecar.port,
+      path,
+      method: 'GET',
+      headers,
+    }, (response) => {
+      responseStream = response
+      const contentType = Array.isArray(response.headers['content-type'])
+        ? (response.headers['content-type'][0] ?? '')
+        : (response.headers['content-type'] ?? '')
+      if (response.statusCode === 200
+        && !/^text\/event-stream(?:\s*;|$)/i.test(contentType)) {
+        failStream(new SidecarClientError('chat_event_stream_failed'))
+        return
+      }
+      if (response.statusCode !== 200) {
+        const chunks: Buffer[] = []
+        let bytes = 0
+        response.on('data', (chunk: Buffer | string) => {
+          const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          bytes += value.length
+          if (bytes > MAX_RESPONSE_BYTES) {
+            failStream(new SidecarClientError('chat_event_stream_failed'))
+            return
+          }
+          chunks.push(value)
+        })
+        response.on('end', () => {
+          if (settled) return
+          rejectOnce(chatFailure({
+            statusCode: response.statusCode ?? 0,
+            contentType,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }))
+        })
+        response.on('error', rejectOnce)
+        return
+      }
+      resetInactivityDeadline()
+      response.on('data', (chunk: Buffer | string) => {
+        if (settled) return
+        try {
+          buffer += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          processBuffer()
+        } catch (error) {
+          failStream(error instanceof SidecarClientError
+            ? error
+            : new SidecarClientError('chat_event_stream_failed'))
+        }
+      })
+      response.on('end', () => {
+        if (settled) return
+        try {
+          buffer += decoder.end()
+          processBuffer(true)
+          if (!terminalSeen) throw new SidecarClientError('chat_event_stream_interrupted')
+          resolveOnce()
+        } catch (error) {
+          rejectOnce(error)
+        }
+      })
+      response.on('error', () => rejectOnce(new SidecarClientError('chat_event_stream_interrupted')))
+    })
+    request.on('error', () => rejectOnce(new SidecarClientError('chat_event_stream_interrupted')))
+    resetDeadline(REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    request.end()
+  })
+}
+
+function parseJobShutdownAssessment(
+  response: Readonly<SidecarHttpResponse>,
+): Readonly<JobShutdownAssessment> {
+  if (!validJsonResponse(response)) throw new SidecarClientError('invalid_response')
+  try {
+    const payload = JSON.parse(response.body) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      throw new SidecarClientError('invalid_response')
+    }
+    const record = payload as Readonly<Record<string, unknown>>
+    const keys = Object.keys(record).sort()
+    if (keys.length !== 3
+      || keys[0] !== 'active_jobs'
+      || keys[1] !== 'safe_to_quit'
+      || keys[2] !== 'schema_version'
+      || record.schema_version !== 1
+      || record.safe_to_quit !== true
+      || !Array.isArray(record.active_jobs)
+      || record.active_jobs.length !== 0) {
+      throw new SidecarClientError('invalid_response')
+    }
+    return Object.freeze({
+      schema_version: 1,
+      safe_to_quit: true,
+      active_jobs: Object.freeze([] as const),
+    })
+  } catch (error) {
+    if (error instanceof SidecarClientError) throw error
+    throw new SidecarClientError('invalid_response')
+  }
+}
+
+/** Binds read-only intake to the current native session and validated opaque identities. */
+export function createGedcomIntakeClient(dependencies: Readonly<{
   session(): Readonly<AuthenticatedSidecarSession> | undefined
   request?: SidecarRequest
-}>): Readonly<{ getCapabilities(): Promise<CapabilityManifest> }> {
+}>): Readonly<GedcomIntakeClient> {
+  const transport = dependencies.request ?? requestFixedRoute
+  const perform = async <T>(path: SidecarPath,
+    parser: (value: unknown) => { ok: boolean; data?: Readonly<T> },
+    signal?: AbortSignal, options?: SidecarRequestOptions): Promise<Readonly<T>> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      const response = await transport(session, path, signal, options)
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (response.statusCode !== 200) throw gedcomFailure(response)
+      return parseJson(response, parser)
+    } catch (cause) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (cause instanceof SidecarClientError) throw cause
+      throw new SidecarClientError('request_failed')
+    }
+  }
+  const jobPath = (jobId: string): `/api/v1/gedcom/intake/${string}` =>
+    `${GEDCOM_INTAKE_PATH}/${parseJobRequest({ schema_version: 1, job_id: jobId }).job_id}`
+  return Object.freeze<GedcomIntakeClient>({
+    async submit(request) {
+      return perform(GEDCOM_INTAKE_PATH, parseJobSnapshotResult, undefined,
+        { method: 'POST', body: JSON.stringify(request) })
+    },
+    async result(jobId, signal) {
+      return perform(jobPath(jobId), parseGedcomInspectionResult, signal)
+    },
+    async roots(input, signal) {
+      const { job_id, query, limit, cursor } = parseGedcomRootQuery(input)
+      return perform(`${jobPath(job_id)}/roots`, parseGedcomRootPageResult, signal,
+        { method: 'POST', body: JSON.stringify({ query, limit, cursor }) })
+    },
+    async discard(jobId) {
+      return perform(`${jobPath(jobId)}/discard`, parseGedcomDiscardResult,
+        undefined, { method: 'POST' })
+    },
+  })
+}
+
+/**
+ * Binds the typed client to a current authenticated session and fixed-route transport.
+ *
+ * The client applies request cancellation, response schema checks, stable error mapping, and
+ * bounded inactivity deadlines before returning data to main-process callers.
+ */
+export function createSidecarClient(dependencies: Readonly<{
+  session(): Readonly<AuthenticatedSidecarSession> | undefined
+  request?: SidecarRequest
+  jobEventInactivityTimeoutMs?: number
+  chatEventInactivityTimeoutMs?: number
+}>): Readonly<SidecarClient> {
+  const jobEventInactivityTimeoutMs = dependencies.jobEventInactivityTimeoutMs
+    ?? JOB_EVENT_INACTIVITY_TIMEOUT_MS
+  if (!Number.isFinite(jobEventInactivityTimeoutMs) || jobEventInactivityTimeoutMs <= 0) {
+    throw new Error('Job event inactivity timeout must be positive.')
+  }
+  const chatEventInactivityTimeoutMs = dependencies.chatEventInactivityTimeoutMs
+    ?? CHAT_EVENT_INACTIVITY_TIMEOUT_MS
+  if (!Number.isFinite(chatEventInactivityTimeoutMs) || chatEventInactivityTimeoutMs <= 0) {
+    throw new Error('Chat event inactivity timeout must be positive.')
+  }
   const request = dependencies.request ?? requestFixedRoute
+  const perform = async (
+    path: SidecarPath,
+    signal?: AbortSignal,
+    options?: Readonly<SidecarRequestOptions>,
+  ): Promise<SidecarHttpResponse> => {
+    if (signal?.aborted) throw new SidecarClientError('cancelled')
+    const session = dependencies.session()
+    if (!session) throw new SidecarClientError('unavailable')
+    try {
+      const response = options === undefined
+        ? await request(session, path, signal)
+        : await request(session, path, signal, options)
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      return response
+    } catch (error) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      if (error instanceof SidecarClientError) throw error
+      throw new SidecarClientError('request_failed')
+    }
+  }
+
   return Object.freeze({
-    async getCapabilities() {
-      const session = dependencies.session()
-      if (!session) throw new SidecarClientError('unavailable')
-      let response: SidecarHttpResponse
+    async getStartupDiagnostics(signal?: AbortSignal) {
+      const response = await perform(STARTUP_DIAGNOSTICS_PATH, signal)
+      if (response.statusCode !== 200) throw new SidecarClientError('invalid_response')
+      if (!validJsonResponse(response)) throw new SidecarClientError('invalid_response')
       try {
-        response = await request(session, CAPABILITIES_PATH)
-      } catch (error) {
-        if (error instanceof SidecarClientError) throw error
-        throw new SidecarClientError('request_failed')
-      }
-      if (response.statusCode !== 200 || !/^application\/json(?:\s*;|$)/i.test(response.contentType)
-        || Buffer.byteLength(response.body, 'utf8') > MAX_RESPONSE_BYTES) {
-        throw new SidecarClientError('invalid_response')
-      }
-      try {
-        const result = parseCapabilitiesResult({
-          ok: true,
-          protocolVersion: DESKTOP_PROTOCOL_VERSION,
-          data: JSON.parse(response.body) as unknown,
-        })
-        if (!result.ok) throw new SidecarClientError('invalid_response')
-        return result.data
+        return parseStartupDiagnosticReport(JSON.parse(response.body) as unknown)
       } catch {
         throw new SidecarClientError('invalid_response')
       }
     },
+    async getCapabilities(signal?: AbortSignal) {
+      const response = await perform(CAPABILITIES_PATH, signal)
+      if (response.statusCode !== 200) throw new SidecarClientError('invalid_response')
+      return parseJson(response, parseCapabilitiesResult)
+    },
+    async getSettings(signal?: AbortSignal) {
+      const response = await perform(SETTINGS_PATH, signal)
+      if (response.statusCode !== 200) throw settingsFailure(response.statusCode)
+      return parseJson(response, parseSettingsResult)
+    },
+    async updateSettings(update: ApplicationSettingsPatch, signal?: AbortSignal) {
+      const response = await perform(SETTINGS_PATH, signal, {
+        method: 'PATCH',
+        body: JSON.stringify(update),
+      })
+      if (response.statusCode !== 200) throw settingsFailure(response.statusCode)
+      return parseJson(response, parseSettingsResult)
+    },
+    async getSecretStatus(secret: SecretReferenceRequest, signal?: AbortSignal) {
+      const response = await perform(secretPath(secret.reference, 'status'), signal)
+      if (response.statusCode !== 200) throw secretFailure(response.statusCode)
+      return parseJson(response, parseSecretStatusResult)
+    },
+    async setSecret(secret: SecretSetRequest, signal?: AbortSignal) {
+      const response = await perform(secretPath(secret.reference, 'set'), signal, {
+        method: 'POST',
+        body: JSON.stringify({ value: secret.value }),
+      })
+      if (response.statusCode !== 200) throw secretFailure(response.statusCode)
+      return parseJson(response, parseSecretStatusResult)
+    },
+    async deleteSecret(secret: SecretReferenceRequest, signal?: AbortSignal) {
+      const response = await perform(secretPath(secret.reference, 'delete'), signal, {
+        method: 'POST',
+      })
+      if (response.statusCode !== 200) throw secretFailure(response.statusCode)
+      return parseJson(response, parseSecretStatusResult)
+    },
+    async getProviderConfiguration(signal?: AbortSignal) {
+      const response = await perform(PROVIDER_CONFIGURATION_PATH, signal)
+      if (response.statusCode !== 200) throw providerFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async createProviderProfile(profile: ProviderProfileCreateRequest, signal?: AbortSignal) {
+      const response = await perform(PROVIDER_PROFILES_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(profile),
+      })
+      if (response.statusCode !== 200) throw providerFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async validateProviderEndpoint(
+      endpoint: ProviderEndpointValidationRequest,
+      signal?: AbortSignal,
+    ) {
+      const response = await perform(PROVIDER_ENDPOINT_VALIDATION_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(endpoint),
+      })
+      if (response.statusCode !== 200) throw endpointFailure(response)
+      return parseJson(response, parseProviderEndpointValidationResult)
+    },
+    async previewConsent(consent: ConsentPreviewRequest, signal?: AbortSignal) {
+      const response = await perform(CONSENT_PREVIEW_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(consent),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseConsentPreviewResult)
+    },
+    async createConsent(consent: ConsentCreateRequest, signal?: AbortSignal) {
+      const response = await perform(CONSENTS_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(consent),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async revokeConsent(consent: ConsentRevokeRequest, signal?: AbortSignal) {
+      const response = await perform(consentRevokePath(consent.name), signal, {
+        method: 'POST',
+        body: JSON.stringify({
+          schema_version: consent.schema_version,
+          expected_revision: consent.expected_revision,
+        }),
+      })
+      if (response.statusCode !== 200) throw consentFailure(response)
+      return parseJson(response, parseProviderConfigurationResult)
+    },
+    async prepareJobShutdown(action: JobShutdownAction, signal?: AbortSignal) {
+      const response = await perform(JOB_SHUTDOWN_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify({ schema_version: 1, action, timeout_seconds: 2 }),
+      })
+      if (response.statusCode !== 200) throw new SidecarClientError('request_failed')
+      return parseJobShutdownAssessment(response)
+    },
+    async listJobs(signal?: AbortSignal) {
+      const response = await perform(JOBS_PATH, signal)
+      if (response.statusCode !== 200) throw jobFailure(response)
+      return parseJson(response, parseJobListResult)
+    },
+    async getJob(job: JobRequest, signal?: AbortSignal) {
+      const response = await perform(jobPath(job.job_id), signal)
+      if (response.statusCode !== 200) throw jobFailure(response)
+      return parseJson(response, parseJobSnapshotResult)
+    },
+    async cancelJob(job: JobRequest, signal?: AbortSignal) {
+      const response = await perform(jobPath(job.job_id, '/cancel'), signal, { method: 'POST' })
+      if (response.statusCode !== 200) throw jobFailure(response)
+      return parseJson(response, parseJobSnapshotResult)
+    },
+    async streamJobEvents(
+      subscription: JobEventSubscriptionRequest,
+      listener: (event: Readonly<JobEvent>) => void,
+      signal?: AbortSignal,
+    ) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      const session = dependencies.session()
+      if (!session) throw new SidecarClientError('unavailable')
+      try {
+        await streamFixedJobEvents(
+          session,
+          subscription,
+          listener,
+          jobEventInactivityTimeoutMs,
+          signal,
+        )
+      } catch (error) {
+        if (signal?.aborted) throw new SidecarClientError('cancelled')
+        if (error instanceof SidecarClientError) throw error
+        throw new SidecarClientError('job_event_stream_failed')
+      }
+    },
+    async getChatCapability(signal?: AbortSignal) {
+      const response = await perform(CHAT_CAPABILITY_PATH, signal)
+      if (response.statusCode !== 200) throw chatSessionFailure(response)
+      return parseJson(response, parseChatCapabilityResult)
+    },
+    async createChatSession(chat: ChatSessionCreateRequest, signal?: AbortSignal) {
+      const response = await perform(CHAT_SESSIONS_PATH, signal, {
+        method: 'POST',
+        body: JSON.stringify(chat),
+      })
+      if (response.statusCode !== 200) throw chatSessionFailure(response)
+      return parseJson(response, parseChatSessionResult)
+    },
+    async closeChatSession(chat: ChatSessionRequest, signal?: AbortSignal) {
+      const response = await perform(chatSessionPath(chat.session_id), signal, {
+        method: 'DELETE',
+      })
+      if (response.statusCode !== 204) throw chatSessionFailure(response)
+      if (response.body !== '') throw new SidecarClientError('invalid_response')
+      return Object.freeze({
+        schema_version: 1,
+        session_id: chat.session_id,
+        closed: true,
+      })
+    },
+    async startChatStream(chat: ChatStreamStartRequest, signal?: AbortSignal) {
+      const response = await perform(chatStreamPath(chat.session_id), signal, {
+        method: 'POST',
+        body: JSON.stringify({
+          schema_version: chat.schema_version,
+          message: chat.message,
+          max_output_tokens: chat.max_output_tokens,
+          temperature: chat.temperature,
+          timeout_seconds: chat.timeout_seconds,
+          max_safe_retries: chat.max_safe_retries,
+        }),
+      })
+      if (response.statusCode !== 200) throw chatFailure(response)
+      return parseJson(response, parseChatStreamRunResult)
+    },
+    async cancelChatStream(chat: ChatStreamCancelRequest, signal?: AbortSignal) {
+      const response = await perform(
+        chatStreamPath(chat.session_id, chat.run_id, '/cancel'),
+        signal,
+        { method: 'POST' },
+      )
+      if (response.statusCode !== 200) throw chatFailure(response)
+      return parseJson(response, parseChatStreamRunResult)
+    },
+    async streamChatEvents(
+      subscription: ChatEventStreamRequest,
+      listener: (event: Readonly<ChatEvent>, flow: Readonly<ChatEventFlowControl>) => void,
+      signal?: AbortSignal,
+    ) {
+      if (signal?.aborted) throw new SidecarClientError('cancelled')
+      const session = dependencies.session()
+      if (!session) throw new SidecarClientError('unavailable')
+      try {
+        await streamFixedChatEvents(
+          session,
+          subscription,
+          listener,
+          chatEventInactivityTimeoutMs,
+          signal,
+        )
+      } catch (error) {
+        if (signal?.aborted) throw new SidecarClientError('cancelled')
+        if (error instanceof SidecarClientError) throw error
+        throw new SidecarClientError('chat_event_stream_failed')
+      }
+    },
   })
+}
+
+/** Backwards-compatible factory for the full authenticated sidecar client contract. */
+export function createSidecarCapabilitiesClient(dependencies: Readonly<{
+  session(): Readonly<AuthenticatedSidecarSession> | undefined
+  request?: SidecarRequest
+  jobEventInactivityTimeoutMs?: number
+  chatEventInactivityTimeoutMs?: number
+}>): Readonly<SidecarClient> {
+  return createSidecarClient(dependencies)
 }

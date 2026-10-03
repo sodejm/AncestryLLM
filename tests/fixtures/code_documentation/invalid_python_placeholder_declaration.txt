@@ -1,0 +1,6 @@
+"""Exercises invalid Python declaration documentation."""
+
+
+def main() -> int:
+    """TODO: documentation placeholder."""
+    return 0

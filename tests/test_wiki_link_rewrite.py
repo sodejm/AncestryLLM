@@ -22,6 +22,32 @@ def test_local_markdown_links_use_wiki_page_targets() -> None:
     )
 
 
+def test_soft_wrapped_link_labels_use_wiki_page_targets() -> None:
+    markdown = "[Dependency\nmaintenance](DEPENDENCY_MAINTENANCE.md)\n"
+
+    assert wiki_links.rewrite_wiki_links(markdown) == (
+        "[Dependency\nmaintenance](DEPENDENCY_MAINTENANCE)\n"
+    )
+
+
+def test_link_parsing_stops_at_blank_line_block_boundaries() -> None:
+    markdown = (
+        "[literal\n\n"
+        "text](Missing.md)\n\n"
+        "`unclosed code span\n\n"
+        "[Guide](Guide.md)\n\n"
+        "closing backtick`\n"
+    )
+
+    assert wiki_links.rewrite_wiki_links(markdown) == (
+        "[literal\n\n"
+        "text](Missing.md)\n\n"
+        "`unclosed code span\n\n"
+        "[Guide](Guide)\n\n"
+        "closing backtick`\n"
+    )
+
+
 def test_non_page_targets_are_preserved() -> None:
     markdown = (
         "[External](https://example.com/Guide.md)\n"
@@ -36,6 +62,7 @@ def test_non_page_targets_are_preserved() -> None:
 def test_code_examples_are_preserved() -> None:
     markdown = (
         "Use `[Guide](Guide.md)` as the source form.\n"
+        "Use `[Dependency\nmaintenance](DEPENDENCY_MAINTENANCE.md)` across lines.\n"
         "```markdown\n"
         "[Guide](Guide.md)\n"
         "```\n"
@@ -44,11 +71,18 @@ def test_code_examples_are_preserved() -> None:
 
     assert wiki_links.rewrite_wiki_links(markdown) == (
         "Use `[Guide](Guide.md)` as the source form.\n"
+        "Use `[Dependency\nmaintenance](DEPENDENCY_MAINTENANCE.md)` across lines.\n"
         "```markdown\n"
         "[Guide](Guide.md)\n"
         "```\n"
         "Navigate with [Guide](Guide).\n"
     )
+
+
+def test_unmatched_label_cannot_capture_link_example_in_inline_code() -> None:
+    markdown = "See [this literal `[Guide](Guide.md)` as an example.\n"
+
+    assert wiki_links.rewrite_wiki_links(markdown) == markdown
 
 
 def test_directory_rewrite_updates_only_regular_markdown_pages(tmp_path: Path) -> None:

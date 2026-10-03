@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "fixture_id": "success",
+  "state": "success",
+  "provider": "none",
+  "network": "disabled",
+  "fictional": true,
+  "content": {
+    "title": "Home",
+    "status": "Ready",
+    "prompt": "",
+    "response": "Local desktop shell",
+    "detail": "No control capabilities are currently available."
+  },
+  "privacy_canaries": []
+}

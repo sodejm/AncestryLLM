@@ -11,7 +11,7 @@ required local GitHub authentication, trust policy, failure recovery, and
 reviewed update procedure. `make setup` executes
 `uv sync --locked --all-extras --all-groups`; purpose-specific CI jobs may
 synchronize a narrower declared profile before invoking the same canonical Make
-target. See [dependency maintenance](docs/DEPENDENCY_MAINTENANCE.md) for the
+target. See [dependency maintenance](docs/reference/DEPENDENCY_MAINTENANCE.md) for the
 group-to-command contract and lockfile review procedure. Define commands
 through the shared `CommandSpec`, route both terminal adapters through
 `CommandInvocation` and `CommandExecutor`, and put domain logic in services,
@@ -20,8 +20,42 @@ remain independent of Click, prompt-toolkit, Rich, FastAPI/Pydantic, Electron,
 provider SDKs, and host-filesystem objects. New providers implement the common
 contract and mocked timeout/malformed-output/consent/offline tests. New modules
 must be explicit built-ins with one-shot and console parity; follow the
-[module-authoring contract](docs/MODULE_AUTHORING.md) rather than adding a
+[module-authoring contract](docs/reference/MODULE_AUTHORING.md) rather than adding a
 second command registry.
+
+## VS Code workspace
+
+Open `AncestryLLM.code-workspace` with **File > Open Workspace from File**, or run
+`code AncestryLLM.code-workspace` from the checkout. The Explorer gives each
+tracked top-level directory a descriptive name, including **Python Application**,
+**Electron Desktop**, **Tests and Fixtures**, and **Documentation**. **Repository**
+retains the complete tree and top-level files; these display names do not rename
+directories on disk. Opening the repository folder alone remains supported.
+
+Install the recommended extensions when VS Code prompts. Use **Tasks: Run Task**
+to run **Setup: Python environment**, then select the checkout's `.venv` through
+**Python: Select Interpreter** if an older interpreter selection is still saved.
+The default interpreter setting works with both Unix and Windows virtual
+environments. Repository Make tasks require `make` and the shell/tool prerequisites
+used by the Makefile; on Windows, use VS Code with WSL for those tasks.
+
+The workspace discovers Python tests only under **Repository**, avoiding duplicate
+Test Explorer entries from the additional folder roots. **Tasks: Run Test Task**
+runs the canonical Python suite, while **Tasks: Run Build Task** runs the desktop
+checks and build. The task menu also includes lint, type checking, security,
+all pre-push gates, and the interactive console. For desktop development, run
+**Setup: desktop dependencies** before **Desktop: development server**; stop the
+server with Ctrl+C in its task terminal. These tasks use the same checked-in
+commands as terminal development and do not run automatically when opening the
+workspace.
+
+In **Run and Debug**, select the Python interactive console, CLI help, or current
+pytest file configuration and press F5. Open a Python test file before using the
+pytest configuration. Debugging uses the repository's `.venv` and working
+directory. Python editing follows the project's Ruff configuration and 100-column
+ruler. Generated dependencies and caches are excluded from routine Explorer and
+search views. The Python extension and debug configurations do not load a local
+`.env` file; use the project's keyring and explicit provider-consent workflow.
 
 ## GitHub Flow branch strategy
 
@@ -57,6 +91,40 @@ branch and remove its clean local worktree when its commits are safely
 reachable; preserve branches with unmerged or graph-unique work for explicit
 follow-up.
 
+### Codex pull-request review
+
+Use the repository-local
+[`code-review` skill](.agents/skills/code-review/SKILL.md) only after GitHub
+confirms that the pull request is non-draft. Before invoking it, the trusted
+delivery driver records the base branch and recorded base SHA, then loads the
+applicable repository guidance and skill from that commit rather than the
+untrusted pull-request head. It requests Codex review for one immutable target
+comprising the base branch, base SHA, merge-base SHA, and head SHA; reuses only
+a successful result from the expected Codex integration identity that is tied
+to the exact trusted review-request comment and target; and trusts a
+`BASE_BRANCH@BASE_SHA..HEAD_SHA` duplicate-prevention marker only when it was
+posted by the authenticated workflow actor. Before every review-related write,
+the live values must still match that target. Draft, changed, unknown, or
+unrefreshable state fails closed, and the workflow never marks a pull request
+ready on a human's behalf.
+
+The skill preserves the repository's Codex-only policy: it does not request a
+second review provider or hand implementation to another coding agent. It
+revalidates every exact-target Codex finding, including one already marked
+resolved, and deduplicates findings by root cause. It treats resolution status
+as untrusted input: verify who resolved it and why, then verify the exact-target
+evidence before honoring a prior resolution. A prior resolution is honored only
+when the authenticated delivery actor made it after a supported tested fix or an
+appropriate human or private-security decision authorizes the disposition.
+Supported findings are resolved only after a tested fix; ambiguous,
+unsupported, stale, or security-sensitive findings remain open until the
+appropriate human decision or private process authorizes resolution. A terminal
+Codex result ends only its review stream; polling continues until both the
+Codex result and required checks are terminal, followed by a final thread
+refresh, or until the five-minute deadline. An explicitly unsuccessful Codex
+result or non-successful required check, including a failure or cancellation,
+blocks delivery.
+
 ## Test-driven development
 
 Every behavioral change starts from a testable acceptance criterion and follows
@@ -87,10 +155,31 @@ record the initial expected failure as evidence rather than committing a
 deliberately failing test.
 
 Before a pull request run
-`make test lint typecheck security sbom package workflow-audit`. Describe
+`make test code-docs-check lint typecheck security sbom package workflow-audit`. Describe
 scope, privacy impact, threat-model changes, migration impact, and exact test
 evidence. Do not commit real GEDCOM, RootsMagic, database, backup, report, log,
 prompt/response, secrets, or person details; use clearly fictional fixtures.
+
+Release-quality work additionally follows the versioned contract in
+`config/release-quality-policy-v1.json`. It assigns the QA, security,
+performance, and diagnostics families to named owners and is the authoritative
+inventory of their commands, pinned tool versions, desktop coverage policy,
+receipt gates, performance ceilings, diagnostic canary, and bounded
+exceptions. Run the listed desktop commands through the checked-in pnpm
+lockfile; do not substitute a locally convenient tool version or edit generated
+evidence. Local results support review, but only the hosted verifier can bind
+the two required workflow artifacts and their policy digest to the exact pull
+request or release commit.
+
+Changes to the OCI or Compose topology also run `make container-policy` and
+the focused container contract tests. Native lifecycle evidence must be
+produced on a matching Linux architecture: CI builds and runs both gateway and
+worker images independently on hosted Linux amd64 and arm64 runners without
+QEMU. An emulated build is useful for development but is not native-platform
+release evidence. The checked-in topology is validation-only until its
+separate authentication and encrypted-persistence dependencies ship; do not
+add application routes, provider access, writable genealogy data, published
+ports, host paths, secrets, or schema migrations while that boundary remains.
 
 Releases follow [the release runbook](docs/RELEASING.md). Never publish from a
 workstation, use a long-lived package-index token, move a published tag, or
@@ -105,16 +194,31 @@ the same Make target without changing the command or its flags. The verified
 bootstrap supplies `uv`; do not add `uv` to a dependency group, install it with
 `pip`, use `uvx` or `uv run --with`, or enable Python downloads.
 
+During the 0.6 advisory period, `make typecheck` remains the authoritative
+strict-mypy gate with the Pydantic plugin. `make typecheck-ty` runs exact
+`ty 0.0.69` across the same complete source tree and preserves its real status;
+CI exposes that result in a separate nonblocking step. See the
+[ty advisory evaluation](docs/reference/TY_ADVISORY_EVALUATION.md) before interpreting
+its diagnostics or proposing the separately gated 0.7 cutover.
+
+The checked-in VS Code profile recommends `charliermarsh.ruff` for Python
+linting and formatting and `ms-python.mypy-type-checker` for the authoritative
+type check. It reads project configuration from `pyproject.toml`, disables
+unsafe automatic fixes, and does not automatically load `.env`. Other editors
+must preserve the same Ruff, strict-mypy, and secret-loading boundaries.
+
 GEDCOM changes must preserve citations, custom/vendor structures, pointers,
 families, conflicts, and conservative removal invariants. RootsMagic fixtures
 must be synthetic and source files must remain hash-identical after tests.
 
 ## Secure desktop development
 
-The current 0.3.0 runtime has no FastAPI routes, Electron application, renderer,
-preload bridge, or desktop package. Those components are later-roadmap adapters
-that must consume the existing application-service surface without redefining
-command or genealogy behavior.
+The bounded 0.6.0 release includes authenticated FastAPI health and capability
+routes plus an Electron shell, renderer, preload bridge, and unpublished
+package-verification path. Source-level gated Issue #103 adds opaque native
+file-grant mediation, but it does not add domain API routes, parser workers, or
+end-user file workflows. Later adapters must consume the existing
+application-service surface without redefining command or genealogy behavior.
 
 Desktop work is governed by
 [`docs/ADR-0025-electron-fastapi-desktop.md`](docs/ADR-0025-electron-fastapi-desktop.md)
@@ -140,6 +244,21 @@ Vite environment values. Privileged IPC, sidecar routes, file grants, secrets,
 events, plugins, and update paths must use strict versioned DTOs, size limits,
 deny-by-default behavior, and the negative tests named by the threat ledger.
 
+Treat model text as hostile display data. Chat presentation must use the closed
+CommonMark/GFM component allowlist and must not add `innerHTML`, `rehype-raw`,
+raw HTML, remote images, embeds, implicit autolinks, executable model actions,
+`window.open`, or HTML clipboard content. External HTTPS links must display the
+normalized destination and use the fixed Electron-Main confirmation action;
+copy is plain text only. Keep renderer conversation state owner-scoped, bounded,
+transient, replay-safe, and cleared during teardown.
+
+Renderer file selection must use the opaque grant broker, never user-supplied
+or returned paths. Grant DTOs remain path-free; Electron main owns native
+dialogs, the path map, lifecycle revocation, and trusted internal resolution. A
+future Python adapter must reopen and revalidate an internally resolved path
+through the shared bounded file-ingress policy. No renderer may redeem a grant
+or call a direct filesystem API.
+
 Desktop pull requests run all applicable Python and desktop format, lint,
 strict type, unit, contract, integration, and packaged tests plus Semgrep,
 CodeQL, secret scanning, dependency audit, lockfile review, and SBOM
@@ -162,6 +281,25 @@ staging copy and Wiki synchronization generates the managed Wiki pages; neither
 output must be copied back into the repository or included in a pull request.
 Removing a source page from `docs/` means its managed Wiki page will also be
 removed by synchronization.
+
+From a clean committed head, run `make docs-cutover` before publication. The
+offline gate stages Pages and the flat Wiki twice, proves deterministic and
+idempotent output, rejects tracked, untracked, or ignored publishing inputs that
+differ from the reported exact 40-character source revision, and checks that
+every external-link exception is present, owned, reasoned, and unexpired.
+It does not contact Pages, the Wiki, or external sites, so successful local or
+pull-request evidence does not replace the required post-merge hosted checks.
+
+Documentation screenshots are source-controlled publication assets. Update the
+shared manifest, every owning Markdown reference and meaningful alt text, and
+the image together. Run `make docs-screenshots`, visually review all changed
+fictional images, then run `make docs-screenshots-check` twice from a clean tree.
+Check mode must retain no repository changes; a missing capture, changed pixel,
+privacy canary, broken reference, or incomplete platform result is a failure.
+For a maintainer-requested focused regeneration, follow the repository-local
+[documentation screenshot agent workflow](.agents/skills/docs-screenshot-regeneration/SKILL.md).
+It may select one declared scenario or surface, but it still requires the full
+unfiltered drift check and does not grant Git or GitHub write authority.
 
 Do not edit a managed GitHub Wiki page directly. A direct edit is allowed only
 when a documented recovery procedure explicitly requires it; reproduce any

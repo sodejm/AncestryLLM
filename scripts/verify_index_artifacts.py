@@ -24,6 +24,7 @@ def _sha256(path: Path) -> str:
 
 
 def read_checksums(path: Path) -> dict[str, str]:
+    """Parse reviewed release checksums keyed by artifact filename."""
     expected: dict[str, str] = {}
     seen: set[str] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -76,6 +77,7 @@ def verify_index(
     checksums: Path,
     output: Path,
 ) -> None:
+    """Verify index artifacts against reviewed identity and digest policy."""
     expected = read_checksums(checksums)
     payload = _request_json(f"{index.rstrip('/')}/pypi/{project}/{version}/json")
     urls = payload.get("urls")
@@ -124,6 +126,7 @@ def verify_index(
 
 
 def main() -> int:
+    """Run the verify index artifacts command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", required=True)
     parser.add_argument("--project", default="ancestryllm")

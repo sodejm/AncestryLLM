@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
+from ancestryllm.application.results import TableResult
 from ancestryllm.console.parser import ParsedInvocation, parse_repl_invocation, split_repl_input
 from ancestryllm.console.security import is_secret_name
 from ancestryllm.core.commands import (
@@ -15,13 +16,17 @@ from ancestryllm.core.commands import (
     ArgumentAction,
     ArgumentSpec,
 )
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.help import render_action_help, render_command_help, render_root_help
 from ancestryllm.core.modules import ModuleRegistry
 
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
 
-class RouteKind(str, Enum):
+
+class RouteKind(StrEnum):
+    """Enumerate the supported route kind values."""
+
     OUTPUT = "output"
     EXECUTE = "execute"
     EXIT = "exit"
@@ -30,6 +35,8 @@ class RouteKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RouteResult:
+    """Describe how one console input line should be dispatched."""
+
     kind: RouteKind
     value: Any = None
     invocation: ParsedInvocation | None = None
@@ -45,13 +52,16 @@ class SessionRouter:
 
     @property
     def prompt(self) -> str:
+        """Return the prompt label for the current console session mode."""
         return f"ancestry({self.active_module}) > " if self.active_module else "ancestry > "
 
     @property
     def enabled_modules(self) -> tuple[str, ...]:
+        """Return the modules enabled for the current console session."""
         return tuple(item.module_id for item in ModuleRegistry(self.context).descriptors())
 
     def route(self, command: str) -> RouteResult:
+        """Classify one console input line without executing it."""
         return self.route_tokens(split_repl_input(command))
 
     def route_tokens(self, tokens: tuple[str, ...]) -> RouteResult:
@@ -71,12 +81,15 @@ class SessionRouter:
         if control == "help":
             return RouteResult(RouteKind.OUTPUT, self._help(tokens[1:]))
         if control == "modules" and len(tokens) == 1:
+            descriptors = ModuleRegistry(self.context).descriptors()
             return RouteResult(
                 RouteKind.OUTPUT,
-                [
-                    {"module_id": item.module_id, "name": item.name, "summary": item.summary}
-                    for item in ModuleRegistry(self.context).descriptors()
-                ],
+                TableResult(
+                    columns=("module", "enter_command", "description"),
+                    rows=tuple(
+                        (item.name, f"use {item.module_id}", item.summary) for item in descriptors
+                    ),
+                ),
             )
         if control == "use":
             return self._use(tokens)

@@ -1,0 +1,175 @@
+{
+  "evidence_consumer": {
+    "gate": "version-1-security-dependencies",
+    "issue": 131
+  },
+  "iteration_order": [
+    "v0.6",
+    "v0.7",
+    "v0.8",
+    "v0.9",
+    "v1.0"
+  ],
+  "project": {
+    "number": 2,
+    "owner": "sodejm",
+    "title": "AncestryLLM Feature Releases"
+  },
+  "repository": "sodejm/AncestryLLM",
+  "required_dependencies": [
+    {
+      "blocked": 110,
+      "blocked_by": 101
+    },
+    {
+      "blocked": 110,
+      "blocked_by": 102
+    },
+    {
+      "blocked": 110,
+      "blocked_by": 103
+    },
+    {
+      "blocked": 110,
+      "blocked_by": 104
+    },
+    {
+      "blocked": 110,
+      "blocked_by": 105
+    },
+    {
+      "blocked": 111,
+      "blocked_by": 110
+    },
+    {
+      "blocked": 112,
+      "blocked_by": 111
+    },
+    {
+      "blocked": 113,
+      "blocked_by": 111
+    },
+    {
+      "blocked": 132,
+      "blocked_by": 353
+    },
+    {
+      "blocked": 132,
+      "blocked_by": 364
+    },
+    {
+      "blocked": 132,
+      "blocked_by": 365
+    },
+    {
+      "blocked": 348,
+      "blocked_by": 363
+    },
+    {
+      "blocked": 349,
+      "blocked_by": 363
+    },
+    {
+      "blocked": 359,
+      "blocked_by": 132
+    },
+    {
+      "blocked": 360,
+      "blocked_by": 132
+    },
+    {
+      "blocked": 361,
+      "blocked_by": 132
+    },
+    {
+      "blocked": 362,
+      "blocked_by": 132
+    },
+    {
+      "blocked": 363,
+      "blocked_by": 346
+    },
+    {
+      "blocked": 364,
+      "blocked_by": 349
+    },
+    {
+      "blocked": 364,
+      "blocked_by": 350
+    },
+    {
+      "blocked": 364,
+      "blocked_by": 351
+    },
+    {
+      "blocked": 365,
+      "blocked_by": 349
+    },
+    {
+      "blocked": 365,
+      "blocked_by": 350
+    },
+    {
+      "blocked": 365,
+      "blocked_by": 351
+    }
+  ],
+  "required_issues": [
+    {
+      "iteration": "v0.6",
+      "number": 305,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 306,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 307,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 308,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 309,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 310,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.7",
+      "number": 311,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 312,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.6",
+      "number": 363,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.9",
+      "number": 364,
+      "owner": "sodejm"
+    },
+    {
+      "iteration": "v0.9",
+      "number": 365,
+      "owner": "sodejm"
+    }
+  ],
+  "schema_version": 1
+}

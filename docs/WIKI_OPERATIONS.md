@@ -29,16 +29,23 @@ Changes only to the Wiki workflow or synchronization scripts do not match the
 
 ## Validate before publication
 
-Run the deterministic local-source validator before opening a pull request:
+From a clean committed head, run the complete deterministic cutover gate before
+opening a pull request:
 
 ```console
-python scripts/validate_wiki_docs.py --source docs
+make docs-cutover
 ```
 
 It resolves page, image, and asset links from the canonical file that contains
-them, checks the complete metadata sidecar, and rejects unsafe or ambiguous
-paths and both hierarchical and flattened-namespace collisions. The Pages and
-Wiki workflows repeat this validation before staging or remote mutation.
+them, checks the complete metadata sidecar, rejects unsafe or ambiguous paths
+and both hierarchical and flattened-namespace collisions, stages Pages twice,
+and synchronizes two fresh flat-Wiki trees twice each. The command fails when
+the output is nondeterministic or non-idempotent, the source revision is not the
+current exact lowercase Git SHA, any tracked, untracked, or ignored publishing
+input differs from that commit, or an external-link exception is malformed,
+unowned, expired, or unreferenced. It performs no network requests. The Pages
+and Wiki workflows repeat the applicable source validation before staging or
+remote mutation.
 
 The Pages workflow embeds `${{ github.sha }}` in the generated artifact and
 then runs `validate_rendered_docs.py`. That post-Jekyll gate checks metadata,
@@ -253,8 +260,7 @@ Rollback happens in the source repository, not by rewriting Wiki history.
 1. Create a `bugfix/*` branch from current `origin/main`.
 2. Revert the documentation-only source commit, or restore the affected files
    under `docs/` to their last known-good content.
-3. Run `python scripts/validate_wiki_docs.py --source docs` and the relevant
-   documentation tests.
+3. Run `make docs-cutover` and the relevant documentation tests.
 4. Open and merge the rollback pull request.
 5. Verify the automatic run and new Wiki commit using the procedure above.
 

@@ -1,3 +1,5 @@
+"""Verify PyPI attestations against the reviewed repository and workflow identities."""
+
 from __future__ import annotations
 
 import base64

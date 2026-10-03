@@ -19,6 +19,8 @@ ASSEMBLER = ROOT / "scripts" / "assemble_desktop_release.py"
 PYPROJECT = ROOT / "pyproject.toml"
 RELEASE_CONFIG = ROOT / ".github" / "release-config.json"
 SIDECAR_MODULE = ROOT / "src" / "ancestryllm" / "api" / "sidecar.py"
+CONTAINER_DOCKERFILE = ROOT / "containers" / "Dockerfile"
+CONTAINER_POLICY = ROOT / "scripts" / "container_policy.py"
 
 
 def test_release_sources_share_the_exact_stable_build_identity() -> None:
@@ -42,6 +44,8 @@ def test_release_sources_share_the_exact_stable_build_identity() -> None:
     assert sidecar_builds == [expected]
     assert python_version == expected
     assert desktop_version == expected
+    assert f"ARG APP_VERSION={expected}" in CONTAINER_DOCKERFILE.read_text(encoding="utf-8")
+    assert f'("ARG", "APP_VERSION={expected}")' in CONTAINER_POLICY.read_text(encoding="utf-8")
 
 
 def test_release_request_validates_every_build_identity_before_pretag_exit() -> None:
@@ -118,6 +122,13 @@ def test_release_workflow_builds_and_verifies_the_supported_installer_matrix() -
     assert "scripts/smoke_sidecar.py" in workflow
     assert "ANCESTRYLLM_PACKAGED_RUNTIME_PATH" in workflow
     assert "Get-AuthenticodeSignature" in workflow
+
+
+def test_release_workflow_uses_the_canonical_desktop_install_contract() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count("node desktop/scripts/install-locked.mjs") == 2
+    assert "pnpm --dir desktop install --frozen-lockfile" not in workflow
     assert "codesign --verify --deep --strict" in workflow
     assert "spctl --assess" in workflow
     assert "stapler validate" in workflow
@@ -166,15 +177,19 @@ def test_electron_builder_includes_the_nsis_binary_extraction_fix() -> None:
     assert development_dependencies["electron-builder-squirrel-windows"] == "26.15.7"
 
 
-def test_release_packaged_smoke_forwards_the_playwright_filter_without_a_pnpm_separator() -> None:
+def test_release_packaged_smoke_forwards_the_webdriverio_filter_without_a_pnpm_separator() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    scenario = (
+    automated_scenario = (
         "exercises first run, persistence, corrupt preferences, security, and resource evidence"
     )
+    normal_scenario = (
+        "launches the selected packaged runtime normally without a debugging transport"
+    )
 
-    assert workflow.count("test:e2e:packaged") == 6
-    assert workflow.count(f'--grep "{scenario}"') == 6
-    assert re.search(r"test:e2e:packaged --\s", workflow) is None
+    assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 12
+    assert workflow.count(f'--grep "{automated_scenario}"') == 6
+    assert workflow.count(f'--grep "{normal_scenario}"') == 6
+    assert re.search(r"run-wdio\.mjs packaged --\s", workflow) is None
 
 
 def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> None:
@@ -205,7 +220,11 @@ def test_ubuntu_signing_secrets_are_not_exposed_to_runtime_verification() -> Non
     assert "ancestryllm-signing-gnupg" not in verification_step
     assert "--status-fd 1 --verify" in verification_step
     assert 'sudo apt-get install -y "./$INSTALLER"' in verification_step
-    assert "xvfb-run --auto-servernum pnpm" in verification_step
+    assert (
+        "desktop/scripts/run-with-linux-keyring.sh --production-runtime-bus "
+        "xvfb-run --auto-servernum" in verification_step
+    )
+    assert "node desktop/scripts/run-wdio.mjs packaged" in verification_step
 
 
 def test_release_installer_runtime_validation_uses_platform_native_copy_and_install() -> None:
@@ -467,7 +486,7 @@ def test_release_workflow_binds_installers_evidence_sboms_and_provenance() -> No
 def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> None:
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
     desktop = (ROOT / "docs" / "DESKTOP_VERIFICATION.md").read_text(encoding="utf-8")
-    desktop_shell = (ROOT / "docs" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
+    desktop_shell = (ROOT / "docs" / "explanation" / "DESKTOP_SHELL.md").read_text(encoding="utf-8")
     release_notes = (ROOT / "docs" / "release-notes" / "0.5.0.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -510,7 +529,7 @@ def test_release_docs_define_the_exact_matrix_and_manual_upgrade_contract() -> N
         in normalized
     )
     assert (
-        "The supported 0.5.0 targets are macOS 15 and 26 on arm64 and x64, "
+        "The supported 0.6.0 targets are macOS 15 and 26 on arm64 and x64, "
         "Windows 11 on arm64, and Ubuntu 24.04 on x64." in normalized_shell
     )
     assert 'binarySigningMode: "unsigned"' in releasing

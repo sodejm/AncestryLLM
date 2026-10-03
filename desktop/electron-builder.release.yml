@@ -1,3 +1,4 @@
+# Configures signed installer artifacts and release-only packaging metadata.
 appId: org.ancestryllm.desktop
 productName: AncestryLLM
 executableName: ancestryllm
@@ -10,6 +11,8 @@ files:
 extraResources:
   - from: build/sidecar
     to: sidecar
+  - from: resources/macos-arm64-runtime-policy-v1.json
+    to: runtime-policy/macos-arm64-runtime-policy-v1.json
 electronFuses:
   runAsNode: false
   enableCookieEncryption: true

@@ -5,17 +5,67 @@ is written with restrictive permissions through SQLCipher's online backup API.
 The backup uses the same key reference held in the OS keyring; copying only the
 database without securely backing up that key is not a recovery strategy.
 
+If the destination already exists, the command fails with `BACKUP_EXISTS`
+without printing the destination path. Choose a different destination or remove
+the existing item only after confirming it is no longer needed. The existing
+item remains unchanged, and the failed command does not publish a partial
+backup.
+
 Keep database and key backups separate. Test recovery on an offline machine by
 restoring the key into an OS credential store, opening a copy, checking the
 schema revision, and running integrity checks. Plain SQLite files and wrong keys
 are rejected. Never commit a database or backup to Git.
 
-## Accepted future container and remote profiles
+## Transient file-operation recovery
 
-[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts future
-Local Desktop and advanced remote profiles. Their backup commands and runbooks
-are not implemented or supported yet; the current commands above remain the
-only documented product workflow.
+Issue #352's `mediated-runtime` staging area is scratch space, not a backup,
+workspace, or retained family-tree copy. Inputs are immutable private copies;
+outputs remain staged until every declared artifact validates. The original
+RootsMagic or GEDCOM source and the prior destination remain the recovery
+authority until a validated output is published through same-directory atomic
+replacement.
+
+Success, failure, cancellation, and timeout remove the exact private operation
+directory. On startup, Electron Main removes only recognized operation
+directories beneath the fixed owner-only staging root. An unexpected file,
+link, directory shape, permission, or owner fails closed and is preserved for
+investigation instead of triggering broad cleanup. This cleanup does not scan
+or delete user-selected source or destination directories.
+
+After interruption, restart the application and retry with fresh opaque
+grants. Never salvage, move, or publish staged files, and never treat them as a
+backup. If recovery fails, retain the source and prior output and record only
+the stable operation code and phase; support material must exclude host,
+staging, destination, and container mount paths.
+
+## Deployment-profile metadata and future runtimes
+
+Backup manifests and support bundles may include the redacted structural
+profile evidence produced by:
+
+```console
+ancestry --json deployment metadata --purpose backup
+```
+
+The evidence contains the profile schema and revision, mode, topology, and an
+optional endpoint-identity digest. It excludes the raw endpoint origin,
+filesystem paths, providers, credentials, environment values, host details,
+and genealogy data. Use `--purpose support` for an equivalently redacted
+support record.
+
+Profile switching never migrates, copies, uploads, restores, or deletes a tree.
+Those data operations remain separately reviewed and confirmed. The current
+encrypted local backup commands above remain the only implemented product
+backup workflow.
+
+[ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts later
+container and advanced remote runtimes. Their backup commands and runbooks are
+not implemented or supported yet. Issue #349's Compose topology includes an
+application-owned named volume only as a read-only persistence placeholder. It
+does not initialize a database, run a migration, broker a key, back up, restore,
+or write genealogy data. Those operations remain fail-closed until Issue #351
+provides the separately reviewed encrypted-volume and recovery contract; the
+local CLI workflow above remains authoritative in the meantime.
 
 Before either profile can ship, its release evidence must demonstrate all of
 the following:
@@ -43,3 +93,26 @@ rotation. Host Remote is self-supported and has no project-operated backup,
 recovery, retention, or availability SLA. Support bundles may contain only
 structural, redacted diagnostics and never database contents, keys, tokens,
 paths, or container-environment values.
+
+## Interrupted native mutations
+
+The per-account `.ancestryllm-coordination` directory contains a protected SQLite
+coordination journal, an opaque-identifier key, and ownership-lock files. It is
+independent of workspace/configuration overrides and of the SQLCipher genealogy
+database. Its key derives opaque resource identities; it is not a genealogy
+encryption key. The journal contains metadata, never genealogy payloads,
+credentials, or private destination paths.
+
+After interruption, preserve the journal and adjacent operation-owned staging or
+backup files. Retry through an authorized invocation with the original output
+selection. The coordinator revalidates identity before completing the verified
+new output or restoring the previous complete set. Desktop grants expire on
+restart and must be selected again. Do not delete the journal, lock files, or
+unrecognized staging files to bypass a conflict: doing so discards recovery and
+ownership evidence. Unexpected replacement or content produces a stable
+recovery-required failure and preserves the ambiguous files for investigation.
+
+This journal is not a backup of genealogy data. Keep the encrypted backup and
+key-custody procedures above. Process-interruption tests do not establish
+power-loss durability on every filesystem. See [mutation recovery](reference/MUTATION_RECOVERY.md)
+for supported semantics, failure codes, and current validation boundaries.

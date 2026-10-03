@@ -9,15 +9,13 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy import select
 
 from ancestryllm.cli import main
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError, ProviderError, SecurityPolicyError
 from ancestryllm.gedcom.service import GedcomService
 from ancestryllm.llm.contracts import (
@@ -28,6 +26,11 @@ from ancestryllm.llm.contracts import (
 from ancestryllm.llm.policy import ConsentGrant
 from ancestryllm.llm.service import LLMService
 from ancestryllm.storage.models import LlmRunModel
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.core.context import AppContext
 
 
 def _write_person(path: Path, *, surname: str, birth: str) -> None:

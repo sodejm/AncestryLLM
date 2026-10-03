@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.gedcom.parser import parse_gedcom_line, validate_gedcom_555
 from ancestryllm.gedcom.service import GedcomService
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 XREF_RE = re.compile(r"@[^@\s]+@")
 

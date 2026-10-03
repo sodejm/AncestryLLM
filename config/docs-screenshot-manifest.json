@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "launch_allowlist": [
+    "pnpm"
+  ],
+  "output_allowlist": [
+    "docs/assets/screenshots/electron/ready-home.png",
+    "docs/assets/screenshots/electron/degraded-diagnostics.png"
+  ],
+  "determinism": {
+    "locale": "en_US.UTF-8",
+    "timezone": "UTC",
+    "theme": "light",
+    "fonts": {
+      "electron": {
+        "family": "Inter",
+        "size_px": 16,
+        "weight": 400,
+        "source_policy": "capture-adapter-bundled"
+      },
+      "terminal": {
+        "family": "JetBrains Mono",
+        "size_px": 14,
+        "weight": 400,
+        "source_policy": "capture-adapter-bundled"
+      }
+    },
+    "animations": "disabled",
+    "fixed_timestamp": "2040-01-02T03:04:05Z",
+    "fixed_username": "Fictional Researcher",
+    "path_policy": "fixture-relative",
+    "id_seed": "ancestryllm-docs-v1",
+    "volatile_data": "fixture-only",
+    "network": "deny"
+  },
+  "fixtures": [
+    {
+      "id": "success",
+      "state": "success",
+      "path": "tests/fixtures/docs_screenshots/success.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
+      "id": "degraded",
+      "state": "degraded",
+      "path": "tests/fixtures/docs_screenshots/degraded.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
+      "id": "electron-degraded",
+      "state": "degraded",
+      "path": "tests/fixtures/docs_screenshots/electron-degraded.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    },
+    {
+      "id": "privacy-canary",
+      "state": "privacy-canary",
+      "path": "tests/fixtures/docs_screenshots/privacy-canary.json",
+      "provider": "none",
+      "network": "disabled",
+      "fictional": true
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "electron-ready-home",
+      "surface": "electron",
+      "launch": [
+        "pnpm",
+        "--dir",
+        "desktop",
+        "capture:docs"
+      ],
+      "fixture_id": "success",
+      "geometry": {
+        "kind": "viewport",
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 1
+      },
+      "ready_signal": {
+        "kind": "text",
+        "value": "Local desktop shell"
+      },
+      "output_path": "docs/assets/screenshots/electron/ready-home.png",
+      "documentation": [
+        {
+          "path": "docs/explanation/DESKTOP_SHELL.md",
+          "anchor": "supported-surface"
+        },
+        {
+          "path": "docs/Home.md",
+          "anchor": "v06-desktop-learning-path"
+        },
+        {
+          "path": "docs/tutorials/desktop-first-run.md",
+          "anchor": "3-confirm-the-local-home-state"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      },
+      "appearance": {
+        "mode": "light",
+        "source": "project-owned"
+      },
+      "crop": {
+        "x": 256,
+        "y": 112,
+        "width": 864,
+        "height": 540
+      },
+      "inclusion": {
+        "target_ui_element": "Home status and local action cards",
+        "placement": "After the written Home state checklist in each owning section.",
+        "text_insufficiency": "Shows the relative locations of status badges and local action cards so readers can recognize the ready state.",
+        "crop_context": "Retain the page heading, status and action cards; omit sidebar, help rail and empty lower canvas.",
+        "alt_text": "Home shows the local desktop shell, Ready status, and local action cards."
+      }
+    },
+    {
+      "id": "electron-degraded-diagnostics",
+      "surface": "electron",
+      "launch": [
+        "pnpm",
+        "--dir",
+        "desktop",
+        "capture:docs"
+      ],
+      "fixture_id": "electron-degraded",
+      "geometry": {
+        "kind": "viewport",
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 1
+      },
+      "ready_signal": {
+        "kind": "text",
+        "value": "The desktop service did not start."
+      },
+      "output_path": "docs/assets/screenshots/electron/degraded-diagnostics.png",
+      "documentation": [
+        {
+          "path": "docs/explanation/DESKTOP_SHELL.md",
+          "anchor": "sanitized-diagnostics-and-recovery"
+        }
+      ],
+      "comparison": {
+        "mode": "exact"
+      },
+      "appearance": {
+        "mode": "light",
+        "source": "project-owned"
+      },
+      "crop": {
+        "x": 256,
+        "y": 112,
+        "width": 864,
+        "height": 666
+      },
+      "inclusion": {
+        "target_ui_element": "Diagnostics service status, error and recovery controls",
+        "placement": "After the written explanation of sanitized Diagnostics and recovery.",
+        "text_insufficiency": "Shows the relative locations of the sanitized error, service status and recovery controls so readers can locate them.",
+        "crop_context": "Retain the Diagnostics heading, service status and complete recovery panel; omit sidebar and help rail.",
+        "alt_text": "Diagnostics shows a degraded service, sanitized startup error, and recovery controls."
+      }
+    }
+  ]
+}

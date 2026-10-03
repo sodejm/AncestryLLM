@@ -1,6 +1,7 @@
+/** Verifies desktop evidence aggregation, coverage gates, and performance policy. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -10,6 +11,7 @@ import {
   aggregateEvidence,
   createSecurityEvidence,
   createTargetEvidence,
+  deriveReleaseQualityContract,
   runCli,
 } from './verification-evidence.mjs'
 import {
@@ -36,20 +38,50 @@ const metrics = {
   rendererOutboundRequests: 0,
 }
 
+const expectedFuseStates = {
+  RunAsNode: 'disabled',
+  EnableCookieEncryption: 'enabled',
+  EnableNodeOptionsEnvironmentVariable: 'disabled',
+  EnableNodeCliInspectArguments: 'disabled',
+  EnableEmbeddedAsarIntegrityValidation: 'enabled',
+  OnlyLoadAppFromAsar: 'enabled',
+  LoadBrowserProcessSpecificV8Snapshot: 'disabled',
+  GrantFileProtocolExtraPrivileges: 'disabled',
+}
+
 function encoded(value) {
   return Buffer.from(`${JSON.stringify(value)}\n`)
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 function digest(bytes) {
   return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength }
 }
 
-function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
+function receiptRecord(
+  gates,
+  artifacts = {},
+  command = ['node', '--test'],
+  context = { runner: 'ubuntu-24.04', sidecarTarget: 'none' },
+) {
   const receipt = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: 'verification-receipt',
     status: 'passed',
     gitHead,
+    context,
     headBefore: gitHead,
     headAfter: gitHead,
     gates: [...gates].sort(),
@@ -69,7 +101,7 @@ function receiptRecord(gates, artifacts = {}, command = ['node', '--test']) {
       status: 'unchanged',
     },
   }
-  validateVerificationReceipt(receipt, gitHead)
+  validateVerificationReceipt(receipt, gitHead, context)
   const raw = encoded(receipt)
   return { receipt, file: digest(raw), raw }
 }
@@ -94,8 +126,13 @@ function fuseInspection(platform) {
     package: { executable: '/package/app', application: '/package', resources: '/package/resources' },
     fuses: {
       status: 'verified',
-      count: 1,
-      items: [{ name: 'RunAsNode', expected: 'disabled', actual: 'disabled', status: 'verified' }],
+      count: Object.keys(expectedFuseStates).length,
+      items: Object.entries(expectedFuseStates).map(([name, state]) => ({
+        name,
+        expected: state,
+        actual: state,
+        status: 'verified',
+      })),
     },
     asar: { path: '/package/resources/app.asar', presence: { status: 'verified' }, integrity },
   }
@@ -113,17 +150,38 @@ function faultEvidence(scenario, observations) {
   }
 }
 
-function targetFixture(row, observed = metrics) {
+function fileGrantEvidence() {
+  return {
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-file-grant-evidence',
+    status: 'passed',
+    verificationOnlyDialogAdapter: true,
+    observations: {
+      openGrantOpaque: true,
+      openMetadataValidated: true,
+      saveGrantOpaque: true,
+      replacementConfirmed: true,
+      revocationPassed: true,
+      selectedPathsAbsent: true,
+    },
+  }
+}
+
+function targetFixture(row, observed = metrics, receiptContext) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
+  const targetContext = receiptContext ?? { runner, sidecarTarget }
+  const targetReceipt = (gates, artifacts = {}, command = ['node', '--test']) => (
+    receiptRecord(gates, artifacts, command, targetContext)
+  )
   const metricsBytes = encoded(observed)
   const inspection = fuseInspection(TARGET_ROWS[runner].platform)
   const fuseInspectionBytes = encoded(inspection)
   const withholdEvidence = faultEvidence('sidecar-withhold-retry', {
     failure: 'startup_failed',
-    automaticRestartsRemaining: 0,
+    automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
     recoveredState: 'ready',
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
   const restartEvidence = faultEvidence('sidecar-restart-exhaustion-quit', {
     automaticRestartCount: 2,
@@ -131,55 +189,111 @@ function targetFixture(row, observed = metrics) {
     manualRetriesRemainingBefore: 1,
     manualRetryState: 'ready',
     activeSidecarExitedOnQuit: true,
-    cleanExit: true,
+    processExitedAfterWindowClose: true,
   })
-  const mismatchEvidence = faultEvidence('sidecar-version-mismatch', {
-    failure: 'incompatible_build',
+  const integrityEvidence = faultEvidence('sidecar-integrity-substitution', {
+    failure: 'startup_failed',
     automaticRestartsRemaining: 2,
     manualRetriesRemainingBefore: 1,
-    manualRetryFailure: 'incompatible_build',
+    manualRetryFailure: 'startup_failed',
     manualRetriesRemainingAfter: 0,
     verificationProcessTerminated: true,
   })
   const withholdEvidenceBytes = encoded(withholdEvidence)
   const restartEvidenceBytes = encoded(restartEvidence)
-  const mismatchEvidenceBytes = encoded(mismatchEvidence)
-  const runtimeReceipt = receiptRecord(
-    ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed', 'normalLaunchDebugSurfaceAbsentPassed'],
+  const integrityEvidenceBytes = encoded(integrityEvidence)
+  const fileGrantMediation = fileGrantEvidence()
+  const fileGrantEvidenceBytes = encoded(fileGrantMediation)
+  const runtimeReceipt = targetReceipt(
+    ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed'],
     { metrics: digest(metricsBytes) },
-    ['pnpm', 'exec', 'playwright', 'test'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'exercises first run, persistence, corrupt preferences, security, and resource evidence',
+    ],
   )
-  const sidecarReceipt = receiptRecord(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
-  const fuseReceipt = receiptRecord(
+  const normalLaunchReceipt = targetReceipt(
+    ['normalLaunchDebugSurfaceAbsentPassed'],
+    {},
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'launches the selected packaged runtime normally without a debugging transport',
+    ],
+  )
+  const processTreeGuardReceipt = targetReceipt(
+    ['sidecarProcessTreeGuardPassed'],
+    {},
+    ['python', '-m', 'pytest', 'tests/api/test_sidecar_bootstrap.py'],
+  )
+  const sidecarReceipt = targetReceipt(['sidecarSmokePassed'], {}, ['node', 'scripts/smoke-sidecar.mjs'])
+  const fuseReceipt = targetReceipt(
     ['fusesInspectedPassed'],
     { fuseInspection: digest(fuseInspectionBytes) },
     ['node', 'scripts/inspect-package-fuses.mjs'],
   )
-  const withholdReceipt = receiptRecord(
+  const fileGrantReceipt = targetReceipt(
+    ['packagedFileGrantSmokePassed'],
+    { fileGrantEvidence: digest(fileGrantEvidenceBytes) },
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'mediates opaque packaged open and save file grants',
+    ],
+  )
+  const withholdReceipt = targetReceipt(
     ['packagedSidecarWithholdRetryPassed'],
     { faultEvidence: digest(withholdEvidenceBytes) },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'withholds'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'withholds and restores the packaged sidecar through Diagnostics retry',
+    ],
   )
-  const restartReceipt = receiptRecord(
+  const restartReceipt = targetReceipt(
     ['packagedSidecarRestartExhaustionQuitPassed'],
     { faultEvidence: digest(restartEvidenceBytes) },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'restarts'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'exhausts packaged sidecar restarts and exits cleanly',
+    ],
   )
-  const mismatchReceipt = receiptRecord(
-    ['packagedSidecarVersionMismatchPassed'],
+  const integrityReceipt = targetReceipt(
+    ['packagedSidecarIntegritySubstitutionPassed'],
     {
-      faultEvidence: digest(mismatchEvidenceBytes),
-      wrongBuildSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
+      faultEvidence: digest(integrityEvidenceBytes),
+      substitutedSidecar: { sha256: 'd'.repeat(64), bytes: 123 },
     },
-    ['pnpm', 'exec', 'playwright', 'test', '--grep', 'wrong-build'],
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'rejects a substituted packaged sidecar before launch',
+    ],
   )
   const receiptRecords = [
     runtimeReceipt,
+    normalLaunchReceipt,
+    processTreeGuardReceipt,
     sidecarReceipt,
     fuseReceipt,
+    fileGrantReceipt,
     withholdReceipt,
     restartReceipt,
-    mismatchReceipt,
+    integrityReceipt,
   ]
   const evidence = createTargetEvidence({
     gitHead,
@@ -194,21 +308,24 @@ function targetFixture(row, observed = metrics) {
     metricsBytes,
     fuseInspection: inspection,
     fuseInspectionBytes,
+    fileGrantMediation,
+    fileGrantEvidenceBytes,
     withholdEvidence,
     withholdEvidenceBytes,
     restartEvidence,
     restartEvidenceBytes,
-    mismatchEvidence,
-    mismatchEvidenceBytes,
+    integrityEvidence,
+    integrityEvidenceBytes,
     receiptRecords,
   })
   return {
     evidence,
     metricsBytes,
     fuseInspectionBytes,
+    fileGrantEvidenceBytes,
     withholdEvidenceBytes,
     restartEvidenceBytes,
-    mismatchEvidenceBytes,
+    integrityEvidenceBytes,
     receiptRecords,
   }
 }
@@ -234,9 +351,26 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
   assert.equal(evidence.packageRuntime, true)
   assert.equal(evidence.rendererZeroEgressCanary, true)
   assert.equal(evidence.normalLaunchDebugSurfaceAbsent, true)
+  assert.equal(evidence.packagedFileGrantSmoke, true)
+  assert.deepEqual(evidence.fileGrantMediation, fileGrantEvidence())
   assert.equal(evidence.signingVerified, false)
   assert.equal(evidence.hostArch, 'arm64')
   assert.equal(evidence.arch, 'arm64')
+  assert.equal(
+    evidence.faultScenarios['sidecar-withhold-retry'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    evidence.faultScenarios['sidecar-restart-exhaustion-quit'].observations.processExitedAfterWindowClose,
+    true,
+  )
+  assert.equal(
+    Object.hasOwn(
+      evidence.faultScenarios['sidecar-withhold-retry'].observations,
+      'cleanExit',
+    ),
+    false,
+  )
   assert.equal(evidence.performance.policyVersion, PERFORMANCE_POLICY_VERSION)
   assert.deepEqual(evidence.gates, Object.fromEntries(TARGET_RECEIPT_GATES.map((gate) => [gate, true])))
 
@@ -255,12 +389,14 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
     metricsBytes: fixture.metricsBytes,
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
     restartEvidenceBytes: fixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(fixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: fixture.integrityEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /platformValidated is derived/)
 })
@@ -283,6 +419,27 @@ test('target evidence records every observed value, ceiling, and check and rejec
   const missing = { ...metrics }
   delete missing.readyMs
   assert.throws(() => targetFixture(rows[0], missing), /exact schema/)
+  assert.throws(
+    () => targetFixture(rows[0], metrics, { runner: rows[1][0], sidecarTarget: rows[1][1] }),
+    /requested execution context/,
+  )
+})
+
+test('release evidence derives performance ceilings from the central quality policy', async () => {
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  const changed = structuredClone(policy)
+  changed.performance.policyVersion = 'desktop-unpacked-test'
+  changed.performance.targets[0].performanceCeilings.coldLaunchMs = 1234
+  changed.qa.toolVersions.node = '26.6.0'
+
+  const contract = deriveReleaseQualityContract(changed)
+
+  assert.equal(contract.performancePolicyVersion, 'desktop-unpacked-test')
+  assert.equal(contract.targetRows['macos-15'].ceilings.coldLaunchMs, 1234)
+  assert.equal(contract.toolVersions.node, '26.6.0')
 })
 
 test('target evidence rejects a digest-unbound artifact and the wrong platform ASAR scope', () => {
@@ -300,12 +457,14 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: Buffer.from('{}'),
     fuseInspection: JSON.parse(fixture.fuseInspectionBytes),
     fuseInspectionBytes: fixture.fuseInspectionBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
     restartEvidenceBytes: fixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(fixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: fixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(fixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: fixture.integrityEvidenceBytes,
     receiptRecords: fixture.receiptRecords,
   }), /not the artifact produced/)
 
@@ -316,7 +475,12 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
   const wrongBytes = encoded(wrong)
   const records = linuxFixture.receiptRecords.map((record) => (
     record.receipt.gates.includes('fusesInspectedPassed')
-      ? receiptRecord(['fusesInspectedPassed'], { fuseInspection: digest(wrongBytes) })
+      ? receiptRecord(
+          ['fusesInspectedPassed'],
+          { fuseInspection: digest(wrongBytes) },
+          ['node', '--test'],
+          { runner: linuxRow[0], sidecarTarget: linuxRow[1] },
+        )
       : record
   ))
   assert.throws(() => createTargetEvidence({
@@ -332,12 +496,14 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     metricsBytes: linuxFixture.metricsBytes,
     fuseInspection: wrong,
     fuseInspectionBytes: wrongBytes,
+    fileGrantMediation: fileGrantEvidence(),
+    fileGrantEvidenceBytes: linuxFixture.fileGrantEvidenceBytes,
     withholdEvidence: JSON.parse(linuxFixture.withholdEvidenceBytes),
     withholdEvidenceBytes: linuxFixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(linuxFixture.restartEvidenceBytes),
     restartEvidenceBytes: linuxFixture.restartEvidenceBytes,
-    mismatchEvidence: JSON.parse(linuxFixture.mismatchEvidenceBytes),
-    mismatchEvidenceBytes: linuxFixture.mismatchEvidenceBytes,
+    integrityEvidence: JSON.parse(linuxFixture.integrityEvidenceBytes),
+    integrityEvidenceBytes: linuxFixture.integrityEvidenceBytes,
     receiptRecords: records,
   }), /not-applicable/)
 })
@@ -374,9 +540,10 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
     await writeFile(join(runnerRoot, 'evidence.json'), encoded(fixture.evidence))
     await writeFile(join(runnerRoot, 'metrics.json'), fixture.metricsBytes)
     await writeFile(join(runnerRoot, 'fuse-inspection.json'), fixture.fuseInspectionBytes)
+    await writeFile(join(runnerRoot, 'file-grant-mediation.json'), fixture.fileGrantEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-withhold-retry.json'), fixture.withholdEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-restart-exhaustion-quit.json'), fixture.restartEvidenceBytes)
-    await writeFile(join(runnerRoot, 'sidecar-version-mismatch.json'), fixture.mismatchEvidenceBytes)
+    await writeFile(join(runnerRoot, 'sidecar-integrity-substitution.json'), fixture.integrityEvidenceBytes)
     for (const [index, receipt] of fixture.receiptRecords.entries()) {
       await writeFile(join(runnerRoot, `receipt-${index}.json`), receipt.raw)
     }
@@ -389,10 +556,27 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   await writeFile(join(securityRoot, 'receipt.json'), security.receiptRecords[0].raw)
 
   const aggregate = await aggregateEvidence(root, gitHead)
+  const policy = JSON.parse(await readFile(
+    new URL('../../config/release-quality-policy-v1.json', import.meta.url),
+    'utf8',
+  ))
+  assert.equal(aggregate.schemaVersion, 3)
+  assert.deepEqual(aggregate.policy, {
+    id: policy.policyId,
+    schemaVersion: policy.schemaVersion,
+    sha256: createHash('sha256').update(canonicalJson(policy)).digest('hex'),
+  })
   assert.equal(aggregate.targets.length, 6)
   assert.equal(aggregate.platformValidated, true)
   assert.equal(aggregate.status, 'passed')
   assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
+  assert.deepEqual(aggregate.toolVersions, {
+    python: '3.12',
+    node: '26.5.0',
+    pnpm: '11.9.0',
+    vitest: '3.2.7',
+    webdriverio: '9.31.2',
+  })
 
   await writeFile(join(targetsRoot, 'windows-11-arm', 'evidence.json'), encoded({
     ...aggregate.targets.find((target) => target.runner === 'windows-11-arm'),

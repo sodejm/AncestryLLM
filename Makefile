@@ -1,11 +1,17 @@
+# Defines the canonical local and CI commands for building and validating AncestryLLM.
 SHELL := /bin/bash
 
 VENV_DIR ?= .venv
 UV_TOOL_DIR := .tools/uv
 UV_RECEIPT := .tools/receipts/uv-bootstrap.json
 DIST_DIR ?= dist
+UV_BUILD_REPORT ?= build/uv-build-evaluation.json
 SBOM_OUTPUT ?= sbom.json
 export PYTEST_ADDOPTS ?= --cov --cov-report=term-missing
+override DOCS_SCREENSHOT_SURFACE := $(value DOCS_SCREENSHOT_SURFACE)
+override DOCS_SCREENSHOT_SCENARIO := $(value DOCS_SCREENSHOT_SCENARIO)
+export DOCS_SCREENSHOT_SURFACE
+export DOCS_SCREENSHOT_SCENARIO
 ifeq ($(OS),Windows_NT)
 PYTHON ?= python
 UV_BIN := $(UV_TOOL_DIR)/uv.exe
@@ -15,15 +21,16 @@ PYTHON ?= python3
 UV_BIN := $(UV_TOOL_DIR)/uv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 endif
-export UV_PYTHON := $(PYTHON)
+SYSTEM_PYTHON_EXECUTABLE := $(shell "$(PYTHON)" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null)
+export UV_PYTHON := $(SYSTEM_PYTHON_EXECUTABLE)
 
-.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint typecheck dependency-audit security-static security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check
+.PHONY: help system-python verified-uv setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security-static security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-cutover docs-screenshots docs-screenshots-check docs-terminal-screenshots
 
 help:
-	@echo "Available targets: setup bootstrap console lock lock-check test lint typecheck security pre-push sbom package workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check"
+	@echo "Available targets: setup bootstrap console lock lock-check test lint markdown-check typecheck typecheck-ty dependency-audit security pre-push sbom package evaluate-uv-build container-policy container-compose-config workflow-audit hooks desktop-install desktop-check desktop-e2e desktop-security code-docs-check docs-cutover docs-screenshots docs-screenshots-check docs-terminal-screenshots"
 
 desktop-install:
-	@pnpm --dir desktop install --frozen-lockfile
+	@node desktop/scripts/install-locked.mjs
 
 desktop-check:
 	@pnpm --dir desktop lint
@@ -46,6 +53,16 @@ verified-uv: system-python
 	@$(PYTHON) scripts/bootstrap_uv.py bootstrap --install-dir $(UV_TOOL_DIR) --receipt $(UV_RECEIPT) >/dev/null
 
 setup: verified-uv
+	@if [ -e "$(VENV_DIR)" ] || [ -L "$(VENV_DIR)" ]; then \
+		if [ -L "$(VENV_DIR)" ] || [ ! -d "$(VENV_DIR)" ] || [ -L "$(VENV_DIR)/pyvenv.cfg" ] || [ ! -f "$(VENV_DIR)/pyvenv.cfg" ] || ! grep -Eq '^[[:space:]]*uv[[:space:]]*=' "$(VENV_DIR)/pyvenv.cfg"; then \
+			echo "UVENV_VENV_REPAIR_REFUSED: $(VENV_DIR) is not a regular uv-managed virtual environment" >&2; \
+			exit 2; \
+		fi; \
+		if ! "$(VENV_PYTHON)" -I -c 'import encodings' >/dev/null 2>&1; then \
+			echo "UVENV_VENV_RECREATED: replacing the unusable generated environment at $(VENV_DIR)" >&2; \
+			$(UV_BIN) venv --clear --python "$(UV_PYTHON)" "$(VENV_DIR)" >/dev/null; \
+		fi; \
+	fi
 	@$(UV_BIN) sync --locked --all-extras --all-groups
 
 bootstrap: setup hooks
@@ -65,15 +82,22 @@ test: verified-uv
 lint: verified-uv
 	@$(UV_BIN) run --locked --group lint ruff check src tests scripts
 	@$(UV_BIN) run --locked --group lint ruff format --check src tests scripts
+	@$(UV_BIN) run --locked --group lint python scripts/check_gfm_markdown.py
 	@$(UV_BIN) run --locked --group lint python scripts/check_architecture_contracts.py
 	@./scripts/check_repository_safety.sh
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
 
+markdown-check: verified-uv
+	@$(UV_BIN) run --locked --group lint python scripts/check_gfm_markdown.py
+
 typecheck: verified-uv
 	@$(UV_BIN) run --locked --group typecheck mypy src/ancestryllm
 
+typecheck-ty: verified-uv
+	@$(UV_BIN) run --locked --group typecheck ty check src/ancestryllm
+
 dependency-audit: verified-uv
-	@$(UV_BIN) run --locked --group security pip-audit
+	@$(UV_BIN) run --locked --group security python scripts/run_dependency_audit.py --uv $(UV_BIN)
 
 security-static: verified-uv
 	@$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .
@@ -87,16 +111,49 @@ pre-push:
 	@$(MAKE) security
 
 sbom: verified-uv
-	@$(UV_BIN) run --locked --group security cyclonedx-py environment --output-file $(SBOM_OUTPUT) $(VENV_PYTHON)
+	@$(UV_BIN) run --locked --group security python scripts/generate_sbom.py --python $(VENV_PYTHON) --output $(SBOM_OUTPUT) --project pyproject.toml
 
 package: verified-uv
 	@$(UV_BIN) run --locked --group build python scripts/build_release.py --output-dir $(DIST_DIR)
 
+evaluate-uv-build: verified-uv
+	@$(UV_BIN) run --locked --group build python scripts/evaluate_uv_build.py --uv $(UV_BIN) --report $(UV_BUILD_REPORT)
+
+container-policy: system-python
+	@mkdir -p build/container-policy
+	@$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.local.yaml --dockerfile containers/Dockerfile --output build/container-policy/local.json
+	@$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.remote.yaml --dockerfile containers/Dockerfile --output build/container-policy/remote.json
+
+container-compose-config: container-policy
+	@gateway_image="$${ANCESTRYLLM_GATEWAY_IMAGE:?Set ANCESTRYLLM_GATEWAY_IMAGE}"; worker_image="$${ANCESTRYLLM_WORKER_IMAGE:?Set ANCESTRYLLM_WORKER_IMAGE}"; platform="$${ANCESTRYLLM_PLATFORM:?Set ANCESTRYLLM_PLATFORM}"; \
+		$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.local.yaml --dockerfile containers/Dockerfile --gateway-image "$$gateway_image" --worker-image "$$worker_image" --platform "$$platform" --output build/container-policy/resolved-local.json && \
+		docker compose --file containers/compose.yaml --file containers/compose.local.yaml config >/dev/null
+	@gateway_image="$${ANCESTRYLLM_GATEWAY_IMAGE:?Set ANCESTRYLLM_GATEWAY_IMAGE}"; worker_image="$${ANCESTRYLLM_WORKER_IMAGE:?Set ANCESTRYLLM_WORKER_IMAGE}"; platform="$${ANCESTRYLLM_PLATFORM:?Set ANCESTRYLLM_PLATFORM}"; \
+		$(PYTHON) scripts/container_policy.py --base containers/compose.yaml --overlay containers/compose.remote.yaml --dockerfile containers/Dockerfile --gateway-image "$$gateway_image" --worker-image "$$worker_image" --platform "$$platform" --output build/container-policy/resolved-remote.json && \
+		docker compose --file containers/compose.yaml --file containers/compose.remote.yaml config >/dev/null
+
 workflow-audit: verified-uv
 	@$(UV_BIN) run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
-code-docs-check: verified-uv
+code-docs-check: verified-uv desktop-install
+	@$(UV_BIN) run --locked --group lint ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419
 	@$(UV_BIN) run --locked --group lint python scripts/check_code_documentation.py
+	@pnpm --dir desktop docs:check
+
+docs-cutover: verified-uv
+	@$(UV_BIN) run --locked --group test python scripts/verify_documentation_cutover.py --repository-root . --source docs --source-sha "$$(git rev-parse HEAD)" --exceptions docs/_data/external_link_exceptions.json
+
+docs-screenshots: verified-uv
+	@selection=(); \
+		if [[ -n "$$DOCS_SCREENSHOT_SURFACE" ]]; then selection+=(--surface "$$DOCS_SCREENSHOT_SURFACE"); fi; \
+		if [[ -n "$$DOCS_SCREENSHOT_SCENARIO" ]]; then selection+=(--scenario "$$DOCS_SCREENSHOT_SCENARIO"); fi; \
+		$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root . "$${selection[@]}"
+
+docs-screenshots-check: verified-uv
+	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py check --manifest config/docs-screenshot-manifest.json --repository-root .
+
+docs-terminal-screenshots: verified-uv
+	@$(UV_BIN) run --locked --group lint python scripts/docs_screenshots.py capture --manifest config/docs-screenshot-manifest.json --repository-root . --surface terminal
 
 hooks: verified-uv
 	@$(UV_BIN) run --locked --group lint pre-commit install --hook-type pre-commit --hook-type pre-push

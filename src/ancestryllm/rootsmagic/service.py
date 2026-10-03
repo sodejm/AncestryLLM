@@ -2,25 +2,31 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ancestryllm.application._rootsmagic_export import (
     RootsMagicExporter,
     RootsMagicExportResult,
 )
-from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
-from ancestryllm.application.ports import CancellationPort, ProgressPort
-from ancestryllm.core.config import AppConfig
 from ancestryllm.core.ingress import FileIngressPolicy
-from ancestryllm.llm.policy import ConsentGrant
-from ancestryllm.llm.service import LLMService
 from ancestryllm.rootsmagic.core import QueryResult, RootsMagicReader
 from ancestryllm.rootsmagic.query import RootsMagicQueryService
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ancestryllm.application.operations import RootsMagicQueryRequest, RootsMagicQueryResult
+    from ancestryllm.application.ports import CancellationPort, ProgressPort
+    from ancestryllm.core.config import AppConfig
+    from ancestryllm.llm.policy import ConsentGrant
+    from ancestryllm.llm.service import LLMService
 
 __all__ = ["RootsMagicService"]
 
 
 class RootsMagicService:
+    """Coordinate RootsMagic operations across the application boundary."""
+
     def __init__(
         self,
         config: AppConfig,
@@ -47,9 +53,11 @@ class RootsMagicService:
         self.exporter = RootsMagicExporter(self.reader)
 
     def list_trees(self) -> list[Path]:
+        """Return immutable RootsMagic trees found beneath allowed directories."""
         return self.reader.list_trees()
 
     def query_sql(self, tree: str | Path, sql: str) -> QueryResult:
+        """Execute validated read-only SQL against an immutable RootsMagic source."""
         return self.query_service.query_sql(tree, sql)
 
     def query_question(
@@ -61,6 +69,7 @@ class RootsMagicService:
         model: str,
         consent: ConsentGrant | None = None,
     ) -> QueryResult:
+        """Translate a question into validated read-only RootsMagic access."""
         return self.query_service.query_question(
             tree,
             question,
@@ -93,6 +102,7 @@ class RootsMagicService:
         living: str = "exclude",
         report_path: Path | None = None,
     ) -> RootsMagicExportResult:
+        """Export an immutable RootsMagic source as loss-minimal GEDCOM."""
         return self.exporter.export(
             self.reader.resolve_tree(tree),
             output,

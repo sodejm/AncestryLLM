@@ -1,6 +1,10 @@
+/// Exports an Apple signing identity for the isolated macOS release keychain.
 import Foundation
 import Security
 
+/// Writes a stable release-helper error to standard error and terminates with status 1.
+///
+/// - Parameter message: Sanitized operational context that must not contain credentials.
 private func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("ERROR: \(message)\n".utf8))
     exit(1)

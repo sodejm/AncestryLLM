@@ -8,9 +8,171 @@ hosted application deployment.
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 future Local Desktop container profile plus explicit Connect Remote and Host
-Remote profiles. None is implemented, shipped, or supported today. This guide
-does not authorize using the current private sidecar as a network service or
-provide a current Host Remote runbook.
+Remote profiles. The 0.6.0 source implements the shared profile control
+plane and a separate macOS arm64 manager for app-owned Colima/Lima, Docker
+Engine, and Compose tools. Issue #349 also supplies a probe-only OCI and Compose
+verification topology, but neither component activates a deployment profile or
+supported application container. Local Desktop is the preselected, recommended
+mode. An omitted profile migrates to that safe local default; an unknown schema,
+malformed topology, stale revision, or substituted endpoint fails closed.
+
+Headless tooling can list the reviewed choices, inspect the stored profile,
+preview an exact transition, diagnose a profile/runtime mismatch, recover to
+Local Desktop, and emit redacted backup or support metadata:
+
+```sh
+ancestry --json deployment modes
+ancestry --json deployment status
+ancestry --json deployment diagnose
+ancestry --json deployment metadata --purpose support
+```
+
+Every unattended transition requires the current schema and configuration
+revision, the exact confirmation returned by a separate preview, and the
+literal `--unattended` flag. Only Local Desktop can currently be activated.
+Connect Remote activation is reserved for authenticated enrollment in #357;
+Host Remote activation remains separate reviewed hosting work. Neither the
+#363 host-only container-control foundation nor the #348 runtime-tool manager
+activates a profile.
+Profile selection never starts a listener, container, supervisor, or remote
+session, and never copies, exports, imports, or uploads a family tree.
+
+The stored endpoint origin and endpoint-identity digest are non-secret
+configuration, while enrollment credentials remain in the secret store. No
+mode is inferred from environment variables, Docker context, port state,
+hostname, or service discovery. `provider=none` continues to require the local,
+network-free path. A valid non-local profile without its separately authorized
+runtime blocks ordinary commands but leaves `deployment status`, `diagnose`,
+and Local Desktop recovery available.
+
+This guide does not authorize using the current private sidecar as a network
+service or provide a current Host Remote runbook.
+
+## Host control and macOS arm64 runtime tools
+
+The 0.6.0 source contains the #363 Electron-Main-only container-control
+foundation and the #348 macOS arm64 runtime-tool manager. Packaged Settings and
+the packaged executable expose only fixed status, review, and apply operations.
+The renderer receives no Docker socket, executable path, Docker context,
+environment, arbitrary arguments, process output, or unredacted diagnostics.
+Neither component connects the deployment-profile executor, starts an
+AncestryLLM application image, or introduces a public or remote runtime.
+
+The closed schema-v1 policy and plan currently accept only native Darwin arm64
+with an app-owned runtime profile, Docker context, Unix socket, Docker
+configuration directory, working directory, exact Engine identity and
+compatibility, and exact Compose project labels. Before and after every
+lifecycle action, the supervisor verifies the canonical socket path, owner,
+mode, device and inode, endpoint, runtime profile, context, Engine ID, server
+and API versions, operating system, architecture, and required security
+options. Ambient `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, PATH
+selection, and alternate endpoints are not authority. Docker and Compose run
+by absolute executable path with a minimal environment, fixed arguments,
+bounded input, output, and time, no shell, process-tree termination, and
+redacted stable failures.
+
+Validated plans require digest-pinned images, a numeric non-root user,
+read-only roots, `cap_drop: [ALL]`, `no-new-privileges`, init, app-owned named
+volumes, internal networks, and loopback-only TCP publication. Host paths,
+devices, host namespaces, privileged execution, writable roots, extra
+capabilities, unowned labels, and ambiguous or colliding resources fail
+closed. Discovery and reconciliation use the exact project identity and three
+app-owned labels; conflicting resources are reported and never adopted.
+Start, repair, and preserve/delete uninstall require a short-lived token bound
+to that exact operation. Stop is bounded but does not delete resources.
+
+Stable control failures are `INVALID_POLICY`, `INVALID_PLAN`,
+`ENDPOINT_UNTRUSTED`, `ENDPOINT_CHANGED`, `ENGINE_UNTRUSTED`,
+`RESOURCE_CONFLICT`, `AUTHORIZATION_REQUIRED`, and `CONTROL_FAILED`. Stable
+process failures are `PROCESS_REQUEST_INVALID`, `PROCESS_INPUT_LIMIT`,
+`PROCESS_OUTPUT_LIMIT`, `PROCESS_TIMEOUT`, `PROCESS_EXIT`, and
+`PROCESS_RESPONSE_INVALID`. Local-runtime management uses the `RUNTIME_*`
+codes in [Setup diagnostics](SETUP_DIAGNOSTICS.md#local-runtime-management-failures).
+These codes are bounded diagnostic evidence, not an end-user Host Remote
+troubleshooting interface.
+
+The sanitized
+[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
+record verifies this control subset against an isolated, app-owned Colima
+profile. It exercises start, stop, repair, preserve/delete uninstall, exact
+inventory, hardening inspection, ambient-selection rejection, and complete
+owned-resource cleanup while leaving the default Docker context and engine
+unchanged. It proves neither an application image nor a supported runtime.
+
+The #348 manager downloads exact upstream assets into bounded app-owned cache
+files, verifies each archive and license by reviewed size and SHA-256, safely
+extracts and re-verifies expected components, and then performs resumable
+setup, start, stop, repair, and preserve/delete removal. Offline mode never
+uses the network and succeeds only from a complete reverified cache. It is
+limited to Apple silicon on macOS 13 or later, requires hardware virtualization
+and at least 24 GiB free, and uses exact pinned versions, resource limits,
+archive names, URLs, licenses, sizes, and digests. It does not use a package
+manager, request administrator privileges, install system services, select
+ambient tools, or fall back to another mirror. Docker Desktop remains optional
+and untouched. See [Desktop shell](explanation/DESKTOP_SHELL.md#macos-arm64-local-runtime-management)
+for the Settings and noninteractive operator procedures.
+
+## Probe-only OCI and Compose topology
+
+Issue #349 adds
+[`containers/Dockerfile`](https://github.com/sodejm/AncestryLLM/blob/main/containers/Dockerfile),
+a closed
+base Compose model, and Local Desktop and Host Remote validation overlays. This
+is production-shaped build and lifecycle evidence, not authorization to run
+`docker compose up` as a supported application deployment. The deployment
+profile executor and #348 host manager do not start it.
+
+The topology contains exactly two defined services:
+
+- `gateway` is mandatory and serves only authenticated health and capability
+  probes on loopback inside its container;
+- `worker` is optional behind an explicit Compose profile and otherwise remains
+  absent. When selected for lifecycle evidence it performs no genealogy work
+  and exits cleanly on the platform termination signal.
+
+Neither service publishes or exposes a host port. Both attach only one internal
+network, run as numeric UID/GID 65532, use a read-only root filesystem, drop all
+capabilities, set `no-new-privileges`, enable init, and have explicit CPU,
+memory, PID, log, health, and shutdown bounds. Host paths, devices, privileged
+or host namespaces, extra services, mutable image references, unsupported
+platforms, and unknown fields fail policy validation. The named data volume is
+attached read-only as a placeholder. No service initializes a database, runs a
+schema migration, receives a genealogy path, or receives a provider secret.
+The random probe credential exists only in a private `/run` tmpfs and is not
+written to Compose, environment evidence, logs, receipts, or inventory.
+
+Maintainers can validate the static source contract without starting Docker:
+
+```sh
+make container-policy
+```
+
+Hosted CI then builds both image targets by exact digest on native Linux amd64
+and native Linux arm64 runners; emulation is not accepted as architecture
+evidence. It checks the realized image architecture and hardening, authenticated
+probe readiness, optional-worker readiness, crash visibility, graceful gateway
+and worker shutdown, build/version skew rejection, read-only and disk-full
+handling, and log redaction. Source policy separately proves that the probe-only
+images have no database initializer or migration entrypoint; this is not an
+executed migration-path assertion. The
+retained schema-v1 evidence includes every installed Python distribution and
+every installed Debian package, with normalized license identities and the
+SHA-256 of each retained Debian copyright file. Missing packages, licenses,
+fields, or lifecycle assertions fail the job rather than producing partial
+evidence.
+
+#350 must add reviewed workload identity and any permitted network publication;
+#351 must add the secret broker, SQLCipher data lifecycle, migrations, backup,
+restore, and recovery. Until both boundaries and the remaining `G5`/`G7` gates
+pass, the images remain verification artifacts, schema migrations remain
+disabled, and no Local Desktop or Host Remote activation path is supported.
+
+Remaining work includes workload-capable application surfaces, the host secret
+broker, profile activation, grant-authorized read-only family tree mounts,
+authenticated workloads, storage migration and backup, runtime upgrade and
+rollback policy, final application resource/readiness/listener budgets,
+packaged native evidence, the full `G5`/`G7` evidence set, and every additional
+OS, architecture, Engine, and Compose row claimed by a future release.
 
 Before any profile release, a separate operator runbook must cover every
 claimed native host and architecture, Docker Engine API and Compose

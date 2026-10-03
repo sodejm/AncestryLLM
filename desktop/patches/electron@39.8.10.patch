@@ -1,0 +1,7 @@
+diff --git a/install.js b/install.js
+index 9d7ecaf55d29b67de146f8359083fe4b4548a2bf..df04345c320b8f268a43541a1e4edc59df1de959 100644
+--- a/install.js
++++ b/install.js
+@@ -5 +5 @@ const { downloadArtifact } = require('@electron/get');
+-const extract = require('extract-zip');
++const { extract } = require('extract-zip');

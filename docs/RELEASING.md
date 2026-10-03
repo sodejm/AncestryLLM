@@ -6,26 +6,77 @@ uploads are prohibited.
 
 Repository release coordinates are defined in
 `.github/release-config.json`. Its stable package version and GitHub Project 2
-release fields are one reviewed release control. The Project fields are the
-owner, Project number and title, `Release iteration`, `Priority`, `Status`, and
-`Validation`; no successor tracker issue is required. The release workflow
-requires the configured version, `pyproject.toml`, `desktop/package.json`, and
-the packaged sidecar build identity to match exactly before either pre-tag
-packaging or tagged publication can proceed. Readiness and publication use the
-configured Project values instead of inferring release state from an issue
-number or version string.
+release fields are one reviewed release control. Every Project-backed schema
+names the owner, Project number and title, `Release iteration`, `Status`, and
+`Validation`; no successor tracker issue is required. Schema 2 selects one
+`project.priority`. Schema 3 replaces that singular field with the non-empty,
+unique `project.priorities` list and adds the repository milestone number and
+title under `project.milestone`. The release workflow requires the configured
+version, `pyproject.toml`, `desktop/package.json`, and the packaged sidecar build
+identity to match exactly before either pre-tag packaging or tagged publication
+can proceed. Readiness and publication use the configured Project values
+instead of inferring release state from an issue number or version string.
 
 The published v0.4.0 release continues to use its preserved milestone/tracker
-evidence. Schema 2 is the v0.5.0-and-later control plane: its selected Project
-iteration, currently `v0.5.0 — Foundation`, is authoritative for future
-release readiness.
+evidence. Schema 2 is the v0.5.0 and v0.6.0 control plane: its selected Project
+iteration, currently `v0.6.0 — Usable desktop core`, is authoritative for
+release readiness. The active v0.6.0 configuration remains on schema 2 until
+the final v0.7.0 release-preparation change selects schema 3. Under schema 3,
+the selected Project iteration and configured repository milestone must contain
+exactly the same issues. Every configured priority must be represented, and
+each release issue must be closed with the configured `Status` and `Validation`
+values and no open dependency. Draft or non-Issue Project items, unconfigured
+priorities, incomplete pagination, missing coordinates, or scope and state
+mismatches fail the gate closed.
 
-## Future deployment-profile release gate
+## Release quality approval contract
+
+`config/release-quality-policy-v1.json` is the versioned, authoritative
+contract for the QA, security, performance, and diagnostics evidence that may
+approve a release commit. The contract names each accountable owner, the exact
+readiness and desktop receipt gates, pinned tool versions, coverage policy,
+native performance method and ceilings, diagnostic schema and retention, and
+the commands that produce the evidence:
+
+| Family | Owner | Required commands |
+|---|---|---|
+| QA | `release-owner` | `make test`; `make lint`; `make typecheck`; `pnpm --dir desktop run verify:source`; `pnpm --dir desktop run test:coverage`; `pnpm --dir desktop run test:accessibility`; `pnpm --dir desktop run test:e2e` |
+| Security | `security-owner` | `make security`; `make sbom`; `pnpm --dir desktop run audit`; `pnpm --dir desktop run check:secrets`; `pnpm --dir desktop run sbom` |
+| Performance | `desktop-owner` | `node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence`; `desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum node desktop/scripts/run-wdio.mjs packaged --grep exercises first run, persistence, corrupt preferences, security, and resource evidence` |
+| Diagnostics | `desktop-owner` | `make test`; `pnpm --dir desktop run test:coverage` |
+
+Release readiness writes schema-v2 `release-evidence/gates.json`; the exact-head
+desktop aggregate writes schema-v3
+`desktop-evidence-aggregate/desktop-evidence.json`. Both source artifacts carry
+the canonical policy identity, schema version, and SHA-256 digest.
+`scripts/verify_release_quality.py` accepts only those closed-schema artifacts,
+recomputes the policy digest and policy reference, requires both artifacts and
+every nested receipt to name the requested full commit SHA, and writes
+`release-quality-approval.json`. Missing, extra, malformed, stale,
+wrong-version, wrong-tool, failed, or unapproved evidence is a blocking error.
+The verifier runs once before the release job can begin and again after final
+distribution assembly. The second pass re-downloads the two immutable source
+artifacts, checks the assembled readiness evidence against its approved copy,
+and regenerates the same deterministic approval in
+`dist/release-quality-approval.json` so it is covered by the release checksums
+and provenance.
+
+The schema permits only explicitly recorded, unexpired exception documents
+with a known family and gate, an owner, an independent approver, a reason, and
+an expiry no later than 90 days after verification. An exception is an
+auditable disclosure and never changes a failed gate into a pass. The v1 policy
+contains no exceptions. Any future waiver semantics require a reviewed
+policy-schema revision; editing an evidence artifact cannot create one.
+
+## Future deployment-runtime release gate
 
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) is an accepted
-target, not a current availability claim. A profile remains unavailable until
-its row below and the common conditions pass. A gate or subset assigned to one
-profile does not block an independent profile whose own row is complete.
+runtime target, not a current availability claim. The source-level profile
+control plane, #363 host-control foundation, and #348 macOS arm64 runtime-tool
+manager do not make an AncestryLLM application container or remote runtime
+available. Each runtime remains unavailable until its row below and the common
+conditions pass. A gate or subset assigned to one profile does not block an
+independent profile whose own row is complete.
 
 | Profile | Required threat-model evidence |
 |---|---|
@@ -53,6 +104,22 @@ implementer. The common conditions are:
    monitoring, incident response, and recovery. Host Remote remains a
    single-household, self-supported profile with no project-operated SLA.
 
+The sanitized native macOS arm64
+[`issue-363-macos-arm64-container-supervisor.json`](release-evidence/issue-363-macos-arm64-container-supervisor.json)
+record is partial `G5`/`G7` source-foundation evidence only. It binds one
+isolated Colima profile, app-owned context and Unix socket to the expected
+Engine identity; exercises hardened start, stop, repair, preserving uninstall,
+deleting uninstall, and exact owned-resource cleanup; and confirms that the
+default Docker context and engine remain unchanged. It does not prove an
+application image, secret broker, family-tree grant, authenticated workload,
+storage migration or recovery, quantitative budget, release-candidate
+integration, or any additional native OS, architecture, Engine, or Compose
+row. Issue #348 adds source-level, policy-bound acquisition and interruption-
+resumable lifecycle management for that macOS arm64 tool substrate; it does not
+upgrade this earlier receipt into application-runtime or packaged-release
+evidence. The receipt cannot independently satisfy a
+profile gate.
+
 Failure of any condition blocks the affected profile without blocking the
 existing local CLI, REPL, or released bounded desktop shell.
 
@@ -70,7 +137,7 @@ that the checkout and `origin/main` are the triggering commit, validates the
 configured release coordinates, and performs the authenticated Project query.
 It verifies pagination and target-iteration field schema without claiming that
 the in-development iteration is ready to release; a deterministic regression
-then proves the strict verifier rejects an open P0 item. `Release readiness`
+then proves the strict verifier rejects a non-ready configured-priority item. `Release readiness`
 and the tag workflow continue to use the strict live gate. The proof has no
 pull-request or manual trigger, so a fork or Dependabot pull request cannot receive the secret.
 While the triggering commit remains the tip of `main`, use GitHub's rerun
@@ -78,6 +145,41 @@ mechanism to retry its immutable run. If `main` advances, the earlier candidate
 and its proof are superseded; require a successful proof from the newer tip
 instead. The exact-main run for each candidate is the hosted proof; do not
 create the secret in a pull request or place the token in repository files.
+
+### Version 1 security dependency gate
+
+`config/version-1-security-policy.json` is the reviewed source of truth for
+Version 1 security issue ownership, release iterations, native GitHub
+dependencies, their iteration order, and the #131 release-evidence consumer.
+`config/release-project-query-v1.graphql` is the only permitted Project query
+for that gate. Proof, readiness, and release workflows must use both files
+without embedding a divergent query or inferring policy from issue titles,
+bodies, labels, or comments.
+
+The Project owner and repository owner are independent coordinates: workflows
+take the former from release configuration and the latter from
+`GITHUB_REPOSITORY_OWNER`. For schema v3 releases, the gate compares the exact
+Project iteration issue set with the exact repository milestone issue set and
+fails if the milestone contains any pull request.
+
+When the plan changes, update the issue number, owner, iteration, dependency
+edge, iteration order, and consumer in the same reviewed pull request wherever
+they are affected. Apply the corresponding owner, Project field, and native
+`blocked by` relationship in GitHub, then run the exact checked-in query through
+`scripts/verify_release_project.py`. Do not represent a required dependency
+only in prose. The verifier rejects missing or reversed edges, cycles,
+prerequisites scheduled after dependents, premature closure, incomplete
+pagination, and unknown policy fields.
+
+The generated schema-v1 report is deterministic and binds its normalized
+issues and edges to the canonical policy SHA-256. Release evidence records its
+digest and accepts the `version-1-security-dependencies` gate only when its
+Project, repository, checked issues, dependencies, policy digest, and #131
+consumer match the checked-in policy exactly. Keep the report as readiness
+evidence and pass that same artifact to the tag workflow; never reconstruct it
+from mutable issue prose. Authorized maintainer changes and GitHub's Project,
+issue-dependency, API, and token enforcement remain trusted. Missing access or
+incomplete hosted data blocks release.
 
 ## Binary-signing version boundary
 
@@ -103,15 +205,25 @@ an unpublished fuse-mutated test bundle on a hosted runner; that bundle must
 never be distributed, imported into a release, or accepted as release-signing
 evidence.
 
-## v0.5.0 supported offline shell
+## v0.6.0 supported offline shell
 
-v0.5.0 is a supported offline three-OS Electron shell. Its installer matrix is
+v0.6.0 is a supported offline three-OS Electron shell. Its installer matrix is
 macOS 15 arm64, macOS 15 x64, Windows 11 ARM64, and Ubuntu 24.04 x64. The
 matching-architecture DMGs cover the supported macOS 15/26 range. Its release
 scope is Home, Diagnostics, Settings, capability onboarding, and a private
 loopback sidecar, distributed as manual full installers under the pre-1.0
 binary-signing policy above. It excludes genealogy jobs, chat providers, cloud
 accounts, updater behavior, and background release channels.
+
+Any later candidate that contains the structured desktop diagnostic boundary
+must verify the schema-v1 event catalog, one per-launch correlation UUID across
+all three component writers, 512 KiB by three-file retention per component,
+symbolic-link refusal, and non-blocking writer failure. Inspect installed
+open-directory and clear actions without exposing a renderer path or generic
+filesystem capability. Confirm that no export or automatic upload exists and
+that diagnostics, privacy canaries, console output, and support files are absent
+from every CI and release artifact. Keep the exact standard-error shutdown
+receipt as independent exit evidence.
 
 ## One-time repository setup
 
@@ -241,6 +353,13 @@ self-approval; do not make that change during the one-maintainer release.
    `docs/release-evidence/<version>/`. Every finding needs an owner and expiry;
    every importer needs a dated evidence link, and only fictional-data manual
    imports may be marked verified.
+
+   Use `uv version --short` as a read-only confirmation of the project version.
+   Do not use `uv version <version>` to perform the release bump: the release
+   contract spans `.github/release-config.json`, `pyproject.toml`, and
+   `desktop/package.json` plus the packaged sidecar/build identity. Update and
+   verify those owned values together, regenerate the lock through `make lock`,
+   and let the release-configuration verifier reject any drift.
 4. Approve and merge a release-only preparation PR through the protected
    `main` ruleset, after required checks pass and conversations are resolved.
 5. Run the release-configuration verifier and confirm the exact configured
@@ -296,7 +415,7 @@ and installer evidence.
 
 The tag workflow is the only installer publisher. The installers are built and
 validated by a manually dispatched pre-tag run, but cannot be
-published until the v0.4.0 release is complete and the v0.5.0 tag gates pass.
+published until the v0.5.0 release is complete and the v0.6.0 tag gates pass.
 Before the final release distribution can be assembled or any release asset can be published, it
 requires all four installer rows. The `Required native verification` column is
 version-aware: `0.x` requires installation and installed-runtime execution but
@@ -322,6 +441,20 @@ complete `release-evidence.md`, create the one `SHA256SUMS` file, and attest
 `dist/*`, so the evidence manifest, checksums, and provenance cover the Python
 wheel and sdist together with every desktop installer, any required detached signature,
 combined SBOM, desktop manifest, and exact-head evidence document.
+
+Before accepting a readiness artifact or authorizing a tag, independently
+inspect the combined SBOM and confirm all of the following:
+
+- exactly one `ancestryllm` component exists with the candidate version, the
+  `ancestryllm==<version>` reference, and the canonical PyPI package URL;
+- component references exactly equal dependency-node references, and every
+  dependency edge names a known component; and
+- no file URI, absolute local path, top-level `serialNumber`, or metadata
+  `timestamp` remains.
+
+Any failure blocks tagging and publication. Fix the source, rerun release
+readiness for the new exact `main` head, and review the replacement artifact;
+never reuse the rejected artifact as release evidence.
 
 ## Tag and publish
 
@@ -368,18 +501,26 @@ Release construction installs the locked `build` group and the `security`
 group needed for SBOM generation, with no provider extras. Stock-`pip` wheel
 and source-distribution smoke jobs remain unchanged because they validate the
 published consumer experience rather than authorize a build.
+Setuptools remains the production backend. The locked `uv_build` candidate and
+`make evaluate-uv-build` exist only for the fail-closed 0.6 comparison recorded
+in the [uv_build evaluation](reference/UV_BUILD_EVALUATION.md); its incompatible result
+does not authorize a backend change or weaken any release check.
 Release construction uses SHA-pinned `actions/setup-python` with Python 3.12,
 then the verified repository contract requires exactly `uv` 0.12.1, selects
 only that system interpreter, and disables Python downloads. The workflow calls
 the canonical package-build and SBOM commands directly after its narrow locked
 synchronization. This keeps release enforcement independent of candidate-controlled
 Make targets while preserving `make package` and `make sbom` as local interfaces.
-The workflow then attests the combined artifacts; prepares a draft GitHub
-Release; publishes to TestPyPI with `attestations: false` because TestPyPI does
-not provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
-artifact hashes; and pauses for required production approval. Production PyPI
-publishing explicitly requests `attestations: true`. The workflow then verifies
-the PEP 740 provenance for both the wheel and source distribution, including
+The workflow then attests the combined artifacts and immediately downloads the
+complete distribution artifact into a separate job. Before it may prepare a
+draft GitHub Release, publish to TestPyPI or PyPI, or publish the immutable
+GitHub Release, `gh attestation verify` must accept every release asset for the
+exact repository, `.github/workflows/release.yml` signer workflow, and release
+commit. TestPyPI publishing uses `attestations: false` because TestPyPI does not
+provide PyPI's PEP 740 Integrity API; it verifies only the exact TestPyPI
+artifact hashes and then pauses for required production approval. Production
+PyPI publishing explicitly requests `attestations: true`. The workflow then
+verifies the PEP 740 provenance for both the wheel and source distribution, including
 exact repository, workflow, environment, filename, and SHA-256 identity, with
 the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. The workflow installs this tool
@@ -442,7 +583,7 @@ configuration directories. Confirm the displayed version and healthy
 Diagnostics after relaunch. Recovery or rollback uses the same process with a
 previous full installer whose checksum and version-required signature still verify.
 
-v0.5.0 has no updater feed, no background update, no staged rollout, and no
+v0.6.0 has no updater feed, no background update, no staged rollout, and no
 automatic rollback. Do not publish `latest*.yml`, blockmaps, or another update
 channel, and do not represent manual reinstall behavior as an updater.
 

@@ -1,3 +1,4 @@
+# Produces fail-closed evidence that a selected commit is ready for release.
 name: Release readiness
 
 on:
@@ -32,6 +33,7 @@ jobs:
   validate:
     name: validate candidate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read # required to verify the candidate commit
       issues: read # required to verify Project issue dependencies
@@ -77,10 +79,28 @@ jobs:
           project_number="$(jq -r '.project.number' .github/release-config.json)"
           project_title="$(jq -r '.project.title' .github/release-config.json)"
           project_iteration="$(jq -r '.project.iteration' .github/release-config.json)"
-          project_priority="$(jq -r '.project.priority' .github/release-config.json)"
           project_status="$(jq -r '.project.status' .github/release-config.json)"
           project_validation="$(jq -r '.project.validation' .github/release-config.json)"
-          project_query='query($owner: String!, $number: Int!, $endCursor: String) { user(login: $owner) { projectV2(number: $number) { number title items(first: 100, after: $endCursor) { nodes { id content { __typename ... on Issue { number state repository { nameWithOwner } blockedBy(first: 100) { nodes { number state repository { nameWithOwner } } dependencyPageInfo: pageInfo { hasNextPage endCursor } } } } fieldValues(first: 100) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2SingleSelectField { name } } } ... on ProjectV2ItemFieldIterationValue { title iterationId field { ... on ProjectV2IterationField { name } } } } } } pageInfo { hasNextPage endCursor } } } } }'
+          project_repository="${GITHUB_REPOSITORY#*/}"
+          project_milestone_number="$(jq -r '.project.milestone.number // 1' .github/release-config.json)"
+          project_include_milestone="false"
+          project_priority_args=()
+          while IFS= read -r project_priority; do
+            project_priority_args+=(--priority "$project_priority")
+          done < <(jq -r '(.project.priorities // [.project.priority])[]' .github/release-config.json)
+          project_milestone_args=()
+          if test "$(jq -r '.schema_version' .github/release-config.json)" -eq 3; then
+            project_include_milestone="true"
+            project_milestone_title="$(jq -r '.project.milestone.title' .github/release-config.json)"
+            project_milestone_args=(
+              --repository-owner "$GITHUB_REPOSITORY_OWNER"
+              --repository "$project_repository"
+              --milestone-number "$project_milestone_number"
+              --milestone-title "$project_milestone_title"
+            )
+          fi
+          project_query="$(< config/release-project-query-v1.graphql)"
+          mkdir -p "$RUNNER_TEMP/version-1-security-gate"
           test -n "$PROJECT_READ_TOKEN" || {
             echo "Missing required Actions secret ANCESTRYLLM_PROJECT_READ_TOKEN for private Project read access." >&2
             exit 1
@@ -88,18 +108,31 @@ jobs:
           GH_TOKEN="$PROJECT_READ_TOKEN" gh api graphql --paginate --slurp \
             -f query="$project_query" \
             -f owner="$project_owner" \
-            -F number="$project_number" |
+            -F number="$project_number" \
+            -f repositoryOwner="$GITHUB_REPOSITORY_OWNER" \
+            -f repository="$project_repository" \
+            -F milestoneNumber="$project_milestone_number" \
+            -F includeMilestone="$project_include_milestone" |
             python scripts/verify_release_project.py \
               --project-owner "$project_owner" \
               --project-number "$project_number" \
               --project-title "$project_title" \
               --iteration "$project_iteration" \
-              --priority "$project_priority" \
+              "${project_priority_args[@]}" \
               --status "$project_status" \
-              --validation "$project_validation"
+              --validation "$project_validation" \
+              "${project_milestone_args[@]}" \
+              --security-policy config/version-1-security-policy.json \
+              --security-report "$RUNNER_TEMP/version-1-security-gate/report.json"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: version-1-security-gate
+          path: ${{ runner.temp }}/version-1-security-gate/report.json
+          if-no-files-found: error
+          retention-days: 90
 
   quality:
     name: quality (${{ matrix.python }})
@@ -109,6 +142,9 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUFF_OUTPUT_FORMAT: github
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -120,6 +156,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.python == '3.12'
+        with:
+          node-version: "26.5.0"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: matrix.python == '3.12'
+        with:
+          version: "11.9.0"
+          run_install: false
       - name: Set up verified uv
         uses: ./.github/actions/setup-verified-uv
         with:
@@ -137,15 +182,20 @@ jobs:
         run: |
           uv run --locked --group lint ruff check src tests scripts
           uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_gfm_markdown.py
           uv run --locked --group lint python scripts/check_architecture_contracts.py
           ./scripts/check_repository_safety.sh
+          uv run --locked --group lint ruff check src tests scripts --select D100,D101,D102,D103,D104,D418,D419
           uv run --locked --group lint python scripts/check_code_documentation.py
+          node desktop/scripts/install-locked.mjs
+          pnpm --dir desktop docs:check
           uv run --locked --group typecheck mypy src/ancestryllm
 
   security:
     name: security evidence
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -156,7 +206,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Scan frozen candidate tree for secrets
-        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
         with:
           version: 3.95.9
           extra_args: --results=verified,unknown --fail-on-scan-errors
@@ -188,6 +238,7 @@ jobs:
     name: CodeQL evidence
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read # required by CodeQL for workflow metadata
       contents: read # required to analyze repository contents
@@ -197,11 +248,11 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: python
           queries: security-extended
-      - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           output: codeql-sarif
           upload: never
@@ -220,6 +271,7 @@ jobs:
     name: release package
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       attestations: read # required by the verified uv provenance preflight
       contents: read
@@ -256,6 +308,7 @@ jobs:
         python: ["3.12", "3.13", "3.14"]
         artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -288,6 +341,7 @@ jobs:
     needs: [validate, quality, security, codeql, package, install]
     if: ${{ success() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -307,6 +361,10 @@ jobs:
           path: evidence/bootstrap
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: version-1-security-gate
+          path: evidence/version-1-security-gate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
           name: release-codeql-sarif
           path: evidence/codeql-sarif
       - name: Create evidence manifest
@@ -315,15 +373,25 @@ jobs:
           COMMIT_SHA: ${{ needs.validate.outputs.commit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          quality_policy_sha="$(
+            python -c 'import hashlib, json, pathlib; value = json.loads(pathlib.Path("config/release-quality-policy-v1.json").read_text(encoding="utf-8")); print(hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest())'
+          )"
           jq -n \
             --arg release "$VERSION" \
             --arg commit "$COMMIT_SHA" \
             --arg run_url "$RUN_URL" \
+            --arg policy_sha "$quality_policy_sha" \
+            --slurpfile quality_policy config/release-quality-policy-v1.json \
             '{
-              schema_version: 1,
+              schema_version: 2,
               release: $release,
               commit: $commit,
               run_url: $run_url,
+              policy: {
+                id: $quality_policy[0].policyId,
+                schemaVersion: $quality_policy[0].schemaVersion,
+                sha256: $policy_sha
+              },
               gates: (
                 [
                   "bootstrap-verification",
@@ -332,17 +400,22 @@ jobs:
                   "cyclonedx-sbom",
                   "dependency-audit",
                   "lifecycle-audit",
-                  "project-release-gate",
                   "mypy",
                   "privacy-regressions",
+                  "project-release-gate",
                   "repository-safety",
                   "reproducible-distributions",
                   "ruff-format",
                   "secret-scan",
                   "semgrep",
                   "tests-and-coverage",
+                  "version-1-security-dependencies",
                   "workflow-security-analysis"
-                ]
+                ] as $manifest_gates
+                | if $quality_policy[0].qa.readinessGates == $manifest_gates
+                  then $manifest_gates
+                  else error("release readiness gates do not match the quality policy")
+                  end
                 | map({
                     name: .,
                     status: "verified",
@@ -363,6 +436,7 @@ jobs:
             --findings evidence/findings-dispositions.json \
             --interoperability evidence/interoperability.json \
             --bootstrap-receipt evidence/bootstrap/uv-bootstrap.json \
+            --security-dependency-report evidence/version-1-security-gate/report.json \
             --output evidence/release-evidence.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

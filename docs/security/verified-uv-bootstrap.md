@@ -13,9 +13,11 @@ storage, FastAPI contracts, or desktop boundaries.
 ## Developer setup
 
 Use a supported system Python 3.12-3.14. The checked-in `.python-version`
-selects 3.12 by default; `[tool.uv]` permits only a system interpreter and
-disables Python downloads. GitHub's attestation API also requires
-authentication. For interactive development, authenticate once with:
+requests 3.12 when `uv` performs direct fallback discovery. Canonical Make
+targets instead resolve the selected `PYTHON` command to its exact native
+executable path and provide that path to `uv`; `[tool.uv]` permits only a system
+interpreter and disables Python downloads. GitHub's attestation API also
+requires authentication. For interactive development, authenticate once with:
 
 ```bash
 gh auth login --hostname github.com
@@ -46,10 +48,11 @@ policy-pinned GitHub CLI archive passes its own hash and archive checks.
 `uv` is supplied by this bootstrap, not by an application extra or PEP 735
 dependency group. After verification, `make setup` runs
 `uv sync --locked --all-extras --all-groups`, including the release verifier.
-Purpose-specific workflows may synchronize smaller locked profiles before
-calling the same canonical Make targets, and the production PyPI verification
-job installs only `release-verifier`. See [Dependency
-maintenance](../DEPENDENCY_MAINTENANCE.md) for the complete group contract.
+Purpose-specific workflows synchronize smaller locked profiles and invoke
+their verifier commands directly; local Make targets remain developer
+interfaces. The production PyPI verification job installs only
+`release-verifier`. See [Dependency
+maintenance](../reference/DEPENDENCY_MAINTENANCE.md) for the complete group contract.
 
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on
@@ -57,6 +60,17 @@ implicit latest release, an alternate index or mirror, or an existing `uv` on
 reuse. A mismatch fails closed without deleting user data; remove only the
 specific ignored `.tools/uv/` cache and run the bootstrap again after resolving
 the cause.
+
+Before synchronization, `make setup` probes an existing regular uv-managed
+`.venv` with an isolated standard-library import. If Python fails during that
+probe because the generated environment is tied to a runtime that no longer
+exists, setup emits `UVENV_VENV_RECREATED`, clears only that ignored environment
+through the verified `uv`, recreates it with the selected supported system
+interpreter, and continues. It refuses to follow or replace a symlink, a
+non-directory, or a directory without `pyvenv.cfg`; those ambiguous targets
+fail closed with `UVENV_VENV_REPAIR_REFUSED` and require the developer to
+inspect and move the exact path aside manually. Setting `PYTHON` alone does not
+repair an existing environment whose base interpreter has disappeared.
 
 ## Trust policy
 
@@ -68,7 +82,7 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - exact release archive names, reviewed byte sizes, archive SHA-256 values,
   paths, and extracted executable SHA-256 values for Linux, macOS, and Windows
   on x86-64 and ARM64;
-- GitHub CLI 2.97.0 as the pinned provenance verifier, with an exact archive and
+- GitHub CLI 2.100.0 as the pinned provenance verifier, with an exact archive and
   reviewed byte size and SHA-256 for every supported platform;
 - `astral-sh/setup-uv` v9.0.0 at its exact reviewed commit; and
 - `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
@@ -97,13 +111,21 @@ verified GitHub CLI may execute.
 
 The utility then downloads the exact policy-selected `uv` release URL, verifies
 the archive digest, and asks the verified GitHub CLI to verify the release
-attestation against `github.com` within a 60-second subprocess deadline;
-ambient `GH_HOST` configuration cannot select another host. A timeout fails as
-`ATTESTATION_VERIFICATION_TIMEOUT` before extraction or `uv` execution. The
-returned statement must bind the selected asset digest to the exact source
+attestation against `github.com` within a shared 60-second deadline;
+ambient `GH_HOST` configuration cannot select another host. HTTP 500, 502, 503,
+and 504 service errors from the GitHub API or attestation bundle downloads allow
+up to three verification attempts, with one- and two-second retry delays included
+in that deadline. Authentication and provenance
+failures are not retried. A timeout fails as `ATTESTATION_VERIFICATION_TIMEOUT`
+before extraction or `uv` execution. The returned statement must bind the
+selected asset digest to the exact source
 repository, source commit and ref, signer workflow, OIDC issuer, and SLSA
 predicate. The extracted `uv` executable receives a second digest check and
-exact-version check before an atomic repository-local installation.
+exact-version check before an atomic repository-local installation. Extraction
+selects only the exact policy-reviewed archive member; an absent or differently
+located executable fails closed before any candidate binary executes. In uv
+0.12.1, both reviewed Windows ZIP archives contain `uv.exe` at the archive root,
+independent of the architecture-specific archive filename.
 The install and receipt destinations are resolved through stable parent handles:
 POSIX uses directory descriptors and relative filesystem operations, while
 Windows holds every ancestor directory open without delete sharing and rejects
@@ -119,6 +141,10 @@ disabled, and re-hashes the action-installed executable before first use. The
 calling job grants the verifier `contents: read` and `attestations: read`; jobs
 retain only any additional job-specific scope already required by their release
 contract.
+On Windows, setup-uv reports its installed path without the `.exe` suffix. The
+post-install verifier resolves only that exact `uv` name to its sibling
+`uv.exe`; it does not search `PATH`, accept another executable name, or relax
+the policy-selected executable digest and version checks.
 The token is available only to the `gh attestation verify` subprocess; the
 verified GitHub CLI version probe and every `uv` subprocess receive an
 environment with GitHub token variables removed. The token is never written to
@@ -173,9 +199,14 @@ Failures use stable coded categories such as `POLICY_SCHEMA_UNSUPPORTED`,
 `INSTALL_WRITE_FAILED`, `RECEIPT_PATH_UNSAFE`, `RECEIPT_WRITE_FAILED`,
 `VERIFIER_ARCHIVE_DIGEST_MISMATCH`, `UV_ARCHIVE_DIGEST_MISMATCH`,
 `VERIFIER_AUTHENTICATION_FAILED`, `ATTESTATION_VERIFICATION_TIMEOUT`,
-`ATTESTATION_IDENTITY_MISMATCH`, and `UV_VERSION_MISMATCH`. Treat every failure
-as a trust-chain failure until its cause is understood. Do not bypass it with a
+`ATTESTATION_SERVICE_UNAVAILABLE`, `ATTESTATION_IDENTITY_MISMATCH`, and
+`UV_VERSION_MISMATCH`. Treat every failure as a trust-chain failure until its
+cause is understood. Do not bypass it with a
 global installation or by editing the receipt.
+
+`ATTESTATION_SERVICE_UNAVAILABLE` means GitHub returned a temporary service error
+on all three attempts. Wait for the service to recover and rerun setup; no `uv`
+binary is installed or executed without successful provenance verification.
 
 For an interrupted download or a cache mismatch, leave user files untouched,
 remove only the repository-local ignored `.tools/uv/` cache, and retry. For a
@@ -192,6 +223,12 @@ reporting a failure; do not attach download responses, temporary directories,
 environment dumps, or credentials.
 
 ## Reviewed policy updates
+
+The GitHub CLI verifier pin is currently 2.100.0. This focused refresh preserves
+the same fail-closed attestation command and payload checks after the previous
+2.97.0 binary returned upstream trust-metadata failures for the exact reviewed
+`uv` attestation; the newer official release verified that same artifact
+without relaxing any identity, digest, or provenance requirement.
 
 Update the policy only in a focused, reviewed pull request. The same change must
 review and update all of the following where applicable:
@@ -210,10 +247,12 @@ review and update all of the following where applicable:
    cache, receipt-sanitization, and policy-rejection tests.
 
 Obtain hashes and provenance from the reviewed upstream release, compare all
-supported platform assets rather than only the maintainer's host, and preserve
-the existing verified chain while preparing the update. Never use the candidate
-unverified executable to establish trust in itself. Run the focused suites and
-all applicable canonical setup, test, lint, type-check, security, package,
-workflow-audit, documentation, and release-evidence gates. Native hosted results
-for every supported platform remain required before merge or release; local or
-emulated evidence is not a substitute.
+supported platform assets rather than only the maintainer's host, inspect every
+archive member listing directly rather than deriving a member path from its
+archive filename, and preserve the existing verified chain while preparing the
+update. Never use the candidate unverified executable to establish trust in
+itself. Run the focused suites and all applicable canonical setup, test, lint,
+type-check, security, package, workflow-audit, documentation, and
+release-evidence gates. Native hosted results for every supported platform
+remain required before merge or release; local or emulated evidence is not a
+substitute.

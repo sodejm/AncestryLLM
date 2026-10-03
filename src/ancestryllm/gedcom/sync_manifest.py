@@ -7,8 +7,11 @@ import re
 import uuid
 from itertools import pairwise
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from types import ModuleType
 
 from ancestryllm.core.cancellation import (
     cancellation_checkpoint,
@@ -78,7 +81,7 @@ def _validate_exported_at(timestamp: str) -> None:
     """Require one explicit export time to be valid ISO-8601 text."""
 
     try:
-        dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        dt.datetime.fromisoformat(timestamp)
     except ValueError as exc:
         raise SyncError(
             "SYNC_CONFIGURATION",
@@ -133,7 +136,7 @@ def _header_export_date(
     core: ModuleType,
     ingress: FileIngressPolicy,
     expected: FileSnapshot,
-) -> Optional[str]:
+) -> str | None:
     """Read a usable HEAD.DATE without treating it as genealogical evidence."""
     try:
         first = next(core.iter_gedcom_records(path, ingress, expected))
@@ -183,7 +186,7 @@ def _snapshot_specs(
                 basis = "HEAD.DATE"
             else:
                 exported_at = dt.datetime.fromtimestamp(
-                    snapshot.modified_ns / 1_000_000_000, tz=dt.timezone.utc
+                    snapshot.modified_ns / 1_000_000_000, tz=dt.UTC
                 ).isoformat()
                 basis = "file-mtime"
         fingerprint = ingress.fingerprint(
@@ -215,8 +218,8 @@ def _new_manifest(
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "tree_id": str(uuid.uuid4()),
         "generation": 0,
-        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "created_at": dt.datetime.now(dt.UTC).isoformat(),
+        "updated_at": dt.datetime.now(dt.UTC).isoformat(),
         "master": {"path": str(master), "sha256": master_fingerprint.sha256},
         "parent_release": None,
         "release_root": str(release_root),
@@ -227,7 +230,7 @@ def _new_manifest(
         "blocks": {},
         "removed": [],
         "manual_tombstones": [],
-        "next_ids": {prefix: 1 for prefix in set(RECORD_PREFIXES.values()) | {"X"}},
+        "next_ids": dict.fromkeys(set(RECORD_PREFIXES.values()) | {"X"}, 1),
         "releases": [],
     }
 
@@ -246,7 +249,7 @@ def _manifest_timestamp(value: Any, field_name: str) -> dt.datetime:
     if not isinstance(value, str) or not value:
         raise _manifest_invalid(field_name)
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(value)
     except ValueError as exc:
         raise _manifest_invalid(field_name) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -350,7 +353,7 @@ def _validate_manifest(value: dict[str, Any]) -> None:
         ):
             raise _manifest_invalid("snapshots")
         try:
-            observed_at = dt.datetime.fromisoformat(snapshot["observed_at"].replace("Z", "+00:00"))
+            observed_at = dt.datetime.fromisoformat(snapshot["observed_at"])
         except ValueError as exc:
             raise _manifest_invalid("snapshots") from exc
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:

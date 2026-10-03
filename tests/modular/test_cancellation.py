@@ -66,15 +66,17 @@ def test_base_exception_listener_cannot_break_cancellation() -> None:
 
 def test_nested_non_interruptible_sections_report_innermost_operation() -> None:
     token = CancellationToken()
-    with bind_cancellation_token(token):
-        with pytest.raises(CancellationError):
-            with non_interruptible_section("publishing fictional bundle"):
-                with non_interruptible_section("rolling back fictional bundle"):
-                    assert token.request() is True
-                    assert token.state.pending is True
-                    assert token.state.deferred_by == "rolling back fictional bundle"
-                assert token.state.pending is True
-                assert token.state.deferred_by == "publishing fictional bundle"
+    with (
+        bind_cancellation_token(token),
+        pytest.raises(CancellationError),
+        non_interruptible_section("publishing fictional bundle"),
+    ):
+        with non_interruptible_section("rolling back fictional bundle"):
+            assert token.request() is True
+            assert token.state.pending is True
+            assert token.state.deferred_by == "rolling back fictional bundle"
+        assert token.state.pending is True
+        assert token.state.deferred_by == "publishing fictional bundle"
 
 
 def test_request_before_protected_section_prevents_entry() -> None:
@@ -82,10 +84,12 @@ def test_request_before_protected_section_prevents_entry() -> None:
     token.request()
     entered = False
 
-    with bind_cancellation_token(token):
-        with pytest.raises(CancellationError):
-            with non_interruptible_section("publishing fictional bundle"):
-                entered = True
+    with (
+        bind_cancellation_token(token),
+        pytest.raises(CancellationError),
+        non_interruptible_section("publishing fictional bundle"),
+    ):
+        entered = True
 
     assert entered is False
 
@@ -94,11 +98,13 @@ def test_cancellation_is_raised_immediately_after_protected_section() -> None:
     token = CancellationToken()
     completed = False
 
-    with bind_cancellation_token(token):
-        with pytest.raises(CancellationError):
-            with non_interruptible_section("publishing fictional bundle"):
-                token.request()
-                completed = True
+    with (
+        bind_cancellation_token(token),
+        pytest.raises(CancellationError),
+        non_interruptible_section("publishing fictional bundle"),
+    ):
+        token.request()
+        completed = True
 
     assert completed is True
     assert token.state.pending is False
@@ -139,6 +145,9 @@ def test_interruptible_sleep_wakes_when_cancellation_is_requested() -> None:
 @pytest.mark.parametrize("operation", ("", " ", "x" * 201))
 def test_protected_section_names_are_bounded_case(operation: str) -> None:
     token = CancellationToken()
-    with bind_cancellation_token(token), pytest.raises(ValueError):
-        with non_interruptible_section(operation):
-            pass
+    with (
+        bind_cancellation_token(token),
+        pytest.raises(ValueError),
+        non_interruptible_section(operation),
+    ):
+        pass

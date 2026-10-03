@@ -1,17 +1,96 @@
 # Desktop verification
 
 The `Desktop gate` is the always-reported aggregate for changes that can affect
-the bounded 0.5.0 Electron shell. It binds source, security, native sidecar, and
-unpublished packaged-runtime evidence to the exact protected `main` commit. The gate
-does not publish a release and must not be interpreted as installer, signing,
-notarization, or end-user platform approval.
+the bounded 0.6.0 Electron shell. It binds source, security, native sidecar, and
+unpublished packaged-runtime evidence to one exact commit. Push executions bind
+that commit to protected `main`; an authorized manual dispatch can select an
+immutable same-repository branch commit to provide pre-merge native evidence.
+The gate does not publish a release and must not be interpreted as installer,
+signing, notarization, or end-user platform approval.
+
+Issue #105 adds source-level contract, unit, API-redaction, and renderer tests
+for five non-secret settings plus write-only credential status, set, and delete
+operations. Those checks do not expand the already recorded six-method
+packaged bridge claim below. The later Issue #131 gate must update the package
+harness and exact-method evidence before a packaged application can claim the
+five new bridge operations.
+
+Issue #109 likewise adds source-level task-contract, sender-subscription,
+renderer-state, accessibility, and reload end-to-end evidence. It does not
+expand the recorded exact-six packaged claim; Issue #131 must update the
+package harness and adversarial evidence before a packaged application can
+claim the five task requests and validated event listener.
+
+Issue #110 adds source-level service, policy, API, sidecar, shutdown, and
+no-network-before-authorization tests for bounded synchronous transient chat.
+Issue #111 adds source-level Main-owned transport tests, and Issue #112 adds
+source-level bridge, bounded renderer-state, accessibility, safe Markdown,
+plain-text copy, and confirmed-link tests. They do not expand the recorded
+packaged-network or exact-six bridge claim. Issue #131 must update the package
+harness and supply target-matched stream-race, accessibility, and hostile-content
+evidence before a packaged application can claim this Chat destination.
+
+## Versioned release-quality evidence
+
+The desktop portion of `config/release-quality-policy-v1.json` is the only
+release-quality authority for tool versions, coverage, receipt gates,
+performance budgets, and diagnostics policy. Hosted verification uses Python
+3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+`desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
+accepted.
+
+The source verification matrix is deliberately layered:
+
+| Evidence | Command | Boundary |
+|---|---|---|
+| Lint and all TypeScript configurations | `pnpm --dir desktop run verify:source` | Source |
+| V8 unit/integration coverage plus script tests | `pnpm --dir desktop run test:coverage` | Source |
+| axe accessibility checks | `pnpm --dir desktop run test:accessibility` | Source renderer |
+| WebDriver functional and WCAG scenarios | `pnpm --dir desktop run test:e2e` | Source application |
+| Native launch, security, lifecycle, and performance scenarios | `pnpm --dir desktop run test:e2e:packaged` | Unpublished unpacked native package |
+
+V8 coverage fails below 70% branches or 75% functions, lines, or statements.
+Only `e2e/**`, declaration files under `src/**/*.d.ts`, and the renderer test
+bootstrap `src/renderer/src/test-setup.ts` are excluded. Tests and canaries use
+deterministic fictional records; real genealogy, credentials, prompts,
+responses, or diagnostic payloads must never enter evidence.
+
+Each command is wrapped by a write-once receipt. The aggregate accepts exactly
+the receipt gates declared by the central policy, including pinned runner
+versions, lint, type checking, coverage, accessibility, source WebDriver,
+JavaScript/TypeScript static analysis, dependency audit, secret scanning,
+diagnostics, packaged security, and SBOM generation. It rejects a missing,
+extra, failed, wrong-head, legacy, or digest-mismatched receipt and records the
+exact `toolVersions` object for the release verifier. Aggregate schema v3 also
+records the canonical policy identity, schema version, and SHA-256 digest so a
+valid receipt set cannot be approved under a substituted policy.
+
+Native performance uses policy `desktop-unpacked-v1`. WebdriverIO measures
+cold launch, warm launch, readiness, process-tree RSS, and renderer outbound
+requests in `desktop/e2e/packaged-shell.wdio.ts`; the aggregate validator in
+`desktop/scripts/verification-evidence.mjs` compares every value with the
+target-specific ceiling. The package boundary is always `unpacked-native`.
+The performance family is authorized only by the declared
+`packageRuntimePassed` receipt gate, whose target-specific hosted commands are
+enumerated exactly in the central policy.
+The six native rows and their numeric ceilings live only in the central policy;
+missing, negative, non-finite, over-budget, or nonzero renderer-egress evidence
+fails the row.
+
+Diagnostics must match `ancestryllm.desktop-diagnostic/1` and its policy-bound
+schema digest. The synthetic privacy canary proves only allowlisted useful
+codes are retained while credential, path, genealogy, prompt, response, port,
+URL, stderr, and output canaries are absent. Retention remains three 512 KiB
+files per component. Diagnostics have no telemetry, export, upload, CI-artifact,
+or release-artifact path; the release approval consumes only the boolean gate,
+schema identity, and sanitized receipt metadata.
 
 ## Exact-head target matrix
 
 The native package job assembles and exercises one `unpacked-native`
-application on each exact supported runner below. The assembled application exists only
-inside that job; CI uploads its JSON evidence and SBOM, not the application
-tree.
+application on each exact supported runner below. The assembled application
+exists only inside that job; CI uploads its JSON evidence and SBOM, not the
+application tree.
 
 | Runner | Bundled sidecar | Intended target | Executed OS | Host architecture | Artifact architecture | `platformValidated` |
 |---|---|---|---|---|---|---|
@@ -33,10 +112,64 @@ the desktop sidecar starts with provider `none`. The resulting `win32-arm64`
 sidecar and application are built and launched natively. The aggregate records
 `platformValidated: true` only after all six exact rows pass.
 
+The Ubuntu row installs the distribution-provided GNOME keyring and launches
+the packaged check through `desktop/scripts/run-with-linux-keyring.sh`. That
+runner creates a disposable D-Bus session, isolated owner-only keyring directories,
+and a disposable native Secret Service collection, then removes them when the
+check exits. It verifies that the native service owns
+`org.freedesktop.secrets`, then stores, reads, and deletes a non-secret probe
+before the WebdriverIO Electron session may start. A normal Linux launch ignores inherited D-Bus and
+XDG runtime selectors and binds the sidecar to the conventional
+`unix:path=/run/user/<uid>/bus` endpoint derived from the kernel-reported user
+ID. The exact verification runner instead binds its private D-Bus daemon to an
+owner-only `runtime/bus` socket and launches a separate unpublished Linux
+verifier package. Only that package compiles the adapter that reads its
+owner-only root from a Linux-only Electron command-line switch. The ordinary
+production package is assembled and scanned first; its adapter always returns
+no verifier root, and the production build scan rejects the selector literal.
+In the verifier, Main requires an absolute Linux path and derives the sidecar's
+disposable home, XDG cache, configuration, data, and runtime paths plus the
+exact D-Bus address from that root; it does not inherit those values from
+the WebdriverIO runner's environment. The packaged process therefore reaches that verified
+service without selecting a Python test backend, injecting a packaged
+credential, or retaining runner keyring state. An unavailable or failed native
+service fails the row.
+
+The Ubuntu release-installer checks exercise the installed production package,
+not the unpublished verifier adapter. They select the launcher's
+`--production-runtime-bus` mode, which validates or creates the owner-only
+`/run/user/<uid>` directory and uses the exact endpoint production Electron
+Main derives from the process user ID. When `bus` is absent, the launcher binds
+an owned private D-Bus daemon there and removes only that identity during
+cleanup. When it already exists, reuse requires a current-user-and-group,
+non-symlink Unix socket, a responsive session bus, no existing
+`org.freedesktop.secrets` owner, and unchanged device/inode and ownership
+metadata across validation. A reused bus is neither killed nor removed. Secret
+Service storage remains isolated under the temporary verifier root in both
+paths. This proves that an installed production sidecar can reach the native
+service without accepting an environment-selected endpoint or compiling the
+verifier switch into the shipped package.
+
 Every row verifies the checked-out full commit SHA before building. The
 aggregate rejects missing, duplicate, wrong-target, or wrong-head evidence.
 Workflow-level path filters are not used: the in-workflow classifier may skip
 the expensive jobs, but `Desktop gate` still reports a result.
+
+For pre-merge verification, dispatch the workflow from the same-repository PR
+branch and supply its full 40-character head SHA:
+
+```console
+gh workflow run desktop-sidecar.yml --ref <branch> -f commit_sha=<full-head-sha>
+```
+
+The workflow rejects a symbolic or abbreviated `commit_sha`, proves that the
+checkout resolves to that exact object, and requires a manual target to equal
+GitHub's immutable event SHA for the selected same-repository ref. A normal push
+run additionally proves that the object equals `origin/main`. Manual dispatch
+does not receive release credentials or publish artifacts outside the ordinary
+read-only verification evidence; it exists to make the native pre-merge gate
+possible without granting forked pull-request code an automatic hosted execution
+path.
 
 ## Installer release matrix and signing boundary
 
@@ -86,9 +219,11 @@ also emits `desktop-exact-head-evidence.json`,
 desktop-only `SHA256SUMS`. The artifact is uploaded without recompression so
 its reported digest can be approved. A later tag run imports that exact
 immutable `desktop-release-distributions` artifact, verifies GitHub's artifact
-digest plus the internal manifest and checksums, and never rebuilds the signed
-installers after the tag is pushed. The tag run then combines those imported
-files with the Python distributions, regenerates the final
+digest plus the internal manifest and checksums, and, for current 0.x runs,
+never rebuilds those downloaded unsigned project-produced installers after the
+tag is pushed. This artifact-identity rule is separate from Issue #132's future
+publisher-signing assurance. The tag run then combines those imported files
+with the Python distributions, regenerates the final
 `release-evidence.md` and one release-wide `SHA256SUMS`, and records build
 provenance over the complete release asset set.
 
@@ -105,10 +240,13 @@ main process.
 Each native row then:
 
 1. builds and smoke-tests the target-matched sidecar;
-2. builds the production Electron assets and assembles an unpublished unpacked
-   native application;
-3. verifies that the packaged resources contain the expected sidecar;
-4. launches the actual packaged executable with isolated fictional app data;
+2. builds the production Electron assets, rejects verifier-only selectors, and
+   assembles and verifies an unpublished unpacked production application;
+3. verifies that the packaged resources exactly match the deterministic
+   target/build-bound sidecar payload manifest;
+4. on Linux and macOS, builds a separate unpublished native-keyring verifier
+   package after the production assembly is complete, then launches that
+   verifier; Windows launches the production package directly;
 5. verifies first-run welcome, Home and healthy Diagnostics, Settings
    persistence across a new process, corrupt-preference fail-closed behavior,
    clean quit and relaunch, custom-protocol and production CSP behavior,
@@ -118,36 +256,86 @@ Each native row then:
 6. records cold-launch, warm-launch, readiness, process-RSS, and renderer
    outbound-request measurements; and
 7. exercises sidecar absence/recovery, crash-loop exhaustion/retry/quit, and
-   app/sidecar build mismatch against verification-only package copies; and
-8. inspects the packaged Electron fuses and ASAR boundary.
+   pre-spawn integrity rejection against verification-only package copies;
+8. records native process-tree-guard evidence, including the Windows
+   kill-on-close Job Object behavior on the exact-head Windows ARM64 row; and
+9. inspects the packaged Electron fuses and ASAR boundary; and
+10. builds a separate verification-only package and exercises opaque native
+    open/save file grants, path-free DTOs, explicit replacement confirmation,
+    and revocation without adding the fixture adapter to production builds.
+    Focused broker and dialog tests separately cover cancellation, replacement
+    races, sentinel preservation, alias rejection, and output locking.
 
-The packaged Playwright pass attaches through an ephemeral CDP endpoint bound
-to `127.0.0.1` solely so the harness can inspect and close the unpublished
-application. It does not pass credentials or expose the endpoint beyond the
-runner. A separate launch uses a fresh profile and no remote-debugging or
-Node-inspector argument; the test verifies that neither the normal process tree
-nor captured output exposes a debugging surface. The normal launch waits for a
-constant, non-sensitive lifecycle record emitted by the existing
-`ready-to-show` window path, so a sidecar or crash helper cannot satisfy the
-renderer-readiness gate. On macOS only, both automation launches pass Chromium's
-`--use-mock-keychain` because the ad hoc, unpackaged runner build cannot reliably
-use a login keychain. That automation-only switch
-is not part of a shipped launch path.
+The packaged WebdriverIO pass launches the unpublished application through the
+pinned WebdriverIO Electron service. The service supplies the native Electron
+automation session. Internally, the service may use its managed Puppeteer/CDP
+bridge where the Electron fuse permits it, including the source-mode suite. The
+secure packaged build disables the Node CLI inspect-arguments fuse, so its
+specifications deliberately avoid `browser.electron.execute`: renderer state is
+observed through WebDriver, while Main-process and sidecar lifecycle evidence
+comes from bounded native process snapshots. No repository-authored CDP
+endpoint, remote-debugging argument, direct CDP command, or external Chromium
+launch is part of product verification. A separate launch uses a fresh profile
+and the selected packaged runtime without WebDriver: the production package on
+Windows and the unpublished verifier package on Linux and macOS. The test
+verifies that neither its process tree nor captured output exposes a debugging
+surface. The normal launch waits for a constant, non-sensitive lifecycle record
+emitted by the existing `ready-to-show` window path, so a sidecar or crash
+helper cannot satisfy the renderer-readiness gate. This bounded check does not
+claim a direct normal-launch observation of the production package on Linux or
+macOS; the earlier production assembly and scanner remain the production-build
+evidence on those rows.
+
+On macOS only, both automation launches pass Chromium's `--use-mock-keychain`
+because the ad hoc, unpackaged runner build cannot reliably use a login
+keychain. The unpublished native-verification package also accepts one reviewed
+selector that directs its Python sidecar to an in-memory secret store and a
+throwaway workspace; otherwise WebdriverIO's child process can block on the
+interactive login keychain before Electron creates a renderer, or load an
+existing encrypted workspace that the verifier must never inspect. Both
+selectors are absent from the production package, and source/unit coverage
+continues to exercise the ordinary OS-keyring adapter. The macOS row therefore
+proves packaged launch, process, diagnostic, and shutdown behavior but does not
+claim native Keychain denial or locking coverage. Linux uses the native Secret
+Service harness described above rather than a mock backend.
+
+The automated scenarios close the native application window through WebDriver,
+then independently observe that the packaged Main PID and active sidecar PID
+disappear within bounded deadlines. Because the secure packaged service session
+does not expose its child-process exit tuple, every release row also performs a
+separate transport-free launch of the selected packaged runtime. Windows
+requests native window closure; macOS and Linux send `SIGTERM` through the
+shared production signal-to-quit path. That process must report the exact
+native result `{ code: 0, signal: null }`; any
+nonzero code, signal termination, or timeout fails the test, and forced
+termination is failure cleanup only. The source contract also proves that
+Electron owns the supervisor and job preflight before payload verification or
+process launch can yield. The quit is vetoed while fail-closed job preflight and
+verified sidecar shutdown run. Only the authorized completion callback uses
+`app.exit(0)`, after releasing the IPC boundary and sidecar supervisor, so
+Electron cannot enter a second platform-dependent quit cycle. The
+sidecar-substitution scenario cannot perform a normal sidecar drain. After
+recording the fail-closed result, the WebdriverIO harness forcibly terminates
+its disposable verification application with `SIGKILL` on POSIX or
+`taskkill.exe /T /F` on Windows. That verification-only cleanup does not call
+the production `app.exit(0)` completion callback and supplies no clean-shutdown
+evidence.
 
 Electron handles the native zoom shortcuts in the browser process, where unit
 tests cover every supported level from 50% through 200%, reset, clamping, and
-unrelated-key behavior. CDP-injected keyboard events do not traverse that
-browser-process hook, so the packaged harness verifies layout at an equivalent
-200% renderer scale and states that distinction explicitly instead of claiming
-a native shortcut observation it did not make.
+unrelated-key behavior. The WebdriverIO harness applies an equivalent 200%
+renderer scale through WebDriver execution in the secure packaged session and
+states that distinction explicitly instead of claiming a native shortcut
+observation it did not make.
 
 On macOS, the verification-only builder overlay applies an ephemeral ad hoc
 signature after electron-builder mutates the Electron executable and fuses.
 That signature only permits the unpublished application to launch on the
 hosted runner; the bundle is never distributed or imported into a release and
 is not release identity, installer-signing, or notarization evidence. The
-aggregate therefore continues to record
-`signingVerified: false` and leaves those claims to #231.
+aggregate therefore continues to record `signingVerified: false`. Issue #231
+carries the installer release gate, while #132 owns publisher-signing and
+notarization assurance.
 
 The packaged renderer canary observes attempted HTTP, HTTPS, WebSocket, window,
 and service-worker activity and requires zero outbound requests. The separate
@@ -156,12 +344,22 @@ bounded automated controls; they are not a claim of OS-level packet capture.
 
 Each native row now makes disposable copies of the assembled package for three
 black-box fault scenarios. It temporarily withholds and restores the real
-packaged sidecar to prove degraded Diagnostics and successful manual retry;
+packaged sidecar to prove degraded Diagnostics and successful manual retry. A
+missing manifest-bound executable is an integrity failure, so it consumes no
+automatic crash-restart budget; restoring the payload and choosing the bounded
+manual retry is the recovery path. The harness separately
 kills the real sidecar child repeatedly to prove automatic restart, bounded
 exhaustion, manual recovery, and child cleanup on quit; and substitutes a
-separately built target-native verification sidecar whose reported build cannot
-match the application build. macOS copies are ad hoc re-signed only after the
-verification mutation. None of these disposable copies is a release artifact.
+byte-different target-native executable while retaining the original manifest
+to prove generic `startup_failed` rejection before a child is spawned. macOS
+copies are ad hoc re-signed only after the verification mutation. None of these
+disposable copies is a release artifact.
+
+Source-level supervisor tests separately use a manifest-accepted fake process
+to prove that both protocol and build mismatches remain `incompatible_build`,
+terminate the process, and consume no automatic restart. Those compatibility
+tests and the packaged integrity-substitution scenario have independent receipt
+gates: `sidecarCompatibilityPassed` and `sidecarIntegrityPassed`.
 
 The harness changes only those verification package copies and observes the
 same packaged UI and process boundaries used by a normal launch. Production
@@ -169,6 +367,23 @@ code has no fault environment variable, test IPC, renderer hook, or alternate
 sidecar registry. Renderer-visible diagnostics remain sanitized: the scenarios
 assert coded states and retry counters without exposing ports, tokens, paths,
 process IDs, or stderr.
+
+Source-level structured-diagnostics tests prove the same launch UUID is used
+across Electron Main, packaged-sidecar, and Python-core records; reject
+malformed UUIDs, oversized records, and symlinked destinations; exercise
+rotation, retry/restart/exhaustion, bridge-sender and bridge-route rejection,
+and package-verification failure; and prove writer failure cannot block
+startup, shutdown, or authorized exit. Persisted-file inspections assert that
+credential, path, genealogy, prompt, response, port, URL, and stderr canaries
+are absent. Renderer and console tests cover the fixed open-directory and
+clear actions and their generic failure states without returning a path or
+record content.
+
+Diagnostic files are deliberately excluded from CI and release artifacts and
+there is no export or upload path. The exact stderr shutdown receipt remains a
+separate, authoritative Main-process check; diagnostic JSON and arbitrary
+child output cannot satisfy it. Packaged verification may exercise the
+feature, but it must not collect the local diagnostic directory.
 
 The performance policy is versioned as `desktop-unpacked-v1` and is a hard gate,
 not an informational benchmark:
@@ -202,15 +417,24 @@ Only declared generated-output paths may change. Evidence generation rejects a
 missing, duplicate, failed, wrong-head, legacy unbound, workspace-mutating, or
 digest-mismatched receipt.
 
-The three packaged-sidecar fault scenarios have independent receipt gates and
-write exact-schema observation documents. Target evidence binds each document
-by byte count and SHA-256 to its receipt; the mismatch receipt additionally
-binds the target-native wrong-build executable. Aggregation revalidates those
-documents and bindings instead of accepting a workflow-provided success flag.
-The crash-loop scenario owns the graceful application-quit assertion and proves
-that the active real sidecar exits with it. The wrong-build scenario instead
-proves `incompatible_build`, consumes the one manual retry without weakening
-that result, and requires bounded termination of its verification process.
+The three packaged-sidecar fault scenarios and the separate packaged file-grant
+scenario have independent receipt gates and write exact-schema observation
+documents. Target evidence binds each document by byte count and SHA-256 to its
+receipt; the integrity receipt additionally binds the substituted target-native
+executable. Aggregation revalidates those documents and bindings instead of
+accepting a workflow-provided success flag. The crash-loop scenario owns the
+graceful application-quit assertion and proves that the active real sidecar
+exits with it. The integrity-substitution scenario instead proves generic
+`startup_failed` rejection before any replacement process is spawned and
+consumes no automatic restart. The file-grant scenario proves path-free public
+DTOs and the grant lifecycle against native open/save behavior in a package
+whose verification adapter is excluded from production output.
+
+Every native row also binds `sidecar-process-tree-guard.json` to the
+`sidecarProcessTreeGuardPassed` receipt. On the exact-head Windows ARM64 hosted
+runner, the test proves that closing the packaged sidecar's kill-on-close Job
+Object terminates a surviving descendant. Non-Windows rows exercise and record
+the intentional no-op path; they are not Windows-native proof.
 
 A target document records the runner, sidecar target, intended and actual OS,
 architecture, `packageBoundary: "unpacked-native"`,
@@ -230,6 +454,14 @@ Evidence files are written once. A pre-existing output, malformed schema,
 failed boolean, invalid metric, nonzero renderer egress count, unexpected
 target, or SHA mismatch fails closed.
 
+The sidecar payload manifest is an embedded-digest-bound inventory, not a
+publisher signature. It detects replacement relative to the built Electron
+main process, but it cannot authenticate a wholly rewritten application bundle.
+Project-produced 0.x binaries remain unsigned by policy; #132 owns trusted
+publisher signing and notarization. Verification and spawning are separate
+filesystem operations, so replacement in that narrow interval remains a local
+verify-to-spawn time-of-check/time-of-use residual.
+
 ASAR evidence is also platform-scoped. All rows require `app.asar` and verify
 the eight expected Electron fuse states. macOS additionally compares the
 `ElectronAsarIntegrity` SHA-256 in `Info.plist` with the packaged ASAR header.
@@ -245,8 +477,8 @@ layer consumes that exact-head input and establishes an installer claim only
 when every target-matched installer is manually installed and exercised, and
 the provenance and actual supported-OS checks pass under the
 [release runbook](RELEASING.md). Trusted signature and macOS notarization checks
-join that claim at v1.0.0. A local build, a different Windows runner, or an
-incomplete pre-tag run cannot substitute for that proof.
+owned by Issue #132 join that claim at v1.0.0. A local build, a different
+Windows runner, or an incomplete pre-tag run cannot substitute for that proof.
 
 This verification work does not close the broader adversarial assurance issue
 #131 or the release-coordination tracker #132. CI success must not be used to

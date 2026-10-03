@@ -13,7 +13,7 @@ import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Self, TypeAlias, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Self, Union, cast, get_args, get_origin, get_type_hints
 
 CONTRACT_VERSION = "ancestryllm.application/0.3"
 MAX_BOUNDARY_JSON_BYTES = 1_048_576
@@ -22,8 +22,7 @@ MAX_TEXT_LENGTH = 65_536
 MAX_PROGRESS_TOTAL = 1_000_000_000
 
 Scalar = str | int | float | bool | None
-JSONValue: TypeAlias = Scalar | list["JSONValue"] | dict[str, "JSONValue"]
-_BoundaryT = TypeVar("_BoundaryT", bound="BoundaryDTO")
+type JSONValue = Scalar | list[JSONValue] | dict[str, JSONValue]
 
 
 class BoundaryDTO:
@@ -34,7 +33,7 @@ class BoundaryDTO:
     def to_serializable(self) -> JSONValue:
         """Return the strict-JSON value represented by this boundary object."""
 
-        return cast(JSONValue, _encode(self))
+        return cast("JSONValue", _encode(self))
 
     def to_json(self) -> str:
         """Serialize with stable ordering and strict JSON scalar behavior."""
@@ -142,10 +141,12 @@ def _field_names(value_type: object) -> tuple[str, ...]:
     declared = getattr(value_type, "__dataclass_fields__", None)
     if not isinstance(declared, Mapping) or not all(isinstance(name, str) for name in declared):
         raise TypeError("Boundary DTO types must be dataclasses.")
-    return tuple(cast(str, name) for name in declared)
+    return tuple(cast("str", name) for name in declared)
 
 
-def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> _BoundaryT:
+def _decode_dataclass[BoundaryT: BoundaryDTO](
+    cls: type[BoundaryT], value: Mapping[object, object]
+) -> BoundaryT:
     if any(not isinstance(key, str) for key in value):
         raise TypeError("Boundary DTO object keys must be strings.")
     annotations = get_type_hints(cls)
@@ -158,7 +159,7 @@ def _decode_dataclass(cls: type[_BoundaryT], value: Mapping[object, object]) -> 
     if missing:
         raise ValueError(f"Missing {cls.__name__} fields: {', '.join(sorted(missing))}")
     decoded = {
-        name: _decode(cast(Mapping[str, object], value)[name], annotations[name])
+        name: _decode(cast("Mapping[str, object]", value)[name], annotations[name])
         for name in sorted(expected)
     }
     return cls(**decoded)
@@ -189,7 +190,7 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON constant: {value}")
 
 
-def load_boundary(cls: type[_BoundaryT], payload: str) -> _BoundaryT:
+def load_boundary[BoundaryT: BoundaryDTO](cls: type[BoundaryT], payload: str) -> BoundaryT:
     """Load one exact DTO type from canonical-compatible strict JSON."""
 
     if len(payload.encode("utf-8")) > MAX_BOUNDARY_JSON_BYTES:
@@ -222,6 +223,28 @@ def _validate_identifier(label: str, value: str, *, prefix: str | None = None) -
         raise ValueError(f"{label} must not contain paths or control characters.")
 
 
+def _validate_operation_id(value: str) -> None:
+    if (
+        len(value) != 67
+        or not value.startswith("op_")
+        or any(character not in "0123456789abcdef" for character in value[3:])
+    ):
+        raise ValueError(
+            "operation_id must use the form op_ followed by 64 lowercase hexadecimal characters."
+        )
+
+
+def _validate_grant_id(value: str) -> None:
+    if (
+        len(value) != 68
+        or not value.startswith("grt_")
+        or any(character not in "0123456789abcdef" for character in value[4:])
+    ):
+        raise ValueError(
+            "grant_id must use the form grt_ followed by 64 lowercase hexadecimal characters."
+        )
+
+
 def _validate_code(label: str, value: str) -> None:
     if not 1 <= len(value) <= 96:
         raise ValueError(f"{label} length is outside its bounded range.")
@@ -252,6 +275,20 @@ class ArtifactAccess(StrEnum):
     WRITE = "write"
 
 
+class MediationTransport(StrEnum):
+    """Trusted execution adapter selected without exposing a host path."""
+
+    LOCAL_CONTAINER = "local-container"
+    REMOTE_SERVICE = "remote-service"
+
+
+class MediatedOperationCleanupStatus(StrEnum):
+    """Cleanup state returned separately from committed artifact readiness."""
+
+    COMPLETE = "complete"
+    RECOVERY_REQUIRED = "recovery-required"
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactRef(BoundaryDTO):
     """Opaque application artifact descriptor with bounded metadata."""
@@ -270,11 +307,10 @@ class ArtifactRef(BoundaryDTO):
             raise ValueError("media_type must be a bounded MIME type.")
         if not 0 <= self.size_bytes <= MAX_ARTIFACT_BYTES:
             raise ValueError("artifact size is outside the supported range.")
-        if self.sha256 is not None:
-            if len(self.sha256) != 64 or any(
-                char not in "0123456789abcdef" for char in self.sha256
-            ):
-                raise ValueError("sha256 must be a lowercase hexadecimal digest.")
+        if self.sha256 is not None and (
+            len(self.sha256) != 64 or any(char not in "0123456789abcdef" for char in self.sha256)
+        ):
+            raise ValueError("sha256 must be a lowercase hexadecimal digest.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,8 +322,54 @@ class ArtifactGrantRef(BoundaryDTO):
     access: ArtifactAccess
 
     def __post_init__(self) -> None:
-        _validate_identifier("grant_id", self.grant_id, prefix="grt_")
+        _validate_grant_id(self.grant_id)
         _validate_code("operation", self.operation)
+
+
+@dataclass(frozen=True, slots=True)
+class MediatedOperationRequest(ServiceRequest):
+    """Path-free capability request shared by local and remote adapters."""
+
+    operation_id: str
+    operation: str
+    transport: MediationTransport
+    inputs: tuple[ArtifactGrantRef, ...]
+    outputs: tuple[ArtifactGrantRef, ...]
+
+    def __post_init__(self) -> None:
+        _validate_operation_id(self.operation_id)
+        _validate_code("operation", self.operation)
+        if not 1 <= len(self.inputs) <= 16:
+            raise ValueError("mediated inputs must contain between 1 and 16 grants.")
+        if not 1 <= len(self.outputs) <= 8:
+            raise ValueError("mediated outputs must contain between 1 and 8 grants.")
+        grants = (*self.inputs, *self.outputs)
+        if len({grant.grant_id for grant in grants}) != len(grants):
+            raise ValueError("mediated grant identifiers must be unique.")
+        if any(grant.operation != self.operation for grant in grants):
+            raise ValueError("mediated grants must match the requested operation.")
+        if any(grant.access is not ArtifactAccess.READ for grant in self.inputs):
+            raise ValueError("mediated input grants must provide read access.")
+        if any(grant.access is not ArtifactAccess.WRITE for grant in self.outputs):
+            raise ValueError("mediated output grants must provide write access.")
+
+
+@dataclass(frozen=True, slots=True)
+class MediatedOperationResult(ServiceResult):
+    """Path-free artifacts produced by one mediated operation."""
+
+    operation_id: str
+    outputs: tuple[ArtifactRef, ...]
+    cleanup_status: MediatedOperationCleanupStatus
+
+    def __post_init__(self) -> None:
+        _validate_operation_id(self.operation_id)
+        if not 1 <= len(self.outputs) <= 8:
+            raise ValueError("mediated results must contain between 1 and 8 artifacts.")
+        if len({output.artifact_id for output in self.outputs}) != len(self.outputs):
+            raise ValueError("mediated result artifact identifiers must be unique.")
+        if any(output.status is not ArtifactStatus.READY for output in self.outputs):
+            raise ValueError("mediated result artifacts must be ready.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,9 +440,12 @@ class ProgressUpdate(BoundaryDTO):
             raise ValueError("progress sequence is outside the supported range.")
         if (self.completed is None) is not (self.total is None):
             raise ValueError("progress requires both completed and total values.")
-        if self.completed is not None and self.total is not None:
-            if not 0 <= self.completed <= self.total <= MAX_PROGRESS_TOTAL:
-                raise ValueError("progress counts are outside the supported range.")
+        if (
+            self.completed is not None
+            and self.total is not None
+            and not 0 <= self.completed <= self.total <= MAX_PROGRESS_TOTAL
+        ):
+            raise ValueError("progress counts are outside the supported range.")
         if self.artifact_id is not None:
             _validate_identifier("artifact_id", self.artifact_id, prefix="art_")
 
@@ -575,6 +660,10 @@ __all__ = [
     "IdentityResolutionRequest",
     "IdentityResolutionResult",
     "JSONValue",
+    "MediatedOperationCleanupStatus",
+    "MediatedOperationRequest",
+    "MediatedOperationResult",
+    "MediationTransport",
     "NamedValue",
     "ProgressUpdate",
     "ProviderSelection",

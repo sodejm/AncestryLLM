@@ -37,11 +37,19 @@ GEDCOM and RootsMagic files, the SQLCipher workspace and OS credential store,
 generated local artifacts, configuration, and explicitly selected local or
 remote LLM providers.
 
-FastAPI, Electron, browser renderers, multi-user service operation, plugins,
-automatic updating, and vector retrieval are not implemented or supported
-runtime surfaces. Their roadmap controls in
-[the threat model](docs/THREAT_MODEL.md) are design requirements, not evidence
-of an effective control and not a reason to reduce current risk.
+FastAPI and Electron development foundations exist in Unreleased source.
+Issue #349 also supplies production-shaped gateway and worker images plus a
+two-service Compose topology, but that topology is validation-only: it exposes
+only authenticated health and capability probes, publishes no host port,
+loads no provider or genealogy workload, mounts no host path, and keeps its
+placeholder data volume read-only. It is not a supported browser, public/LAN,
+remote, multi-user, or workload-capable application runtime. Secret delivery,
+writable persistence, schema migration, profile activation, and authenticated
+application routes remain blocked on their owning issues. Plugins, automatic
+updating, and vector retrieval also remain unimplemented. Roadmap controls in
+[the threat model](docs/THREAT_MODEL.md) are design requirements unless their
+owning issue has produced the named evidence; partial foundation evidence is
+not a reason to credit an unavailable runtime.
 
 The local operator is trusted to choose files, provider profiles, and consent.
 Imported GEDCOM and RootsMagic content, prompt variables, OCR text, provider
@@ -66,9 +74,21 @@ output is never an authority for genealogy facts.
   GEDCOM operations do not overwrite their inputs, preserve unsupported source
   structure where possible, and validate output. Incremental GEDCOM updates
   stage and atomically publish complete release bundles.
+- Electron Main mediates native files through opaque, single-use grants. The
+  Issue #352 operation broker stages local inputs beneath private 0700 roots,
+  rejects links, replacements, aliases, archive signatures, and out-of-policy
+  counts or sizes, and permits only exact read-only input and read-write output
+  mounts after comparing the complete realized mount set. Remote adapters
+  receive bounded streams and opaque metadata, never local paths. All declared
+  outputs validate before any destination is atomically replaced, and
+  renderer-visible progress, results, and errors remain path-free.
 - Provider and model output is untrusted data, is schema-validated when a
   structured result is required, and is never executed. An LLM receives no
-  shell, SQL, filesystem, or other tool capability.
+  shell, SQL, filesystem, or other tool capability. Desktop model text is
+  rendered through a closed CommonMark/GFM component allowlist with raw HTML,
+  images, embeds, implicit autolinks, and executable actions disabled. Copy is
+  plain text only, and opening a visible HTTPS destination requires separate
+  Electron-Main confirmation.
 - Real genealogy records, databases, backups, reports, logs, credentials, and
   prompt or response payloads must not be committed to the repository. Tests
   and reproductions use fictional data.
@@ -116,6 +136,83 @@ re-hashed before use, and release evidence requires a sanitized successful
 receipt. This control is specific to the repository's `uv` bootstrap and does
 not establish trust in unrelated deployment or application update channels.
 
+The dependency-audit input is generated from the locked graph with all extras
+and dependency groups. `scripts/run_dependency_audit.py` compares normalized
+exported package identities with `uv.lock` before the locked auditor executes;
+the closed-schema `config/dependency-audit-exclusions.json` permits only the
+editable source project that the export cannot represent as a pinned index
+artifact. Missing, extra, unpinned, duplicate, unknown, or unused records fail
+closed. This completeness control supplements rather than replaces Semgrep,
+zizmor, CycloneDX, gitleaks, TruffleHog, and CodeQL.
+
+The release-quality contract in `config/release-quality-policy-v1.json`
+assigns QA, security, performance, and diagnostics evidence to named owners and
+binds one exact-head approval to the release-readiness and desktop aggregate
+artifacts. Its closed verifier checks the complete readiness inventory, pinned
+tool versions, required desktop security receipts, target-specific performance
+ceilings, the diagnostic schema digest and retention limits, and any explicitly
+approved unexpired exception. Release verifies the same approval again
+immediately before publication. The diagnostic canary uses fictional values,
+enables no telemetry or collection, and cannot substitute for the separate
+runtime controls. Passing this gate is release evidence, not proof that the
+application or its dependencies contain no vulnerability.
+
+Version 1 security sequencing is enforced by a checked-in schema-v1 policy and
+one shared GitHub Project query. Proof, readiness, and release reject missing or
+contradictory native dependencies, wrong issue ownership or iterations, cycles,
+iteration inversion, premature closure, incomplete pagination, and evidence
+that is not bound to the current policy digest. The sanitized result is consumed
+by #131 as the `version-1-security-dependencies` release-evidence gate. This
+control still trusts authorized maintainers and GitHub's Project, issue,
+dependency, API, and token enforcement; missing access or unverifiable hosted
+state blocks release rather than passing.
+
+Issue #363's host-only container-control foundation treats Docker authority as
+host-administrative. It accepts only a closed, app-owned Unix endpoint and
+exact context/profile identity, ignores ambient Docker selection, verifies the
+socket and engine before and after operations, validates digest-pinned hardened
+plans, and offers bounded no-shell inspection and lifecycle methods only inside
+Electron Main. Exact ownership labels and names prevent adopting or deleting
+foreign resources; destructive start, repair, and uninstall plans require a
+short-lived one-use authorization bound to the operation. The Docker socket,
+CLI, context, generic subprocess authority, and lifecycle API never cross into
+preload, renderer, shared DTOs, or containers.
+
+An isolated macOS arm64 exercise records successful start, stop, repair,
+preserve-data uninstall, restart, delete-data uninstall, cleanup, and unchanged
+ambient Docker identity in a sanitized
+[native evidence receipt](docs/release-evidence/issue-363-macos-arm64-container-supervisor.json).
+That record does not establish a supported application runtime or reduce the
+remaining risk for workload identity, secrets, genealogy data, migration,
+backup/recovery, resource exhaustion, other native platforms, packaged
+integration, or independent G5/G7 review.
+
+Issue #349's probe-only OCI topology adds a stricter validation boundary around
+the future workload. The gateway and optional worker run as UID 65532 with
+read-only roots, all capabilities dropped, `no-new-privileges`, bounded CPU,
+memory, PIDs, logs, and graceful shutdown. Compose admits only an internal
+network, one read-only named data volume, and memory-backed runtime state; it
+publishes no host port and mounts neither a host path nor the Docker socket.
+Native Linux amd64 and arm64 CI builds exercise the exact built digests without
+emulation. Lifecycle evidence covers crash visibility, version and build skew,
+read-only and disk-full failures, bounded shutdown, and stable privacy-safe
+errors. A schema-v1 runtime inventory records every installed Python and Debian
+package with version, architecture, reviewed license identity, and copyright
+digest. These controls do not authenticate a real workload, deliver secrets,
+enable data writes or migrations, prove registry provenance, or make the
+topology supported for application use; those residual controls remain owned
+by #350, #351, #353, #364, and #365.
+
+Issue #352 adds the source-level trust boundary for mediated host-file work.
+The shared request/result DTO is transport-neutral; the trusted local adapter
+alone may use private staged paths and exact container mounts, while a trusted
+remote adapter receives one-use bounded streams. Operations are allowlisted,
+single-use, concurrency- and time-bounded, and fail closed on stale grants,
+mount drift, unsafe staging, invalid outputs, or incomplete cleanup. This is
+Main-process foundation evidence only: no renderer operation route, concrete
+genealogy adapter, packaged parser worker, or supported container workload is
+enabled by it.
+
 Current limitations that must not be credited as controls include:
 
 - there is no public in-place SQLCipher migration or rekey command;
@@ -124,6 +221,12 @@ Current limitations that must not be credited as controls include:
 - RootsMagic schema and live-file coverage are intentionally incomplete;
 - GEDCOM interoperability still needs importer smoke evidence for supported
   Ancestry, Geni, and MyHeritage workflows; and
+- the Issue #349 container topology remains a probe-only validation shell with
+  no application workload, secret delivery, writable persistence, or schema
+  migration; and
+- the Issue #352 mediated-operation broker remains a source-level Main-process
+  gate until a concrete adapter, renderer-owned product action, parser-worker
+  isolation, and packaged runtime evidence are delivered; and
 - several GEDCOM synchronization and recovery paths need broader end-to-end
   evidence.
 

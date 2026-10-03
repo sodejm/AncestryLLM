@@ -6,13 +6,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from docs_linking import SourceIndex, encode_path, split_destination
 from rewrite_wiki_links import rewrite_markdown_link_destinations
 from validate_wiki_docs import validate_wiki_source
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 _ASSET_MANIFEST = ".ancestryllm-managed-assets.json"
 
@@ -218,6 +221,7 @@ def sync_wiki_docs(source: Path, destination: Path) -> SyncResult:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the sync wiki docs command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
@@ -235,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the sync wiki docs command and return its exit status."""
     args = build_parser().parse_args(argv)
     try:
         result = sync_wiki_docs(args.source, args.destination)

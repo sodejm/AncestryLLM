@@ -1,3 +1,4 @@
+# Configures the published Jekyll documentation site and its Markdown renderer.
 title: AncestryLLM documentation
 description: Local-first genealogy research documentation
 url: "https://sodejm.github.io"

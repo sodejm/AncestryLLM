@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ancestryllm.application.executor import CommandInvocation, CommandOutcome
-from ancestryllm.core.context import AppContext
 from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.ingress import FileIngressPolicy, FileKind
 from ancestryllm.execution.common import (
@@ -16,13 +17,19 @@ from ancestryllm.execution.common import (
     text_values,
 )
 
+if TYPE_CHECKING:
+    from ancestryllm.core.context import AppContext
+
 
 class PromptsExecutor:
+    """Dispatch saved-prompt commands through the application boundary."""
+
     def __init__(self, context: AppContext, ingress: FileIngressPolicy) -> None:
         self._context = context
         self._ingress = ingress
 
     def __call__(self, invocation: CommandInvocation) -> CommandOutcome:
+        """Dispatch prompt listing, storage, retrieval, or rendering."""
         action = invocation.key.action
         if action == "list":
             return CommandOutcome(structured_result(self._context.prompts.list()))

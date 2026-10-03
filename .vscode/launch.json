@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: interactive console",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "ancestryllm",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "console": "integratedTerminal",
+      "envFile": "",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: CLI help",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "ancestryllm",
+      "args": [
+        "--help"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "console": "integratedTerminal",
+      "envFile": "",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: current pytest file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-v",
+        "--no-cov"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "console": "integratedTerminal",
+      "envFile": "",
+      "justMyCode": true
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+/** Discovers packaged application executables and resource roots on supported platforms. */
 import assert from 'node:assert/strict'
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -31,6 +32,12 @@ function executableFor(resources, platform) {
   throw new Error(`Unsupported package platform: ${platform}`)
 }
 
+/**
+ * Discovers the packaged resources directory and derives its platform-native executable.
+ * @param {string} root - Release tree to search recursively for a packaged app.asar.
+ * @param {string} platform - Node platform identifier that selects the native bundle layout.
+ * @returns {Promise<{resources: string, executable: string}>} Existing resource and executable paths.
+ */
 export async function discoverPackage(root, platform = process.platform) {
   const resources = await findPackagedResources(root)
   assert.ok(resources, 'Packaged resources directory was not found')

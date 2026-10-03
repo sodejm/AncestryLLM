@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Rejects tracked secrets, genealogy records, and other unsafe repository artifacts.
 set -Eeuo pipefail
 
 blocked='\.(rmtree|rmgc|db|sqlite|sqlite3|ged|gedcom|log|sarif|p12|pfx|p8|pem|key|asc|gpg|b64|mobileprovision)$|(^|/)(\.env(\..+)?|family_trees/.+|secure/.+|secrets/.+)$'
