@@ -38,8 +38,10 @@ The complete `uv.lock` covers every application extra and repository tool
 group. Full local setup installs that complete graph, including the release
 verifier. Purpose-specific workflow jobs pass `--no-default-groups` and
 synchronize only the profile they execute. The lock consistency job installs no
-group and calls `make lock-check`, whose canonical command is
-`uv lock --check`.
+group and invokes `uv lock --check` directly. Hosted quality, security, and
+packaging gates likewise spell out their canonical commands in the workflow,
+so a candidate change to the Makefile cannot replace a required check with a
+no-op. The Make targets remain the supported local developer interfaces.
 
 | Work | Locked environment |
 |---|---|

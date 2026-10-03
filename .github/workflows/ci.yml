@@ -86,7 +86,7 @@ jobs:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-ci-lockfile
       - name: Check uv lockfile consistency
-        run: make lock-check
+        run: uv lock --check
 
   test:
     name: test (${{ matrix.python }})
@@ -115,7 +115,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Tests
-        run: make test
+        run: uv run --locked --group test pytest --verbose
 
   quality:
     name: quality
@@ -140,8 +140,12 @@ jobs:
         run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Lint, type check, and repository contracts
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
+          uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_architecture_contracts.py
+          ./scripts/check_repository_safety.sh
+          uv run --locked --group lint python scripts/check_code_documentation.py
+          uv run --locked --group typecheck mypy src/ancestryllm
 
   security:
     name: security
@@ -173,12 +177,12 @@ jobs:
         run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
         if: needs.changes.outputs.dependencies == 'true'
-        run: make dependency-audit
+        run: uv run --locked --group security pip-audit
       - name: Run pinned static security analysis
-        run: make security-static
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Generate CycloneDX SBOM
         if: needs.changes.outputs.dependencies == 'true'
-        run: make sbom
+        run: uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: needs.changes.outputs.dependencies == 'true'
         with:
@@ -208,7 +212,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --group build
       - name: Build reproducible release artifacts
-        run: make package
+        run: uv run --locked --group build python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions
@@ -289,7 +293,7 @@ jobs:
       - name: Audit workflow security
         run: |
           uv sync --locked --no-default-groups --group security
-          make workflow-audit
+          uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
   pr-gate:
     name: PR gate

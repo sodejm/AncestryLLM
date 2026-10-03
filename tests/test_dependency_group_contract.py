@@ -260,6 +260,6 @@ def test_every_workflow_sync_disables_implicit_groups() -> None:
 def test_lockfile_job_checks_without_installing_any_group() -> None:
     lockfile = _workflow_job(".github/workflows/ci.yml", "lockfile")
 
-    assert "make lock-check" in lockfile
+    assert "uv lock --check" in lockfile
     assert "uv sync" not in lockfile
     assert "--group" not in lockfile

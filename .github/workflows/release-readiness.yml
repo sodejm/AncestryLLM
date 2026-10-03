@@ -128,15 +128,19 @@ jobs:
       - name: Install locked test environment
         run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Test with coverage
-        run: make test
+        run: uv run --locked --group test pytest --verbose
       - name: Install locked static-quality environment
         if: matrix.python == '3.12'
         run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Static quality gates
         if: matrix.python == '3.12'
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
+          uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_architecture_contracts.py
+          ./scripts/check_repository_safety.sh
+          uv run --locked --group lint python scripts/check_code_documentation.py
+          uv run --locked --group typecheck mypy src/ancestryllm
 
   security:
     name: security evidence
@@ -167,13 +171,13 @@ jobs:
       - name: Install locked security environment
         run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
-        run: make dependency-audit
+        run: uv run --locked --group security pip-audit
       - name: Run pinned static security analysis
-        run: make security-static
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Audit workflow security
-        run: make workflow-audit
+        run: uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
       - name: Generate CycloneDX SBOM
-        run: make sbom
+        run: uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-sbom
@@ -235,7 +239,7 @@ jobs:
       - name: Build deterministic distributions
         run: |
           uv sync --locked --no-default-groups --group build
-          make package
+          uv run --locked --group build python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-distributions
