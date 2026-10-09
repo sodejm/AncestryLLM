@@ -452,7 +452,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
 
     assert "default_stages: [pre-commit]" in hooks
     assert "entry: make pre-push" in hooks
-    assert "entry: make workflow-audit" in hooks
+    assert "entry: make workflow-audit" not in hooks
     assert "id: gitleaks" in hooks
     assert "repo: https://github.com/pre-commit/pre-commit-hooks" in hooks
 
@@ -486,17 +486,11 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert bootstrap_policy["uv"]["version"] == "0.12.1"
     assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
 
-    workflow_filter = r"^\.github/(actions|workflows)/"
-    assert f"files: {workflow_filter}" in hooks
-    assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
-    assert re.match(workflow_filter, ".github/workflows/ci.yml")
-    assert not re.match(workflow_filter, "docs/reference/CI.md")
-    assert hooks.count("stages: [pre-push]") == 2
+    assert hooks.count("stages: [pre-push]") == 1
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
     assert "$(UV_BIN) lock --check" in makefile
-    for target in ("test", "lint", "typecheck", "security"):
-        assert f"$(MAKE) {target}" in makefile
+    assert "pre-push: system-python\n\t@$(PYTHON) scripts/run_pre_push.py" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 
 

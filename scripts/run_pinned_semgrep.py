@@ -173,10 +173,15 @@ RULE_BUNDLES = (
         name="trailofbits",
         url="https://semgrep.dev/c/p/trailofbits",
         semantic_sha256="8b1a7d47796f1d002fa6ca1a960efefaf775b2d0cd864a413aa23a5210ed59ea",
+        # Reviewed YAML and JSON encodings share the same 120-rule semantic digest.
         revisions=(
             RuleRevision(
                 sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
                 size=185_537,
+            ),
+            RuleRevision(
+                sha256="f94a2b3e7a39f8e3a89dfa71829220af87611f6db7aefea0ab82f694d9c03809",
+                size=170_335,
             ),
         ),
         include_rule_ids=(
