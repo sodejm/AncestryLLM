@@ -417,6 +417,10 @@ def test_configures_reviewed_trailofbits_registry_bundle() -> None:
             sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
             size=185_537,
         ),
+        runner.RuleRevision(
+            sha256="f94a2b3e7a39f8e3a89dfa71829220af87611f6db7aefea0ab82f694d9c03809",
+            size=170_335,
+        ),
     )
     assert len(trailofbits.include_rule_ids) == 10
     assert all(

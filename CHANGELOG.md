@@ -36,6 +36,13 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Security
 
+- Local pre-push validation now requires branch test changes alongside
+  implementation changes, scans the committed tree with Trivy, and selects
+  desktop, workflow, and container checks in addition to the canonical Python
+  quality, dependency-audit, and Semgrep gates.
+- Updated the locked urllib3, PyJWT, and virtualenv dependencies to 2.8.0,
+  2.15.1, and 21.14.6 respectively, and set a non-root default user for the
+  docs-capture image to resolve findings from the new gate.
 - Release and release-readiness workflows now verify the policy-bound
   release-quality approval against the exact commit and both source artifacts.
   Release verifies it again immediately before publication so stale, edited,

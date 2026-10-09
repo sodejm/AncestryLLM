@@ -741,6 +741,7 @@ def test_capture_container_and_true_pty_scripts_are_closed_and_pinned() -> None:
     assert "latest" not in dockerfile.casefold()
     assert "curl" not in dockerfile.casefold()
     assert "wget" not in dockerfile.casefold()
+    assert "USER 65532:65532" in dockerfile
     assert "ENTRYPOINT []" in dockerfile
     assert "!containers/docs-terminal-capture.Dockerfile" in dockerignore
     assert "!scripts/docs_terminal_preflight.py" in dockerignore
