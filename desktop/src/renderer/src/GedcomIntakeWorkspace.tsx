@@ -14,13 +14,32 @@ interface Source {
   active: boolean
   grantId?: FileGrantId
   jobId?: string
+  revokedGrantId?: FileGrantId
+  discardedJobId?: string
   timer?: ReturnType<typeof setTimeout>
 }
 interface SourceView {
   id: number
   displayName?: string
   inspection?: GedcomInspection
+  snapshot?: JobSnapshot
   error?: string
+}
+
+function inspectionStatus(snapshot?: JobSnapshot): string {
+  if (snapshot?.state === 'queued') return 'Inspection queued.'
+  if (snapshot?.state === 'cancelling') return 'Cancelling inspection.'
+  if (snapshot?.state === 'pending-safe-point') return 'Cancellation is waiting for a safe point.'
+  if (snapshot?.state === 'running') {
+    const { completed, total } = snapshot.progress ?? {}
+    if (typeof completed === 'number' && typeof total === 'number'
+      && Number.isSafeInteger(completed) && Number.isSafeInteger(total)
+      && completed >= 0 && total > 0 && completed <= total) {
+      return `Inspecting source. ${completed} of ${total} work units complete.`
+    }
+    return 'Inspecting source.'
+  }
+  return 'Preparing inspection.'
 }
 
 function IntakeError({ code }: { code: string }) {
@@ -144,16 +163,20 @@ function RootSelector({ bridge, jobId, label }: { bridge: AncestryBridge; jobId:
       <label className="gedcom-root-choice">
         <input type="radio" name={`root-${jobId}`} checked={selection === 'none'}
           onChange={() => setSelection('none')} />
-        Continue without a root
+        <span>Continue without a root</span>
       </label>
-      {page?.candidates.map((candidate) => <label key={candidate.person_ref} className="gedcom-root-choice">
-        <input type="radio" name={`root-${jobId}`}
-          checked={selection !== null && selection !== 'none' && selection.person_ref === candidate.person_ref}
-          onChange={() => setSelection(candidate)} />
-        {candidate.display_name || 'Unnamed individual'} · {candidate.source_identifier}
-        {' · '}Born: {candidate.birth_date || 'unknown'} · Died: {candidate.death_date || 'unknown'}
-        {' · '}{candidate.relationship_summary}
-      </label>)}
+      {page && <ul className="gedcom-root-candidates" aria-label={`Root candidates for ${label}`}>
+        {page.candidates.map((candidate) => <li key={candidate.person_ref}>
+          <label className="gedcom-root-choice">
+            <input type="radio" name={`root-${jobId}`}
+              checked={selection !== null && selection !== 'none' && selection.person_ref === candidate.person_ref}
+              onChange={() => setSelection(candidate)} />
+            <span>{candidate.display_name || 'Unnamed individual'} · {candidate.source_identifier}
+              {' · '}Born: {candidate.birth_date || 'unknown'} · Died: {candidate.death_date || 'unknown'}
+              {' · '}{candidate.relationship_summary}</span>
+          </label>
+        </li>)}
+      </ul>}
     </fieldset>
     {page && <p>{page.total_count === null ? 'Total matches not yet known' : `${page.total_count} matching individuals`}; at most {PAGE_SIZE} shown per page.</p>}
     {page?.candidates.length === 0 && <p>{page.next_cursor
@@ -176,14 +199,25 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
   const pickerOwner = useRef<number | null>(null)
   const mounted = useRef(true)
 
-  const discard = (jobId: string) => {
+  const discardSource = (source: Source, jobId: string) => {
+    if (source.discardedJobId === jobId) return
+    source.discardedJobId = jobId
     void bridge.discardGedcomInspection({ schema_version: 1, job_id: jobId }).catch(() => undefined)
   }
+  const revokeGrant = async (source: Source, grantId: FileGrantId): Promise<void> => {
+    if (source.revokedGrantId === grantId) return
+    source.revokedGrantId = grantId
+    await bridge.revokeFileGrant(grantId).catch(() => undefined)
+  }
   const release = (source: Source) => {
+    if (!source.active) return
     source.active = false
-    if (source.timer !== undefined) clearTimeout(source.timer)
-    if (source.jobId) discard(source.jobId)
-    else if (source.grantId) void bridge.revokeFileGrant(source.grantId).catch(() => undefined)
+    if (source.timer !== undefined) {
+      clearTimeout(source.timer)
+      delete source.timer
+    }
+    if (source.jobId) discardSource(source, source.jobId)
+    else if (source.grantId) void revokeGrant(source, source.grantId)
     if (pickerOwner.current === source.id) {
       pickerOwner.current = null
       if (mounted.current) setPicking(false)
@@ -218,6 +252,7 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
 
   async function inspectProgress(source: Source, snapshot: JobSnapshot): Promise<void> {
     if (!source.active || !mounted.current) return
+    update(source, { snapshot })
     try {
       if (snapshot.state === 'completed') {
         const result = await bridge.getGedcomInspection({ schema_version: 1, job_id: snapshot.job_id })
@@ -258,10 +293,10 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
         const result = await bridge.inspectGedcom(grant.grantId)
         if (!result.ok) { fail(source, result.error.code); return }
         source.jobId = result.data.job_id
-        if (!source.active || !mounted.current) { discard(source.jobId); return }
+        if (!source.active || !mounted.current) { discardSource(source, source.jobId); return }
         await inspectProgress(source, result.data)
       } finally {
-        await bridge.revokeFileGrant(grant.grantId).catch(() => undefined)
+        await revokeGrant(source, grant.grantId)
         delete source.grantId
       }
     } catch { fail(source, 'GEDCOM_INTAKE_UNAVAILABLE') }
@@ -299,7 +334,9 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
       const label = `Source ${source.id}`
       const summary = source.inspection?.value.summary
       const jobId = entries.current.get(source.id)?.jobId
-      return <article className="summary-card" key={source.id} aria-labelledby={`source-${source.id}`}>
+      const inspecting = !source.error && !summary
+      return <article className="summary-card" key={source.id} aria-labelledby={`source-${source.id}`}
+        aria-busy={inspecting}>
         <h2 id={`source-${source.id}`}>{label}</h2>
         {source.displayName && <p>{source.displayName}</p>}
         <div className="home-actions">
@@ -307,10 +344,13 @@ export function GedcomIntakeWorkspace({ bridge = bridgeFromWindow() }: { bridge?
             onClick={() => move(index, -1)}>Move up</Button>
           <Button type="button" variant="quiet" disabled={index === sources.length - 1} aria-label={`Move ${label} down`}
             onClick={() => move(index, 1)}>Move down</Button>
-          <Button type="button" variant="quiet" aria-label={`Remove ${label}`}
-            onClick={() => { const entry = entries.current.get(source.id); if (entry) remove(entry) }}>Remove</Button>
+          <Button type="button" variant="quiet" aria-label={`${inspecting ? 'Cancel' : 'Remove'} ${label}${inspecting ? ' inspection' : ''}`}
+            onClick={() => { const entry = entries.current.get(source.id); if (entry) remove(entry) }}>
+            {inspecting ? 'Cancel' : 'Remove'}
+          </Button>
         </div>
-        {source.error ? <IntakeError code={source.error} /> : !summary ? <p role="status">Inspecting source…</p> : <>
+        {source.error ? <IntakeError code={source.error} /> : !summary
+          ? <p role="status" aria-live="polite">{inspectionStatus(source.snapshot)}</p> : <>
           <p>GEDCOM {summary.gedcom_version || 'unknown'} · {summary.encoding || 'unknown encoding'}</p>
           <p>{summary.individual_count} individuals · {summary.family_count} families · {summary.other_record_count} other records</p>
           <p className="gedcom-fingerprint">Source SHA-256: {summary.source.sha256}</p>
