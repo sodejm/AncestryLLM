@@ -73,9 +73,11 @@ async function waitFor(predicate, description, timeoutMs = 10_000) {
 test('Mocha 11 preserves watch-file globs through its Chokidar 4 adapter', { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'ancestryllm-mocha-watch-'))
   const counterPath = join(root, 'runs.txt')
+  const watchedPath = join(root, 'src', 'nested', 'change.js')
   const mochaCli = await pnpmPackagePath('mocha@11.8.0', 'mocha/bin/mocha.js')
   await mkdir(join(root, 'src', 'nested'), { recursive: true })
   await mkdir(join(root, 'test'), { recursive: true })
+  await writeFile(watchedPath, 'export const changed = false\n')
   await writeFile(
     join(root, 'test', 'watch.test.cjs'),
     "require('node:fs').appendFileSync(process.env.MOCHA_WATCH_COUNTER, 'run\\n'); describe('fixture', () => { it('passes', () => {}) })\n",
@@ -86,7 +88,11 @@ test('Mocha 11 preserves watch-file globs through its Chokidar 4 adapter', { tim
     [mochaCli, '--watch', '--watch-files', 'src/**/*.js', '--reporter', 'dot', 'test/watch.test.cjs'],
     {
       cwd: root,
-      env: { ...process.env, MOCHA_WATCH_COUNTER: counterPath },
+      env: {
+        ...process.env,
+        DEBUG: [process.env.DEBUG, 'mocha:cli:watch'].filter(Boolean).join(','),
+        MOCHA_WATCH_COUNTER: counterPath,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
@@ -99,10 +105,10 @@ test('Mocha 11 preserves watch-file globs through its Chokidar 4 adapter', { tim
 
   try {
     await waitFor(
-      () => output.includes('waiting for changes'),
+      () => output.includes('watcher ready') && output.includes('waiting for changes'),
       `Mocha watcher readiness; output was ${JSON.stringify(output)}`,
     )
-    await writeFile(join(root, 'src', 'nested', 'change.js'), 'export const changed = true\n')
+    await writeFile(watchedPath, 'export const changed = true\n')
     await waitFor(
       async () => (await readFile(counterPath, 'utf8')).trim().split('\n').length >= 2,
       `a rerun from the nested watch glob; output was ${JSON.stringify(output)}`,
