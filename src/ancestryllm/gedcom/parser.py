@@ -115,6 +115,7 @@ class _PointerAllocator:
         namespace = (prefix, source_number)
         suffix = self._next_suffix.get(namespace, 1)
         probes_since_checkpoint = 0
+        self._checkpoint()
 
         while True:
             candidate = f"@{prefix}{source_number}_{suffix}@"
