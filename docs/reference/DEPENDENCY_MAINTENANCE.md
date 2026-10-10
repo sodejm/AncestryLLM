@@ -138,7 +138,7 @@ consumer installation and do not build or authorize release artifacts.
 A dependency-only fix uses the observed failing audit as its initial failure
 evidence. If compatibility requires application behavior changes, first add
 and observe a focused failing regression test under the normal
-[red-green process](../../CONTRIBUTING.md#test-driven-development). Do not add
+red-green process documented in the repository's `CONTRIBUTING.md`. Do not add
 audit exclusions, suppress advisory identifiers, lower severity thresholds,
 or remove security checks to obtain a passing result.
 
