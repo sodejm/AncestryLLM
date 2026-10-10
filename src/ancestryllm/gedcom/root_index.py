@@ -131,6 +131,8 @@ def build_root_index(
         ) from exc
     except sqlite3.Error as exc:
         raise RootIndexError("The private root index could not be built.") from exc
+    except OSError as exc:
+        raise RootIndexError("The private root index could not be built.") from exc
     except RootIndexError:
         raise
     except BaseException:
@@ -446,6 +448,10 @@ def _remove_staged_files(staged: Path) -> None:
             candidate.unlink()
         except FileNotFoundError:
             continue
+        except OSError as exc:
+            raise RootIndexError(
+                "The private root index staging files could not be removed."
+            ) from exc
 
 
 @contextmanager

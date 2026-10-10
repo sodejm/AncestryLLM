@@ -333,6 +333,28 @@ def test_build_sanitizes_sqlite_failures_and_candidate_values(
     assert not path.exists()
 
 
+def test_build_sanitizes_filesystem_failures_and_removes_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = _private_directory(tmp_path)
+    path = directory / "sensitive-family-name.sqlite3"
+    sensitive_detail = "sensitive-filesystem-detail"
+
+    def fail_sync(*args: object, **kwargs: object) -> None:
+        raise OSError(sensitive_detail)
+
+    monkeypatch.setattr(root_index, "_sync_file", fail_sync)
+
+    with pytest.raises(RootIndexError) as failure:
+        build_root_index(path, (_candidate(1),), max_bytes=1_000_000)
+
+    assert sensitive_detail not in str(failure.value)
+    assert path.name not in str(failure.value)
+    assert not path.exists()
+    assert list(directory.iterdir()) == []
+
+
 def test_read_rejects_non_private_or_corrupt_indexes(tmp_path: Path) -> None:
     directory = _private_directory(tmp_path)
     public = directory / "public.sqlite3"
