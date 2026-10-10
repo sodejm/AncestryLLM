@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
 
+import pytest
+
+from ancestryllm.core.cancellation import CancellationToken
 from ancestryllm.core.jobs import JobManager, JobState
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _assert_manager_lock_is_available(manager: JobManager) -> None:
@@ -100,6 +99,41 @@ def test_accepted_cancellation_releases_result_after_callable_returns(
     assert released == [result]
 
 
+def test_cancellation_at_post_callable_checkpoint_releases_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    callable_returning = threading.Event()
+    post_callable_checkpoint = threading.Event()
+    release_checkpoint = threading.Event()
+    result = object()
+    released: list[object] = []
+    original_raise_if_cancelled = CancellationToken.raise_if_cancelled
+
+    def blocked_raise_if_cancelled(token: CancellationToken) -> None:
+        if callable_returning.is_set() and not post_callable_checkpoint.is_set():
+            post_callable_checkpoint.set()
+            assert release_checkpoint.wait(2)
+        original_raise_if_cancelled(token)
+
+    def work() -> object:
+        callable_returning.set()
+        return result
+
+    monkeypatch.setattr(CancellationToken, "raise_if_cancelled", blocked_raise_if_cancelled)
+    job = manager.submit("post-callable cancellation", work, result_cleanup=released.append)
+    assert post_callable_checkpoint.wait(2)
+    manager.cancel(job.job_id)
+    release_checkpoint.set()
+
+    cancelled = manager.wait(job.job_id, timeout=2)
+    manager.shutdown()
+
+    assert cancelled.state is JobState.CANCELLED
+    assert cancelled.result is None
+    assert released == [result]
+
+
 def test_shutdown_wait_true_releases_completed_results() -> None:
     manager = JobManager(max_workers=1, max_pending=1)
     result = object()
@@ -158,3 +192,23 @@ def test_cleanup_failure_logs_only_exception_class(
 
     assert "RuntimeError" in caplog.text
     assert "PRIVATE CLEANUP DETAIL" not in caplog.text
+
+
+def test_shutdown_preserves_completed_result_without_cleanup_callback() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+    result = object()
+    job = manager.submit("ordinary result", lambda: result)
+    assert manager.wait(job.job_id, timeout=2).result is result
+
+    manager.shutdown()
+
+    assert manager.get(job.job_id).result is result
+
+
+def test_result_cleanup_must_be_callable() -> None:
+    manager = JobManager(max_workers=1, max_pending=1)
+
+    with pytest.raises(ValueError, match="result cleanup must be callable"):
+        manager.submit("invalid cleanup", object, result_cleanup="invalid")  # type: ignore[arg-type]
+
+    manager.shutdown()
