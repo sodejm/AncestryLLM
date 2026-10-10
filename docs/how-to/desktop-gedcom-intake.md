@@ -55,8 +55,9 @@ each UI page shows at most 25 candidates. **Next candidates** continues the
 same query. An empty query starts from the first page and reports an exact
 total. A filtered request scans at most 4,096 candidates, so its total may be
 shown as **Unknown** and a continuation can be available even when the current
-page is empty. Exact `person:<identifier>` searches remain exact rather than
-falling back to a fuzzy name match, and may also require continuation.
+page is empty. Exact `person:<identifier>` searches use the private index,
+report a known total, and never fall back to a fuzzy name match. A unique exact
+person lookup does not require fuzzy-scan continuation.
 
 Use the source identifier, birth/death dates, and relationship counts to
 distinguish duplicate names. Candidate text is bounded and may be shortened;
@@ -81,8 +82,12 @@ sources or root choices. Removing a source while its native chooser is still
 open also cancels that selection and revokes any matching grant returned
 before submission. A completion that arrives after cancellation is ignored
 and discarded once; it cannot repopulate the removed slot.
-Private staged bytes are normally removed when inspection reaches a terminal
-state; results remain in process memory only until disposal or shutdown.
+Private staged source bytes are normally removed when inspection reaches a
+terminal state. The bounded summary remains in process memory, and a minimal
+private root index remains on disk under a 15-minute lease. At most eight
+successful leases are retained. Disposal, shutdown, or lease expiry revokes
+the result and removes its index. An expired result requires selecting and
+inspecting the source again.
 
 If a selection is oversized, invalid, replaced, or unavailable, remove its
 slot and choose a stable source again. For a sidecar or disposal failure,
