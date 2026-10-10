@@ -71,22 +71,29 @@ Empty-query pages use this deterministic order:
 3. `source_identifier`
 4. `person_ref`
 
-An exact `person_ref` or `source_identifier` query uses indexed equality and
-returns only exact matches. Its total is known. An empty query also has a known
-total. All values are bound as SQLite parameters.
+An exact `person_ref` query uses case-sensitive indexed equality. An exact
+`source_identifier` query uses indexed ASCII case-insensitive equality, matching
+the case-insensitive GEDCOM xref normalization used by callers. These queries
+return only exact matches and their totals are known. A syntactically valid
+`person:` reference containing 32 hexadecimal characters returns an empty exact
+result when absent; it never falls back to searching imported display text. An
+empty query also has a known total. All values are bound as SQLite parameters.
 
 When there is no exact identifier match, substring search compares the literal
 case-folded query with all seven projected fields in Python. SQL wildcard
 characters such as `%` and `_` therefore have no special meaning. A call scans
-at most 4,096 deterministically ordered rows and stops earlier when the requested
-number of matches is found.
+at most 4,096 deterministically ordered rows. After collecting the requested
+number of matches, it uses the remaining scan budget to look for one later
+match. This bounded lookahead lets a terminal full page finish without an empty
+continuation while preserving the first later match for the next page.
 
 For substring searches, `next_offset` is the position after the last scanned
 row, not the number of matches. A page with no matches can still return a resume
 offset. Passing that offset continues the bounded scan without repeating rows.
 `total_count` is `None` until a scan that began at offset zero reaches the end;
-later resumed calls keep it unknown. `next_offset` is `None` only after the end
-of the ordered index is reached.
+later resumed calls keep it unknown. When lookahead finds another match,
+`next_offset` identifies that unreturned row. Otherwise it is the position after
+the last scanned row, or `None` after the ordered index is exhausted.
 
 The immutable read URI relies on the publication contract: published index
 files are never modified in place. Rebuilds must use a new destination after the

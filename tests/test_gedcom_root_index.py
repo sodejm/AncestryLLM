@@ -139,6 +139,51 @@ def test_read_exact_person_or_source_identifier_is_indexed_and_pageable(
     assert page.next_offset is None
 
 
+def test_read_exact_source_identifier_is_case_insensitive_and_indexed(
+    tmp_path: Path,
+) -> None:
+    path = _private_directory(tmp_path) / "roots.sqlite3"
+    decoy = RootCandidate(
+        person_ref="person:decoy",
+        reason_code="selectable",
+        display_name="A mention of @i2@",
+        source_identifier="@I9@",
+    )
+    build_root_index(path, (_candidate(1), _candidate(2), decoy), max_bytes=1_000_000)
+
+    page = read_root_page(path, query="@i2@", limit=1)
+    with closing(sqlite3.connect(path)) as connection:
+        query_plan = connection.execute(
+            f"EXPLAIN QUERY PLAN {root_index._EXACT_SOURCE_PAGE_SQL}",
+            ("@i2@", 1, 0),
+        ).fetchall()
+
+    assert [candidate.person_ref for candidate in page.candidates] == ["person:0002"]
+    assert page.total_count == 1
+    assert page.next_offset is None
+    assert any("root_candidates_source_identifier" in row[3] for row in query_plan)
+
+
+def test_read_unknown_person_anchor_never_falls_back_to_display_search(
+    tmp_path: Path,
+) -> None:
+    path = _private_directory(tmp_path) / "roots.sqlite3"
+    missing_anchor = "person:" + "0" * 32
+    imported_name = RootCandidate(
+        person_ref="person:" + "1" * 32,
+        reason_code="selectable",
+        display_name=f"Named {missing_anchor} Example",
+        source_identifier="@I1@",
+    )
+    build_root_index(path, (imported_name,), max_bytes=1_000_000)
+
+    page = read_root_page(path, query=missing_anchor)
+
+    assert page.candidates == ()
+    assert page.total_count == 0
+    assert page.next_offset is None
+
+
 def test_read_substring_treats_sql_wildcards_literally(tmp_path: Path) -> None:
     path = _private_directory(tmp_path) / "roots.sqlite3"
     literal = RootCandidate(
@@ -154,6 +199,62 @@ def test_read_substring_treats_sql_wildcards_literally(tmp_path: Path) -> None:
     assert [candidate.person_ref for candidate in page.candidates] == ["person:literal"]
     assert page.total_count == 1
     assert page.next_offset is None
+
+
+def test_read_substring_looks_ahead_to_finish_a_full_terminal_page(tmp_path: Path) -> None:
+    path = _private_directory(tmp_path) / "roots.sqlite3"
+    first = RootCandidate(
+        person_ref="person:first",
+        reason_code="selectable",
+        display_name="A Needle",
+        source_identifier="@I1@",
+    )
+    second = RootCandidate(
+        person_ref="person:second",
+        reason_code="selectable",
+        display_name="B Needle",
+        source_identifier="@I2@",
+    )
+    build_root_index(
+        path,
+        (first, second, _candidate(3), _candidate(4)),
+        max_bytes=1_000_000,
+    )
+
+    page = read_root_page(path, query="Needle", limit=2)
+
+    assert page.candidates == (first, second)
+    assert page.total_count == 2
+    assert page.next_offset is None
+
+
+def test_read_substring_lookahead_preserves_the_next_matching_row(tmp_path: Path) -> None:
+    path = _private_directory(tmp_path) / "roots.sqlite3"
+    candidates = tuple(
+        RootCandidate(
+            person_ref=f"person:{number}",
+            reason_code="selectable",
+            display_name=f"{number} Needle",
+            source_identifier=f"@I{number}@",
+        )
+        for number in range(3)
+    )
+    build_root_index(path, candidates, max_bytes=1_000_000)
+
+    first = read_root_page(path, query="Needle", limit=2)
+    resumed = read_root_page(
+        path,
+        query="Needle",
+        offset=first.next_offset or 0,
+        limit=2,
+    )
+
+    assert first.candidates == candidates[:2]
+    assert first.total_count == 3
+    assert first.next_offset == 2
+    assert resumed.candidates == candidates[2:]
+    assert resumed.total_count is None
+    assert resumed.next_offset is None
 
 
 def test_read_substring_stops_after_4096_scanned_rows_and_resumes(tmp_path: Path) -> None:

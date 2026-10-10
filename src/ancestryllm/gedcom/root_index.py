@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import sqlite3
 import stat
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 _SCHEMA_VERSION = 1
 _INSERT_BATCH_SIZE = 128
 _SUBSTRING_SCAN_LIMIT = 4096
+_PERSON_REF_PATTERN = re.compile(r"person:[0-9a-f]{32}")
 _REQUIRED_INDEXES = {
     "root_candidates_display_order",
     "root_candidates_source_identifier",
@@ -44,11 +46,20 @@ _ORDERED_PAGE_SQL = """
              source_identifier, person_ref
     LIMIT ? OFFSET ?
 """
-_EXACT_PAGE_SQL = """
+_EXACT_PERSON_PAGE_SQL = """
     SELECT person_ref, reason_code, display_name, source_identifier,
            birth_date, death_date, relationship_summary
     FROM root_candidates
-    WHERE person_ref = ? OR source_identifier = ?
+    WHERE person_ref = ?
+    ORDER BY display_name COLLATE NOCASE, display_name,
+             source_identifier, person_ref
+    LIMIT ? OFFSET ?
+"""
+_EXACT_SOURCE_PAGE_SQL = """
+    SELECT person_ref, reason_code, display_name, source_identifier,
+           birth_date, death_date, relationship_summary
+    FROM root_candidates
+    WHERE source_identifier = ? COLLATE NOCASE
     ORDER BY display_name COLLATE NOCASE, display_name,
              source_identifier, person_ref
     LIMIT ? OFFSET ?
@@ -183,28 +194,31 @@ def read_root_page(
                 next_offset=next_offset if next_offset < candidate_count else None,
             )
 
-        exact_count_row = connection.execute(
-            """
-            SELECT COUNT(*)
-            FROM root_candidates
-            WHERE person_ref = ? OR source_identifier = ?
+        exact_page = _read_exact_page(
+            connection,
+            count_sql="SELECT COUNT(*) FROM root_candidates WHERE person_ref = ?",
+            page_sql=_EXACT_PERSON_PAGE_SQL,
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+        if exact_page is not None:
+            return exact_page
+        exact_page = _read_exact_page(
+            connection,
+            count_sql="""
+                SELECT COUNT(*) FROM root_candidates
+                WHERE source_identifier = ? COLLATE NOCASE
             """,
-            (query, query),
-        ).fetchone()
-        if exact_count_row is None:
-            raise RootIndexError("The private root index is invalid.")
-        exact_count = int(exact_count_row[0])
-        if exact_count:
-            rows = connection.execute(
-                _EXACT_PAGE_SQL,
-                (query, query, limit, offset),
-            ).fetchall()
-            next_offset = offset + len(rows)
-            return RootIndexPage(
-                candidates=tuple(_candidate_from_row(row) for row in rows),
-                total_count=exact_count,
-                next_offset=next_offset if next_offset < exact_count else None,
-            )
+            page_sql=_EXACT_SOURCE_PAGE_SQL,
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+        if exact_page is not None:
+            return exact_page
+        if _PERSON_REF_PATTERN.fullmatch(query.casefold()) is not None:
+            return RootIndexPage(candidates=(), total_count=0, next_offset=None)
 
         scan_rows = connection.execute(
             _ORDERED_PAGE_SQL,
@@ -213,19 +227,57 @@ def read_root_page(
         needle = query.casefold()
         matches: list[RootCandidate] = []
         scanned = 0
+        lookahead_offset: int | None = None
         for row in scan_rows:
+            row_offset = offset + scanned
             scanned += 1
             if any(needle in value.casefold() for value in row):
-                matches.append(_candidate_from_row(row))
-                if len(matches) == limit:
+                if len(matches) < limit:
+                    matches.append(_candidate_from_row(row))
+                else:
+                    lookahead_offset = row_offset
                     break
         resume_offset = offset + scanned
         reached_end = resume_offset >= candidate_count
+        total_count: int | None = None
+        if offset == 0 and reached_end:
+            total_count = len(matches) + int(lookahead_offset is not None)
+        substring_next_offset: int | None
+        if lookahead_offset is not None:
+            substring_next_offset = lookahead_offset
+        elif reached_end:
+            substring_next_offset = None
+        else:
+            substring_next_offset = resume_offset
         return RootIndexPage(
             candidates=tuple(matches),
-            total_count=len(matches) if offset == 0 and reached_end else None,
-            next_offset=None if reached_end else resume_offset,
+            total_count=total_count,
+            next_offset=substring_next_offset,
         )
+
+
+def _read_exact_page(
+    connection: sqlite3.Connection,
+    *,
+    count_sql: str,
+    page_sql: str,
+    query: str,
+    offset: int,
+    limit: int,
+) -> RootIndexPage | None:
+    count_row = connection.execute(count_sql, (query,)).fetchone()
+    if count_row is None:
+        raise RootIndexError("The private root index is invalid.")
+    exact_count = int(count_row[0])
+    if exact_count == 0:
+        return None
+    rows = connection.execute(page_sql, (query, limit, offset)).fetchall()
+    next_offset = offset + len(rows)
+    return RootIndexPage(
+        candidates=tuple(_candidate_from_row(row) for row in rows),
+        total_count=exact_count,
+        next_offset=next_offset if next_offset < exact_count else None,
+    )
 
 
 def _validate_page_request(query: str, offset: int, limit: int) -> None:
@@ -314,7 +366,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             relationship_summary TEXT NOT NULL
         ) WITHOUT ROWID;
         CREATE INDEX root_candidates_source_identifier
-            ON root_candidates(source_identifier);
+            ON root_candidates(source_identifier COLLATE NOCASE);
         CREATE INDEX root_candidates_display_order
             ON root_candidates(
                 display_name COLLATE NOCASE,
