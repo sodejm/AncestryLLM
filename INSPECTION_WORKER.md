@@ -11,7 +11,12 @@ a fixed resource envelope.
 The parent fingerprints the immutable granted source and performs a streaming
 preflight through the standard GEDCOM ingress policy. It then waits for one of
 two process slots, creates a mode `0700` lease directory, and starts
-`python -m ancestryllm.gedcom.inspection_worker --child`.
+`python -m ancestryllm.gedcom.inspection_worker --child` in an ordinary Python
+runtime. A frozen native sidecar instead starts its own executable with the
+exact `--inspection-worker` flag. The native entry point dispatches that flag
+directly to the same private protocol without starting the API server; extra
+worker arguments are rejected. This avoids treating a native executable as a
+Python interpreter.
 
 The command line contains no source or staging path. A single JSON control
 document, limited to 8 KiB, travels over standard input. Standard output and
@@ -118,6 +123,13 @@ or output backdoors in production. Focused tests cover exact-limit admission,
 one-over rejection, path-free failure parsing, crash/memory/timeout mapping,
 private output checks, forced termination and reaping, and bounded orphan
 cleanup.
+
+Entry-routing regressions cover ordinary Python and frozen worker launches,
+exclusive native worker dispatch, and rejection of extra arguments. Native
+validation must also build the sidecar through `scripts/build_sidecar.py`, run
+its normal control smoke test, and inspect fictional GEDCOM input through the
+packaged worker. Source-level routing tests alone do not prove the frozen
+payload contains every worker dependency.
 
 Operators should investigate repeated `WORKER_FAILED` results as local runtime,
 permission, resource-measurement, or child-integrity failures. Source paths and

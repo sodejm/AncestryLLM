@@ -35,7 +35,7 @@ from ancestryllm.domain.errors import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
     from ancestryllm.application.ports import CancellationPort
@@ -504,9 +504,14 @@ def run_inspection(
         )
         payload = _control_payload(source, directory, request, selected, policy.limits)
         source_root = Path(__file__).resolve().parents[2]
+        command = (
+            [sys.executable, "--inspection-worker"]
+            if getattr(sys, "frozen", False)
+            else [sys.executable, "-m", "ancestryllm.gedcom.inspection_worker", "--child"]
+        )
         try:
-            process = subprocess.Popen(
-                [sys.executable, "-m", "ancestryllm.gedcom.inspection_worker", "--child"],
+            process = subprocess.Popen(  # noqa: S603 - fixed protocol and current runtime executable
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -650,8 +655,15 @@ def _child_main() -> int:
         return 70
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run only the private stdin worker protocol, rejecting other arguments."""
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    return _child_main() if arguments == ["--child"] else 64
+
+
 if __name__ == "__main__":
-    raise SystemExit(_child_main() if sys.argv[1:] == ["--child"] else 64)
+    raise SystemExit(main())
 
 
-__all__ = ["InspectionBudgets", "WorkerInspection", "preflight_source", "run_inspection"]
+__all__ = ["InspectionBudgets", "WorkerInspection", "main", "preflight_source", "run_inspection"]

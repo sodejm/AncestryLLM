@@ -30,6 +30,17 @@ The native build workflow creates a self-contained PyInstaller directory for
 each target and embeds it under `Resources/sidecar/<target>/` (macOS) or the
 equivalent Electron resources directory on Windows and Linux.
 
+The native entry point also accepts the exact private `--inspection-worker`
+flag for the bounded offline inspection child introduced by Issue #489. That
+mode consumes a bounded stdin control document and writes private result files;
+it does not start an API server or expose another Electron bridge method.
+Additional worker arguments fail closed. The application supervisor selects
+this entry point only in a frozen runtime; ordinary Python uses the module
+entry point. The [worker contract](https://github.com/sodejm/AncestryLLM/blob/main/INSPECTION_WORKER.md)
+defines the shared admission, resource, privacy, and cleanup limits. This native
+entry capability does not promote the gated desktop genealogy adapter to a
+supported packaged surface.
+
 | Supported operating system | Architecture | Resource target | Native CI runner |
 | --- | --- | --- | --- |
 | macOS 15 | arm64, x64 | `darwin-arm64`, `darwin-x64` | `macos-15`, `macos-15-intel` |

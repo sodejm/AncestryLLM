@@ -307,6 +307,43 @@ def test_real_child_enforces_custom_collection_limit(
     assert source.read_bytes() == before
 
 
+@pytest.mark.parametrize("frozen", [False, True])
+def test_worker_launch_uses_the_runtime_entry_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen: bool
+) -> None:
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n1 CHAR UTF-8\n0 TRLR\n", encoding="utf-8")
+    registry = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=registry.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="application/x-gedcom",
+            artifact_type="gedcom",
+        )
+    )
+    executable = str(tmp_path / ("native-sidecar" if frozen else "python"))
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.sys.frozen", frozen, raising=False)
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.sys.executable", executable)
+    commands: list[list[str]] = []
+
+    def refuse_launch(command: list[str], **kwargs: object) -> None:
+        commands.append(command)
+        raise OSError("simulated launch failure")
+
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.subprocess.Popen", refuse_launch)
+    with pytest.raises(DomainFailure) as caught:
+        run_inspection(source, request, _Cancellation())
+
+    assert caught.value.code.value == "WORKER_FAILED"
+    expected = (
+        [executable, "--inspection-worker"]
+        if frozen
+        else [executable, "-m", "ancestryllm.gedcom.inspection_worker", "--child"]
+    )
+    assert commands == [expected]
+
+
 def test_windows_rss_api_declares_pointer_safe_signatures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
