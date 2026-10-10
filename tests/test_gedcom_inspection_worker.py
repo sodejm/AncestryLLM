@@ -1,27 +1,73 @@
 """Fictional-input regressions for the isolated inspection resource boundary."""
 
 import json
+import subprocess
+from dataclasses import fields, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from ancestryllm.application._artifacts import _ArtifactRegistry
+from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
+from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure
 from ancestryllm.gedcom.inspection_worker import (
     InspectionBudgets,
+    _cleanup_orphans,
+    _control_payload,
     _monitor_process,
     _read_failure,
+    _read_rss,
     _sanitized_environment,
+    _stop_process,
     _validate_private_outputs,
     preflight_source,
+    run_inspection,
 )
 
 
 class _Process:
+    pid = 123
+
     def __init__(self, polls: list[int | None]) -> None:
         self._polls = iter(polls)
 
     def poll(self) -> int | None:
         return next(self._polls)
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+    def terminate(self) -> None:
+        return
+
+    def kill(self) -> None:
+        return
+
+
+class _StubbornProcess:
+    pid = 456
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self._waits = 0
+
+    def poll(self) -> int | None:
+        return None
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.calls.append(f"wait:{timeout}")
+        self._waits += 1
+        if self._waits == 1:
+            raise subprocess.TimeoutExpired("worker", timeout)
+        return -9
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def kill(self) -> None:
+        self.calls.append("kill")
 
 
 class _Cancellation:
@@ -150,3 +196,148 @@ def test_failure_channel_rejects_structured_or_path_bearing_details(
             _read_failure(failure_path)
         assert caught.value.code.value == "WORKER_FAILED"
         assert caught.value.details == ()
+
+
+def test_stop_process_escalates_and_reaps_a_stubborn_child() -> None:
+    process = _StubbornProcess()
+    _stop_process(process)
+    assert process.calls == ["terminate", "wait:1", "kill", "wait:1"]
+
+
+def test_restart_cleanup_removes_only_dead_owned_private_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ancestryllm-inspection"
+    root.mkdir(mode=0o700)
+    dead = root / "ancestryllm-inspect-dead"
+    live = root / "ancestryllm-inspect-live"
+    unrelated = root / "other-directory"
+    for directory, pid in ((dead, 1001), (live, 1002), (unrelated, 1003)):
+        directory.mkdir(mode=0o700)
+        owner = directory / "owner.json"
+        owner.write_text(json.dumps({"pid": pid}), encoding="ascii")
+        owner.chmod(0o600)
+
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._pid_is_live", lambda pid: pid == 1002
+    )
+    _cleanup_orphans(root)
+
+    assert not dead.exists()
+    assert live.exists()
+    assert unrelated.exists()
+
+
+def test_control_payload_round_trips_custom_ingress_limits(tmp_path: Path) -> None:
+    defaults = FileIngressLimits()
+    limits = replace(
+        defaults,
+        gedcom=replace(defaults.gedcom, max_collection_items=1),
+    )
+    registry = _ArtifactRegistry()
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n0 TRLR\n", encoding="utf-8")
+    request = GedcomInspectRequest(
+        source=registry.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="application/x-gedcom",
+            artifact_type="gedcom",
+        )
+    )
+
+    payload = _control_payload(
+        source,
+        tmp_path / "private-worker",
+        request,
+        InspectionBudgets(),
+        limits,
+    )
+    document = json.loads(payload)
+
+    assert document["ingress"]["gedcom"]["max_collection_items"] == 1
+    assert FileIngressLimits.from_mapping(document["ingress"]) == limits
+
+
+def test_real_child_enforces_custom_collection_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if "root_candidate_count" not in {item.name for item in fields(GedcomInspectResult)}:
+        pytest.skip("requires the integrated worker result contract")
+    source = tmp_path / "fictional.ged"
+    source.write_text(
+        "0 HEAD\n1 GEDC\n2 VERS 5.5.5\n1 CHAR UTF-8\n"
+        "0 @I1@ INDI\n1 NAME Ada /Example/\n"
+        "0 @I2@ INDI\n1 NAME Grace /Example/\n0 TRLR\n",
+        encoding="utf-8",
+    )
+    before = source.read_bytes()
+    real_temp = tmp_path / "real-temp"
+    real_temp.mkdir()
+    temp_alias = tmp_path / "temp-alias"
+    try:
+        temp_alias.symlink_to(real_temp, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker.tempfile.gettempdir",
+        lambda: str(temp_alias),
+    )
+    defaults = FileIngressLimits()
+    ingress = FileIngressPolicy(
+        replace(
+            defaults,
+            gedcom=replace(defaults.gedcom, max_collection_items=1),
+        )
+    )
+    registry = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=registry.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="application/x-gedcom",
+            artifact_type="gedcom",
+        )
+    )
+
+    with pytest.raises(DomainFailure) as caught:
+        run_inspection(source, request, _Cancellation(), ingress=ingress)
+
+    assert caught.value.code.value == "ARTIFACT_TOO_LARGE"
+    assert source.read_bytes() == before
+
+
+def test_windows_rss_api_declares_pointer_safe_signatures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NativeFunction:
+        def __init__(self, result: object) -> None:
+            self.result = result
+            self.argtypes: list[object] | None = None
+            self.restype: object | None = None
+            self.calls: list[tuple[object, ...]] = []
+
+        def __call__(self, *args: object) -> object:
+            self.calls.append(args)
+            return self.result
+
+    open_process = _NativeFunction(0x1_0000_0001)
+    memory_info = _NativeFunction(False)
+    close_handle = _NativeFunction(True)
+    windll = SimpleNamespace(
+        kernel32=SimpleNamespace(OpenProcess=open_process, CloseHandle=close_handle),
+        psapi=SimpleNamespace(GetProcessMemoryInfo=memory_info),
+    )
+    import ctypes
+    from ctypes import wintypes
+
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr(ctypes, "windll", windll, raising=False)
+
+    assert _read_rss(_Process([None])) is None
+    assert open_process.restype is wintypes.HANDLE
+    assert memory_info.argtypes is not None
+    assert memory_info.argtypes[0] is wintypes.HANDLE
+    assert close_handle.argtypes == [wintypes.HANDLE]
+    assert memory_info.calls[0][0] == 0x1_0000_0001
+    assert close_handle.calls == [(0x1_0000_0001,)]

@@ -22,6 +22,7 @@ import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields, replace
 from importlib import import_module
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -195,20 +196,35 @@ def _read_rss(process: _PollableProcess) -> int | None:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
+            kernel32 = windll.kernel32
+            psapi = windll.psapi
+            kernel32.OpenProcess.argtypes = [
+                wintypes.DWORD,
+                wintypes.BOOL,
+                wintypes.DWORD,
+            ]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(_MemoryCounters),
+                wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
             query = 0x1000
-            handle = windll.kernel32.OpenProcess(query, False, process.pid)
+            handle = kernel32.OpenProcess(query, False, process.pid)
             if not handle:
                 return None
             try:
                 counters = _MemoryCounters()
                 counters.cb = ctypes.sizeof(counters)
-                if not windll.psapi.GetProcessMemoryInfo(
-                    handle, ctypes.byref(counters), counters.cb
-                ):
+                if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
                     return None
                 return int(counters.WorkingSetSize)
             finally:
-                windll.kernel32.CloseHandle(handle)
+                kernel32.CloseHandle(handle)
         except (AttributeError, OSError, ValueError):
             return None
     return None
@@ -361,7 +377,7 @@ def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
     """Remove a bounded number of stale worker leases after supervisor restart."""
 
     try:
-        candidates = tuple(root.iterdir())[:maximum]
+        candidates = tuple(islice(root.iterdir(), maximum))
     except OSError:
         return
     for candidate in candidates:
@@ -379,7 +395,10 @@ def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
 
 
 def _scratch_root() -> Path:
-    root = Path(tempfile.gettempdir()) / "ancestryllm-inspection"
+    # macOS commonly exposes the same temporary directory through both /var and
+    # /private/var.  Canonicalize before passing the lease path to a child whose
+    # cwd is reported canonically, otherwise the child rejects its own directory.
+    root = Path(tempfile.gettempdir()).resolve() / "ancestryllm-inspection"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         root.chmod(0o700)
@@ -427,12 +446,14 @@ def _control_payload(
     directory: Path,
     request: GedcomInspectRequest,
     budgets: InspectionBudgets,
+    ingress_limits: FileIngressLimits,
 ) -> bytes:
     document = {
         "source": str(source),
         "directory": str(directory),
         "request": json.loads(request.to_json()),
         "budgets": asdict(budgets),
+        "ingress": ingress_limits.to_mapping(),
     }
     payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(payload) > _CONTROL_BYTES:
@@ -481,7 +502,7 @@ def run_inspection(
             json.dumps({"pid": os.getpid()}, separators=(",", ":")).encode("ascii"),
             maximum=_FAILURE_BYTES,
         )
-        payload = _control_payload(source, directory, request, selected)
+        payload = _control_payload(source, directory, request, selected, policy.limits)
         source_root = Path(__file__).resolve().parents[2]
         try:
             process = subprocess.Popen(
@@ -561,6 +582,7 @@ def _child_main() -> int:
             "directory",
             "request",
             "budgets",
+            "ingress",
         }:
             return 64
         source = Path(document["source"])
@@ -568,6 +590,7 @@ def _child_main() -> int:
         if Path.cwd() != directory or not _private_mode(directory, 0o700):
             return 64
         budgets = InspectionBudgets(**document["budgets"])
+        ingress = FileIngressPolicy(FileIngressLimits.from_mapping(document["ingress"]))
         _apply_child_memory_limit(budgets.memory_bytes)
 
         from ancestryllm.application._artifacts import _ArtifactRegistry
@@ -586,7 +609,7 @@ def _child_main() -> int:
             artifact_type="gedcom",
         )
         local_request = replace(request, source=source_grant)
-        service = GedcomService(artifacts=registry)
+        service = GedcomService(ingress=ingress, artifacts=registry)
         execute = getattr(service, "_execute_inspect_locally", None)
         if execute is None:
             raise RuntimeError("local inspection seam unavailable")
