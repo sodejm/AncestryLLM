@@ -13,9 +13,13 @@ evidence.
 2. Choose **Add GEDCOM source** and select a GEDCOM file in the native chooser.
    Cancel if the requested file or purpose is unexpected. There is no typed
    path fallback.
-3. Wait for its inspection. A summary shows the declared GEDCOM version,
-   physical encoding, individual/family/other-record counts, byte size,
-   SHA-256 source identity, and coded findings.
+3. Wait for its inspection. Queued, running, cancelling, and safe-point states
+   are announced to screen readers. When the worker supplies bounded progress,
+   the running state also reports completed and total work units. Use **Cancel**
+   from the keyboard or pointer to stop a pending inspection. A completed
+   summary shows the declared GEDCOM version, physical encoding,
+   individual/family/other-record counts, byte size, SHA-256 source identity,
+   and coded findings.
 4. Add further sources as needed. At most eight slots are available, including
    pending or failed selections. Use **Move up** and **Move down** to set the
    order; source identity and root choices remain attached to their source.
@@ -58,8 +62,10 @@ Use the source identifier, birth/death dates, and relationship counts to
 distinguish duplicate names. Candidate text is bounded and may be shortened;
 it is not an authoritative identity match. Use native radio-button keyboard
 controls to choose one candidate, or explicitly select **Continue without a
-root**. The application never guesses a root. A selection remains visible
-when searching, paging, or reordering sources; a failed query clears it.
+root**. Screen readers encounter each page as a named candidate list, and long
+candidate labels wrap within the available viewport. The application never
+guesses a root. A selection remains visible when searching, paging, or
+reordering sources; a failed query clears it.
 
 This selection is preparation for a future operation only. It does not create
 a rooted export or mutate records. All sources and choices are temporary, not
@@ -67,12 +73,14 @@ saved projects or encrypted workspace records.
 
 ## Remove a source or recover
 
-**Remove** or leaving the workspace requests cancellation and disposal of the
-inspection. Closing or replacing the document, invalidating the native
-runtime, or closing the application revokes its Main-process authority.
-Removing a source while its native chooser is still open also cancels that
-selection and revokes any matching grant returned before submission; late
-callbacks cannot repopulate the removed slot.
+**Cancel**, **Remove**, or leaving the workspace requests cancellation and
+disposal of the inspection. Reloading or replacing the document, restarting
+the native runtime, closing the window, or quitting the application revokes
+its Main-process authority. A restarted application begins with no retained
+sources or root choices. Removing a source while its native chooser is still
+open also cancels that selection and revokes any matching grant returned
+before submission. A completion that arrives after cancellation is ignored
+and discarded once; it cannot repopulate the removed slot.
 Private staged bytes are normally removed when inspection reaches a terminal
 state; results remain in process memory only until disposal or shutdown.
 
@@ -82,7 +90,10 @@ restart the application before retrying. Do not recover data from private
 staging or bypass the native chooser. Original source files remain unchanged,
 and no output needs to be salvaged.
 
-Report only the stable error code and whether failure occurred during
-selection, inspection, finding review, or root search. Do not attach real genealogy records,
-search text, names, identifiers, fingerprints, raw parser lines, logs, or local
-paths to a public issue.
+Timeout, capacity, and worker-crash failures remain keyboard reachable as an
+alert with a reviewed recovery action and stable code such as
+`REQUEST_TIMEOUT`, `GEDCOM_INTAKE_CAPACITY`, or `JOB_SERVICE_UNAVAILABLE`.
+Report only that code and whether failure occurred during selection,
+inspection, finding review, or root search. Do not attach real genealogy
+records, search text, names, identifiers, fingerprints, raw parser lines,
+logs, or local paths to a public issue.

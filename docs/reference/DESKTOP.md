@@ -207,6 +207,19 @@ grant; late completion is ignored. Original files are unchanged.
 There is no import, merge, export, output destination, provider call, or remote
 upload. See [Inspect GEDCOM sources](../how-to/desktop-gedcom-intake.md).
 
+Issue #491 adds worker-lifecycle presentation without widening those contracts.
+Queued, running, cancelling, and safe-point states use bounded polite
+announcements; valid worker totals add completed and total work units. Pending
+sources expose a keyboard-accessible **Cancel** action and terminal sources use
+**Remove**. Root pages remain limited to 25 candidates, render as a named list
+of native radio controls, replace the prior page rather than accumulating it,
+and wrap long labels within the viewport. Reload, restart, window close, and
+application shutdown revoke the owner; a late result is discarded once and
+cannot restore a removed source. Timeout, capacity, and worker-crash states
+render reviewed recovery text plus only the stable code, including
+`REQUEST_TIMEOUT`, `GEDCOM_INTAKE_CAPACITY`, and
+`JOB_SERVICE_UNAVAILABLE`.
+
 ## Chat limits and states
 
 Chat accepts at most 32 concurrent sessions, 32 stored messages per session,
