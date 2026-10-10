@@ -35,7 +35,7 @@ evidence before a packaged application can claim this Chat destination.
 The desktop portion of `config/release-quality-policy-v1.json` is the only
 release-quality authority for tool versions, coverage, receipt gates,
 performance budgets, and diagnostics policy. Hosted verification uses Python
-3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 4.1.11, and WebdriverIO 9.32.0;
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
 
@@ -50,6 +50,8 @@ The source verification matrix is deliberately layered:
 | Native launch, security, lifecycle, and performance scenarios | `pnpm --dir desktop run test:e2e:packaged` | Unpublished unpacked native package |
 
 V8 coverage fails below 70% branches or 75% functions, lines, or statements.
+The existing explicit `src/**/*.{ts,tsx}` inclusion keeps unexecuted application modules
+in the denominator after the Vitest 4 coverage migration.
 Only `e2e/**`, declaration files under `src/**/*.d.ts`, and the renderer test
 bootstrap `src/renderer/src/test-setup.ts` are excluded. Tests and canaries use
 deterministic fictional records; real genealogy, credentials, prompts,

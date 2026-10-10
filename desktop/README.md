@@ -110,7 +110,7 @@ patch is required for the current Electron installer. WebdriverIO uses Mocha
 11.8.0 so its Chokidar 4 watcher retains Mocha's supported glob handling. The
 unused optional `@electron/get` legacy proxy agent is removed because it has
 no patched release. Installation and packaging fail explicitly when
-`ELECTRON_GET_USE_PROXY` is set instead of silently ignoring that requested
+`ELECTRON_GET_USE_PROXY` is nonempty instead of silently ignoring that requested
 legacy behavior.
 
 `desktop-check` runs lint, separated main/preload/renderer type checks, unit
