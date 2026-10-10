@@ -7,9 +7,11 @@ import os
 import re
 import sqlite3
 import stat
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 from uuid import uuid4
@@ -24,6 +26,10 @@ if TYPE_CHECKING:
 _SCHEMA_VERSION = 1
 _INSERT_BATCH_SIZE = 128
 _SUBSTRING_SCAN_LIMIT = 4096
+_VALIDATION_CACHE_LIMIT = 64
+type _IndexIdentity = tuple[int, int, int, int, int]
+_VALIDATED_INDEXES: OrderedDict[Path, _IndexIdentity] = OrderedDict()
+_VALIDATION_CACHE_LOCK = Lock()
 _PERSON_REF_PATTERN = re.compile(r"person:[0-9a-f]{32}")
 _REQUIRED_INDEXES = {
     "root_candidates_display_order",
@@ -157,13 +163,7 @@ def build_root_index(
 def root_index_count(path: Path) -> int:
     """Return the verified candidate count from one complete private index."""
     with _open_valid_index(path) as connection:
-        row = connection.execute("SELECT COUNT(*) FROM root_candidates").fetchone()
-        if row is None:
-            raise RootIndexError("The private root index is invalid.")
-        recorded = _recorded_candidate_count(connection)
-        if row[0] != recorded:
-            raise RootIndexError("The private root index is invalid.")
-        return recorded
+        return _recorded_candidate_count(connection)
 
 
 def read_root_page(
@@ -508,21 +508,22 @@ def _remove_staged_files(staged: Path) -> None:
 
 @contextmanager
 def _open_valid_index(path: Path) -> Iterator[sqlite3.Connection]:
+    """Validate immutable file identities once while checking permissions on every read."""
+    path = path.absolute()
     _validate_private_parent(path)
-    try:
-        mode = path.lstat().st_mode
-    except OSError as exc:
-        raise RootIndexError("The private root index is unavailable.") from exc
-    if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != 0o600:
-        raise RootIndexError("The private root index has invalid permissions.")
+    identity = _index_identity(path)
 
-    uri = f"file:{quote(str(path.absolute()), safe='/:')}?mode=ro&immutable=1"
+    uri = f"file:{quote(str(path), safe='/:')}?mode=ro&immutable=1"
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(uri, uri=True)
         connection.execute("PRAGMA query_only = ON")
         connection.execute("PRAGMA trusted_schema = OFF")
-        _validate_schema(connection)
+        if not _is_validated_index(path, identity):
+            _validate_schema(connection)
+        if _index_identity(path) != identity:
+            raise RootIndexError("The private root index changed during validation.")
+        _remember_valid_index(path, identity)
     except RootIndexError:
         if connection is not None:
             connection.close()
@@ -533,10 +534,48 @@ def _open_valid_index(path: Path) -> Iterator[sqlite3.Connection]:
         raise RootIndexError("The private root index is invalid.") from exc
     try:
         yield connection
+        if _index_identity(path) != identity:
+            raise RootIndexError("The private root index changed during reading.")
     except sqlite3.Error as exc:
         raise RootIndexError("The private root index is invalid.") from exc
     finally:
         connection.close()
+
+
+def _index_identity(path: Path) -> _IndexIdentity:
+    """Return replacement and mutation markers for a regular private file."""
+    try:
+        details = path.lstat()
+    except OSError as exc:
+        raise RootIndexError("The private root index is unavailable.") from exc
+    if not stat.S_ISREG(details.st_mode) or stat.S_IMODE(details.st_mode) != 0o600:
+        raise RootIndexError("The private root index has invalid permissions.")
+    return (
+        details.st_dev,
+        details.st_ino,
+        details.st_size,
+        details.st_mtime_ns,
+        details.st_ctime_ns,
+    )
+
+
+def _is_validated_index(path: Path, identity: _IndexIdentity) -> bool:
+    """Reuse only full validation of the same immutable file identity."""
+    with _VALIDATION_CACHE_LOCK:
+        if _VALIDATED_INDEXES.get(path) != identity:
+            _VALIDATED_INDEXES.pop(path, None)
+            return False
+        _VALIDATED_INDEXES.move_to_end(path)
+        return True
+
+
+def _remember_valid_index(path: Path, identity: _IndexIdentity) -> None:
+    """Retain a bounded set of validated identities without candidate payloads."""
+    with _VALIDATION_CACHE_LOCK:
+        _VALIDATED_INDEXES[path] = identity
+        _VALIDATED_INDEXES.move_to_end(path)
+        while len(_VALIDATED_INDEXES) > _VALIDATION_CACHE_LIMIT:
+            _VALIDATED_INDEXES.popitem(last=False)
 
 
 def _validate_schema(connection: sqlite3.Connection) -> None:

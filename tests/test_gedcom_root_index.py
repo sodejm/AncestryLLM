@@ -409,6 +409,65 @@ def test_missing_lookup_index_is_rejected(tmp_path: Path) -> None:
         read_root_page(path, query="@I1@")
 
 
+@pytest.mark.parametrize("query", ("@I9999@", "person:9999"))
+def test_admitted_exact_lookup_has_bounded_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    directory = _private_directory(tmp_path)
+    path = directory / "roots.sqlite3"
+    build_root_index(path, (_candidate(number) for number in range(10_000)), max_bytes=8_000_000)
+    assert root_index_count(path) == 10_000
+    real_connect = sqlite3.connect
+    vm_steps = 0
+
+    def counted_connect(database: str, *, uri: bool = False) -> sqlite3.Connection:
+        connection = real_connect(database, uri=uri)
+
+        def record_steps() -> int:
+            nonlocal vm_steps
+            vm_steps += 100
+            return 0
+
+        connection.set_progress_handler(record_steps, 100)
+        return connection
+
+    monkeypatch.setattr(root_index.sqlite3, "connect", counted_connect)
+
+    page = read_root_page(path, query=query)
+
+    assert page.candidates == (_candidate(9999),)
+    assert page.total_count == 1
+    assert vm_steps < 5_000
+
+
+@pytest.mark.parametrize("mutation", ("index", "count", "replacement", "permissions"))
+def test_changed_admitted_index_is_rejected(tmp_path: Path, mutation: str) -> None:
+    directory = _private_directory(tmp_path)
+    path = directory / "roots.sqlite3"
+    build_root_index(path, (_candidate(1),), max_bytes=1_000_000)
+    assert root_index_count(path) == 1
+
+    if mutation == "replacement":
+        replacement = directory / "replacement.sqlite3"
+        replacement.write_bytes(b"not a database")
+        replacement.chmod(0o600)
+        replacement.replace(path)
+    elif mutation == "permissions":
+        path.chmod(0o640)
+    else:
+        with closing(sqlite3.connect(path)) as connection:
+            if mutation == "index":
+                connection.execute("DROP INDEX root_candidates_source_identifier")
+            else:
+                connection.execute(
+                    "UPDATE root_index_metadata SET value = '2' WHERE key = 'candidate_count'"
+                )
+            connection.commit()
+
+    with pytest.raises(RootIndexError):
+        read_root_page(path, query="@I1@")
+
+
 def test_build_sanitizes_sqlite_failures_and_candidate_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

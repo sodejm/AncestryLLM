@@ -68,6 +68,15 @@ column schema, both required lookup indexes, the supported schema version, a
 complete marker, and agreement between the recorded and physical row counts.
 Validation fails closed for a corrupt, partial, modified, or unsupported index.
 
+The first read or admission count performs the full integrity and row-count
+validation. Subsequent reads reuse that validation only while the absolute path,
+device, inode, byte size, modification time, and change time remain unchanged.
+Every read rechecks file and parent permissions and verifies file identity before
+and after querying. A replacement or modification requires full validation
+again. The thread-safe cache retains at most 64 paths and file identities, with
+no connections or candidate payloads. Eviction or process restart requires a
+new full validation; this initial scan is proportional to index size.
+
 Empty-query pages use this deterministic order:
 
 1. `display_name` with SQLite `NOCASE` collation
