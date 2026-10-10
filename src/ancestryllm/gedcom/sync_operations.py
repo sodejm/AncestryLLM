@@ -221,19 +221,6 @@ def _perform_update(
 
         guarded_identity_resolver = verify_and_resolve
 
-    if all(
-        manifest.get("active_snapshots", {}).get(spec.source_id) == spec.snapshot_id
-        for spec in specs
-    ):
-        verify_inputs()
-        _checkpoint(cancellation_check)
-        return SyncExecutionResult(
-            exit_code=0,
-            output=(
-                "No update was needed: every supplied snapshot is already active "
-                "with the same SHA-256 checksum. No release files were changed.\n"
-            ),
-        )
     try:
         sources = core.load_sources(
             [master, *(spec.path for spec in specs)],
@@ -242,6 +229,7 @@ def _perform_update(
                 master: master_fingerprint.snapshot,
                 **{spec.path: spec.fingerprint.snapshot for spec in specs},
             },
+            validate_structure=True,
         )
     except (OSError, ValueError) as exc:
         raise SyncError(
@@ -252,6 +240,18 @@ def _perform_update(
             details=(f"Error class: {type(exc).__name__}",),
         ) from exc
     _checkpoint(cancellation_check)
+    if all(
+        manifest.get("active_snapshots", {}).get(spec.source_id) == spec.snapshot_id
+        for spec in specs
+    ):
+        verify_inputs()
+        return SyncExecutionResult(
+            exit_code=0,
+            output=(
+                "No update was needed: every supplied snapshot is already active "
+                "with the same SHA-256 checksum. No release files were changed.\n"
+            ),
+        )
     stats = SyncStats()
     pointer_map, bindings, _ = _match_people(
         sources,
