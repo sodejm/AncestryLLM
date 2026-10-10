@@ -23,6 +23,10 @@ if TYPE_CHECKING:
 _SCHEMA_VERSION = 1
 _INSERT_BATCH_SIZE = 128
 _SUBSTRING_SCAN_LIMIT = 4096
+_REQUIRED_INDEXES = {
+    "root_candidates_display_order",
+    "root_candidates_source_identifier",
+}
 _CANDIDATE_COLUMNS = (
     "person_ref",
     "reason_code",
@@ -87,6 +91,7 @@ def build_root_index(
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(staged)
+        staged.chmod(0o600)
         _configure_writer(connection)
         _create_schema(connection)
         _check_staged_size(staged, max_bytes)
@@ -124,6 +129,8 @@ def build_root_index(
         raise RootIndexError(
             "The private root index contains a duplicate person reference."
         ) from exc
+    except sqlite3.Error as exc:
+        raise RootIndexError("The private root index could not be built.") from exc
     except RootIndexError:
         raise
     except BaseException:
@@ -489,9 +496,22 @@ def _validate_schema(connection: sqlite3.Connection) -> None:
     columns = tuple(row[1] for row in connection.execute("PRAGMA table_info(root_candidates)"))
     if columns != _CANDIDATE_COLUMNS:
         raise RootIndexError("The private root index is invalid.")
+    indexes = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = ?",
+            ("root_candidates",),
+        )
+    }
+    if not indexes >= _REQUIRED_INDEXES:
+        raise RootIndexError("The private root index is invalid.")
     metadata = dict(connection.execute("SELECT key, value FROM root_index_metadata"))
     if metadata.get("schema_version") != str(_SCHEMA_VERSION) or metadata.get("complete") != "1":
         raise RootIndexError("The private root index is incomplete or unsupported.")
+    recorded_count = _recorded_candidate_count(connection)
+    actual_count = connection.execute("SELECT COUNT(*) FROM root_candidates").fetchone()
+    if actual_count != (recorded_count,):
+        raise RootIndexError("The private root index is invalid.")
 
 
 __all__ = [
