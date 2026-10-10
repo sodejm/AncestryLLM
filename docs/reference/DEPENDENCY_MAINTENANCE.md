@@ -159,6 +159,15 @@ ASAR integrity, and Electron fuse verification; an audit alone does not replace
 those checks. Any transitive override needs an identified dependency path,
 upstream compatibility evidence, and regression validation.
 
+When an advisory has no published fixed version, an optional dependency may
+be removed only after reviewing its callers and documenting the resulting
+unsupported capability. Keep the complete audit scope unchanged. Reject any
+explicit request for that removed capability before dependency installation
+or packaging; do not silently fall back to a different network path. Exercise
+normal operation and the rejection path in regression tests. A major-version
+override must preserve the parent package's actual contract, including archive
+extraction, proxy handling, or watch globs where applicable.
+
 Integrate independently owned Python and desktop changes sequentially, then
 rerun the canonical gates on their combined revision. Record tested commit,
 audit counts, checks, skipped tests, and package target in release evidence.
