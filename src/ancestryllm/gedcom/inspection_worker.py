@@ -1,0 +1,634 @@
+"""Bounded process isolation for offline GEDCOM inspection.
+
+The parent sends one small JSON control document over standard input and accepts
+only private, validated files from the child.  Paths and imported genealogy
+content never cross the public error or logging boundary.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import platform
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from contextlib import suppress
+from dataclasses import asdict, dataclass, fields, replace
+from importlib import import_module
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy, FileKind
+from ancestryllm.domain.errors import (
+    DomainFailure,
+    DomainFailureCode,
+    DomainFailureDetail,
+    DomainScalar,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
+    from ancestryllm.application.ports import CancellationPort
+
+_XREF = re.compile(r"@[^@\r\n]+@")
+_CONTROL_BYTES = 8_192
+_FAILURE_BYTES = 4_096
+_POLL_SECONDS = 0.05
+_LEASE_PREFIX = "ancestryllm-inspect-"
+_OWNER_FILE = "owner.json"
+_RESULT_FILE = "result.json"
+_FAILURE_FILE = "failure.json"
+_INDEX_FILE = "roots.sqlite3"
+_ALLOWED_OUTPUTS = frozenset({_OWNER_FILE, _RESULT_FILE, _FAILURE_FILE, _INDEX_FILE})
+_WORKER_SLOTS = threading.BoundedSemaphore(2)
+
+
+@dataclass(frozen=True, slots=True)
+class InspectionBudgets:
+    """Hard ceilings for one inspection; callers may choose smaller test budgets."""
+
+    max_physical_lines: int = 5_000_000
+    max_xrefs: int = 2_000_000
+    wall_seconds: float = 120.0
+    memory_bytes: int = 1_073_741_824
+    index_bytes: int = 268_435_456
+    summary_bytes: int = 1_048_576
+    max_concurrency: int = 2
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.max_physical_lines,
+            self.max_xrefs,
+            self.memory_bytes,
+            self.index_bytes,
+            self.summary_bytes,
+        ):
+            if type(value) is not int or value < 1:
+                raise ValueError("Inspection budgets require positive integers.")
+        if not math.isfinite(self.wall_seconds) or self.wall_seconds <= 0:
+            raise ValueError("Inspection wall time must be finite and positive.")
+        if self.max_concurrency != 2:
+            raise ValueError("Inspection concurrency is fixed at two workers.")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerInspection:
+    """Private successful worker result and its parent-owned lease."""
+
+    result: GedcomInspectResult
+    index_path: Path
+    directory: Path
+
+
+class _PollableProcess(Protocol):
+    """Process surface used by the watchdog and its deterministic tests."""
+
+    pid: int
+
+    def poll(self) -> int | None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+
+def _limit(budget: str) -> DomainFailure:
+    return DomainFailure(DomainFailureCode.WORKER_LIMIT, (DomainFailureDetail("budget", budget),))
+
+
+def _failed() -> DomainFailure:
+    return DomainFailure(DomainFailureCode.WORKER_FAILED)
+
+
+def preflight_source(
+    source: Path,
+    budgets: InspectionBudgets,
+    *,
+    ingress: FileIngressPolicy | None = None,
+    cancellation: CancellationPort | None = None,
+) -> None:
+    """Count physical lines and xrefs through the immutable bounded reader."""
+
+    policy = ingress or FileIngressPolicy(FileIngressLimits())
+    xrefs = 0
+    for line_number, line in enumerate(policy.iter_text_lines(source, FileKind.GEDCOM), 1):
+        if cancellation is not None and line_number % 4_096 == 0:
+            cancellation.check_cancelled()
+        if line_number > budgets.max_physical_lines:
+            raise _limit("lines")
+        xrefs += sum(1 for _ in _XREF.finditer(line))
+        if xrefs > budgets.max_xrefs:
+            raise _limit("xrefs")
+
+
+def _sanitized_environment(environ: Mapping[str, str], *, source_root: Path) -> dict[str, str]:
+    """Build a minimal child environment without provider keys or dotenv roots."""
+
+    child: dict[str, str] = {}
+    if "LANG" in environ:
+        child["LANG"] = environ["LANG"]
+    if os.name == "nt":
+        for name in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"):
+            if name in environ:
+                child[name] = environ[name]
+    child["PYTHONPATH"] = str(source_root)
+    child["PYTHONUTF8"] = "1"
+    return child
+
+
+def _read_rss(process: _PollableProcess) -> int | None:
+    """Return resident bytes without exposing command or process output."""
+
+    operating_system = platform.system()
+    if operating_system == "Linux":
+        try:
+            status = Path(f"/proc/{process.pid}/status").read_text(
+                encoding="ascii", errors="strict"
+            )
+            match = re.search(r"^VmRSS:\s+(\d+)\s+kB$", status, re.MULTILINE)
+            return int(match.group(1)) * 1024 if match else None
+        except (OSError, ValueError):
+            return None
+    if operating_system == "Darwin":
+        try:
+            completed = subprocess.run(  # noqa: S603 - fixed absolute executable
+                ["/bin/ps", "-o", "rss=", "-p", str(process.pid)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=1,
+                env={"PATH": "/usr/bin:/bin"},
+            )
+            value = completed.stdout.strip()
+            return int(value) * 1024 if completed.returncode == 0 and value else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+    if operating_system == "Windows":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            windll = cast("Any", ctypes).windll
+
+            class _MemoryCounters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            query = 0x1000
+            handle = windll.kernel32.OpenProcess(query, False, process.pid)
+            if not handle:
+                return None
+            try:
+                counters = _MemoryCounters()
+                counters.cb = ctypes.sizeof(counters)
+                if not windll.psapi.GetProcessMemoryInfo(
+                    handle, ctypes.byref(counters), counters.cb
+                ):
+                    return None
+                return int(counters.WorkingSetSize)
+            finally:
+                windll.kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, ValueError):
+            return None
+    return None
+
+
+def _monitor_process(
+    process: _PollableProcess,
+    budgets: InspectionBudgets,
+    cancellation: CancellationPort,
+    *,
+    deadline: float,
+    rss_reader: Callable[[_PollableProcess], int | None] = _read_rss,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    """Watch cancellation, wall time, RSS, and abrupt child termination."""
+
+    while True:
+        cancellation.check_cancelled()
+        if clock() >= deadline:
+            raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+        return_code = process.poll()
+        if return_code is not None:
+            if return_code != 0:
+                raise _failed()
+            return
+        resident = rss_reader(process)
+        if resident is None:
+            raise _failed()
+        if resident > budgets.memory_bytes:
+            raise _limit("memory")
+        sleeper(_POLL_SECONDS)
+
+
+def _private_mode(path: Path, expected: int) -> bool:
+    try:
+        mode = stat.S_IMODE(path.stat(follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+    return mode == expected
+
+
+def _validate_private_outputs(directory: Path, budgets: InspectionBudgets) -> None:
+    """Reject unexpected, nonregular, nonprivate, or oversized child outputs."""
+
+    if not _private_mode(directory, 0o700):
+        raise _failed()
+    try:
+        children = tuple(directory.iterdir())
+    except OSError as exc:
+        raise _failed() from exc
+    for child in children:
+        if child.name not in _ALLOWED_OUTPUTS:
+            raise _failed()
+        try:
+            metadata = child.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise _failed() from exc
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise _failed()
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise _failed()
+        if child.name == _RESULT_FILE and metadata.st_size > budgets.summary_bytes:
+            raise _limit("summary")
+        if child.name == _INDEX_FILE and metadata.st_size > budgets.index_bytes:
+            raise _limit("index")
+        if child.name == _FAILURE_FILE and metadata.st_size > _FAILURE_BYTES:
+            raise _failed()
+
+
+def _write_private(path: Path, payload: bytes, *, maximum: int) -> None:
+    if len(payload) > maximum:
+        raise _limit("summary")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _failure_payload(failure: DomainFailure) -> bytes:
+    document = {
+        "code": failure.code.value,
+        "details": [asdict(detail) for detail in failure.details],
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _read_failure(path: Path) -> DomainFailure:
+    try:
+        payload = path.read_bytes()
+        if len(payload) > _FAILURE_BYTES:
+            raise ValueError
+        document = json.loads(payload)
+        if not isinstance(document, dict) or set(document) != {"code", "details"}:
+            raise ValueError
+        code = DomainFailureCode(document["code"])
+        if code not in {
+            DomainFailureCode.CANCELLED,
+            DomainFailureCode.INVALID_REQUEST,
+            DomainFailureCode.ARTIFACT_INVALID,
+            DomainFailureCode.ARTIFACT_TOO_LARGE,
+            DomainFailureCode.WORKER_LIMIT,
+            DomainFailureCode.WORKER_TIMEOUT,
+            DomainFailureCode.WORKER_FAILED,
+        }:
+            raise ValueError
+        raw_details = document["details"]
+        if not isinstance(raw_details, list) or len(raw_details) > 8:
+            raise ValueError
+        details: list[DomainFailureDetail] = []
+        for item in raw_details:
+            if not isinstance(item, dict) or set(item) != {"name", "value"}:
+                raise ValueError
+            name = item["name"]
+            value = item["value"]
+            if not isinstance(name, str) or type(value) not in {
+                str,
+                int,
+                float,
+                bool,
+                type(None),
+            }:
+                raise ValueError
+            details.append(DomainFailureDetail(name, cast("DomainScalar", value)))
+        if len(details) != len(raw_details):
+            raise ValueError
+        return DomainFailure(code, tuple(details))
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise _failed() from exc
+
+
+def _pid_is_live(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
+    """Remove a bounded number of stale worker leases after supervisor restart."""
+
+    try:
+        candidates = tuple(root.iterdir())[:maximum]
+    except OSError:
+        return
+    for candidate in candidates:
+        if not candidate.name.startswith(_LEASE_PREFIX) or not candidate.is_dir():
+            continue
+        owner = candidate / _OWNER_FILE
+        try:
+            document = json.loads(owner.read_text(encoding="ascii"))
+            pid = document["pid"]
+            if type(pid) is not int or _pid_is_live(pid):
+                continue
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            continue
+        shutil.rmtree(candidate, ignore_errors=True)
+
+
+def _scratch_root() -> Path:
+    root = Path(tempfile.gettempdir()) / "ancestryllm-inspection"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError as exc:
+        raise _failed() from exc
+    if not _private_mode(root, 0o700):
+        raise _failed()
+    return root
+
+
+def _acquire_slot(
+    cancellation: CancellationPort, deadline: float, *, clock: Callable[[], float]
+) -> None:
+    while True:
+        cancellation.check_cancelled()
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+        if _WORKER_SLOTS.acquire(timeout=min(_POLL_SECONDS, remaining)):
+            return
+
+
+def _stop_process(process: _PollableProcess) -> None:
+    """Terminate, escalate, and reap a child without retaining its output."""
+
+    if process.poll() is not None:
+        with suppress(OSError, subprocess.SubprocessError):
+            process.wait(timeout=0)
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=1)
+        return
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        process.kill()
+        process.wait(timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _control_payload(
+    source: Path,
+    directory: Path,
+    request: GedcomInspectRequest,
+    budgets: InspectionBudgets,
+) -> bytes:
+    document = {
+        "source": str(source),
+        "directory": str(directory),
+        "request": json.loads(request.to_json()),
+        "budgets": asdict(budgets),
+    }
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(payload) > _CONTROL_BYTES:
+        raise _failed()
+    return payload
+
+
+def run_inspection(
+    source: Path,
+    request: GedcomInspectRequest,
+    cancellation: CancellationPort,
+    *,
+    budgets: InspectionBudgets | None = None,
+    ingress: FileIngressPolicy | None = None,
+) -> WorkerInspection:
+    """Execute inspection in a supervised child and return a private index lease."""
+
+    from ancestryllm.application.operations import GedcomInspectResult
+
+    selected = budgets or InspectionBudgets()
+    policy = ingress or FileIngressPolicy(FileIngressLimits())
+    started = time.monotonic()
+    deadline = started + selected.wall_seconds
+    cancellation.check_cancelled()
+    source = source.absolute()
+    try:
+        fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
+        preflight_source(source, selected, ingress=policy, cancellation=cancellation)
+    except DomainFailure:
+        raise
+    except Exception as exc:  # noqa: BLE001 - collapse ingress details at the boundary
+        from ancestryllm.application.errors import domain_failure_from_exception
+
+        raise domain_failure_from_exception(exc) from None
+    _acquire_slot(cancellation, deadline, clock=time.monotonic)
+    directory: Path | None = None
+    process: subprocess.Popen[bytes] | None = None
+    success = False
+    try:
+        root = _scratch_root()
+        _cleanup_orphans(root)
+        directory = Path(tempfile.mkdtemp(prefix=_LEASE_PREFIX, dir=root))
+        directory.chmod(0o700)
+        _write_private(
+            directory / _OWNER_FILE,
+            json.dumps({"pid": os.getpid()}, separators=(",", ":")).encode("ascii"),
+            maximum=_FAILURE_BYTES,
+        )
+        payload = _control_payload(source, directory, request, selected)
+        source_root = Path(__file__).resolve().parents[2]
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-m", "ancestryllm.gedcom.inspection_worker", "--child"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=directory,
+                env=_sanitized_environment(os.environ, source_root=source_root),
+            )
+        except OSError:
+            raise _failed() from None
+        assert process.stdin is not None
+        try:
+            process.stdin.write(payload)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            raise _failed() from None
+        _monitor_process(process, selected, cancellation, deadline=deadline)
+        try:
+            policy.verify(source, FileKind.GEDCOM, fingerprint)
+        except Exception as exc:  # noqa: BLE001 - collapse ingress details at the boundary
+            from ancestryllm.application.errors import domain_failure_from_exception
+
+            raise domain_failure_from_exception(exc) from None
+        _validate_private_outputs(directory, selected)
+        failure_path = directory / _FAILURE_FILE
+        if failure_path.exists():
+            raise _read_failure(failure_path)
+        result_path = directory / _RESULT_FILE
+        index_path = directory / _INDEX_FILE
+        if not result_path.is_file() or not index_path.is_file():
+            raise _failed()
+        try:
+            result = GedcomInspectResult.from_json(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, TypeError, ValueError) as exc:
+            raise _failed() from exc
+        success = True
+        return WorkerInspection(result=result, index_path=index_path, directory=directory)
+    finally:
+        if process is not None:
+            _stop_process(process)
+        if directory is not None and not success:
+            shutil.rmtree(directory, ignore_errors=True)
+        _WORKER_SLOTS.release()
+
+
+def _apply_child_memory_limit(maximum: int) -> None:
+    if platform.system() != "Linux":
+        return
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_AS, (maximum, maximum))
+
+
+def _child_result(result: GedcomInspectResult, count: int) -> GedcomInspectResult:
+    """Remove names from IPC while tolerating the pre-integration DTO shape."""
+
+    available = {item.name for item in fields(result)}
+    changes: dict[str, object] = {"root_candidates": ()}
+    if "root_candidate_count" in available:
+        changes["root_candidate_count"] = count
+    if "root_index_ref" in available:
+        changes["root_index_ref"] = None
+    return replace(result, **cast("Any", changes))
+
+
+def _child_main() -> int:
+    directory: Path | None = None
+    try:
+        raw = sys.stdin.buffer.read(_CONTROL_BYTES + 1)
+        if len(raw) > _CONTROL_BYTES:
+            return 64
+        document = json.loads(raw)
+        if not isinstance(document, dict) or set(document) != {
+            "source",
+            "directory",
+            "request",
+            "budgets",
+        }:
+            return 64
+        source = Path(document["source"])
+        directory = Path(document["directory"])
+        if Path.cwd() != directory or not _private_mode(directory, 0o700):
+            return 64
+        budgets = InspectionBudgets(**document["budgets"])
+        _apply_child_memory_limit(budgets.memory_bytes)
+
+        from ancestryllm.application._artifacts import _ArtifactRegistry
+        from ancestryllm.application.errors import domain_failure_from_exception
+        from ancestryllm.application.operations import GedcomInspectRequest
+        from ancestryllm.gedcom.service import GedcomService
+
+        request = GedcomInspectRequest.from_json(
+            json.dumps(document["request"], sort_keys=True, separators=(",", ":"))
+        )
+        registry = _ArtifactRegistry()
+        source_grant = registry.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="application/x-gedcom",
+            artifact_type="gedcom",
+        )
+        local_request = replace(request, source=source_grant)
+        service = GedcomService(artifacts=registry)
+        execute = getattr(service, "_execute_inspect_locally", None)
+        if execute is None:
+            raise RuntimeError("local inspection seam unavailable")
+        result = execute(local_request, cancellation=None)
+        root_candidates = result.root_candidates
+        build_root_index = cast(
+            "Callable[..., int]",
+            import_module("ancestryllm.gedcom.root_index").build_root_index,
+        )
+        count = build_root_index(
+            directory / _INDEX_FILE,
+            root_candidates,
+            max_bytes=budgets.index_bytes,
+        )
+        bounded = _child_result(result, count)
+        payload = bounded.to_json().encode("utf-8")
+        _write_private(directory / _RESULT_FILE, payload, maximum=budgets.summary_bytes)
+        return 0
+    except MemoryError:
+        failure = _limit("memory")
+    except DomainFailure as exc:
+        failure = exc
+    except Exception as exc:  # noqa: BLE001 - strict child boundary must collapse failures
+        try:
+            from ancestryllm.application.errors import domain_failure_from_exception
+
+            failure = domain_failure_from_exception(exc)
+        except Exception:  # noqa: BLE001 - mapping failure cannot escape child boundary
+            failure = _failed()
+        if failure.code is DomainFailureCode.INTERNAL:
+            failure = _failed()
+    if directory is None:
+        return 70
+    try:
+        _write_private(directory / _FAILURE_FILE, _failure_payload(failure), maximum=_FAILURE_BYTES)
+        return 0
+    except Exception:  # noqa: BLE001 - a broken failure channel requires abrupt failure
+        return 70
+
+
+if __name__ == "__main__":
+    raise SystemExit(_child_main() if sys.argv[1:] == ["--child"] else 64)
+
+
+__all__ = ["InspectionBudgets", "WorkerInspection", "preflight_source", "run_inspection"]
