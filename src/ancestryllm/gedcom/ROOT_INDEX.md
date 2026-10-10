@@ -11,6 +11,10 @@ prompt and response content. Callers remain responsible for the lifecycle of
 the source GEDCOM and for deleting or rebuilding an index when it is no longer
 needed.
 
+Public inspection delegates that ownership to the service's
+[expiring result lease](INSPECTION_RESULTS.md). The index module owns bounded
+construction and reading; it does not manage job or application lifetimes.
+
 ## API
 
 `build_root_index(path, candidates, *, max_bytes, cancellation=None)` consumes

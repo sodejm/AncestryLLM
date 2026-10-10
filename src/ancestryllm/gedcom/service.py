@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import logging
+import math
 import os
+import secrets
+import shutil
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -36,6 +42,7 @@ from ancestryllm.application.operations import (
     ProvenanceRecord,
     QualitySummary,
     RootCandidate,
+    RootCandidateWindow,
 )
 from ancestryllm.application.operations import (
     GedcomSyncResult as GedcomSyncServiceResult,
@@ -88,6 +95,7 @@ from ancestryllm.gedcom.quality import (
     refine_quality_report_with_ai,
     valid_quality_date,
 )
+from ancestryllm.gedcom.root_index import RootIndexError, read_root_page
 from ancestryllm.gedcom.serialization import (
     SUPPORTED_GEDCOM_VERSIONS,
     write_gedcom,
@@ -297,8 +305,35 @@ def _subtree_aggregate(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _InspectionLease:
+    """Process-private ownership binding; paths never cross the service boundary."""
+
+    directory: Path
+    index_path: Path
+    artifact_id: str
+    sha256: str
+    count: int
+    expires_at: float
+    timer: threading.Timer
+
+
+def _remove_inspection_directory(path: Path) -> None:
+    """Erase an owned worker projection without recording its path or contents."""
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        logging.getLogger(__name__).warning("GEDCOM_INDEX_CLEANUP_FAILED %s", type(error).__name__)
+
+
 class GedcomService:
-    """Coordinate GEDCOM operations across the application boundary."""
+    """Coordinate GEDCOM operations and own private inspection index leases.
+
+    Retain at most eight completed projections for fifteen minutes by default.
+    Composition owners must call ``close`` when their application shuts down.
+    """
 
     def __init__(
         self,
@@ -308,12 +343,71 @@ class GedcomService:
         consent_lookup: Callable[[str], ConsentGrant] | None = None,
         provider_timeout_seconds: float = 60.0,
         artifacts: _ArtifactRegistry | None = None,
+        root_index_ttl_seconds: float = 900.0,
     ) -> None:
         self.llm = llm
         self.ingress = ingress or FileIngressPolicy()
         self.consent_lookup = consent_lookup
         self.provider_timeout_seconds = provider_timeout_seconds
         self._artifacts = artifacts
+        if not math.isfinite(root_index_ttl_seconds) or root_index_ttl_seconds <= 0:
+            raise ValueError("The private root index lifetime must be finite and positive.")
+        self._root_index_ttl_seconds = root_index_ttl_seconds
+        self._inspection_lock = threading.Lock()
+        self._inspection_leases: dict[str, _InspectionLease] = {}
+        self._inspection_closed = False
+
+    def _expire_inspection(self, reference: str) -> None:
+        """Revoke under the lease lock, then erase outside it for safe timer cleanup."""
+        with self._inspection_lock:
+            lease = self._inspection_leases.pop(reference, None)
+        if lease is not None:
+            lease.timer.cancel()
+            _remove_inspection_directory(lease.directory)
+
+    def release_inspection(self, result: GedcomInspectResult) -> None:
+        """Revoke a private projection on job discard, including repeated cleanup."""
+        if result.root_index_ref is not None:
+            self._expire_inspection(result.root_index_ref)
+
+    def close(self) -> None:
+        """Erase retained indexes and reject worker results arriving after shutdown."""
+        with self._inspection_lock:
+            self._inspection_closed = True
+            leases = tuple(self._inspection_leases.values())
+            self._inspection_leases.clear()
+        for lease in leases:
+            lease.timer.cancel()
+            _remove_inspection_directory(lease.directory)
+
+    def read_inspection_roots(
+        self, result: GedcomInspectResult, *, query: str, offset: int, limit: int
+    ) -> RootCandidateWindow:
+        """Read a bounded window after verifying the private lease and source binding."""
+        if (
+            not isinstance(query, str)
+            or len(query) > 128
+            or type(offset) is not int
+            or offset < 0
+            or type(limit) is not int
+            or not 1 <= limit <= 100
+        ):
+            raise DomainFailure(DomainFailureCode.INVALID_REQUEST)
+        with self._inspection_lock:
+            lease = self._inspection_leases.get(result.root_index_ref or "")
+            if (
+                lease is None
+                or lease.expires_at <= time.monotonic()
+                or lease.artifact_id != result.summary.source.artifact_id
+                or lease.sha256 != result.summary.source.sha256
+                or lease.count != result.root_candidate_count
+            ):
+                raise DomainFailure(DomainFailureCode.NOT_FOUND)
+            try:
+                page = read_root_page(lease.index_path, query=query, offset=offset, limit=limit)
+            except RootIndexError:
+                raise DomainFailure(DomainFailureCode.NOT_FOUND) from None
+        return RootCandidateWindow(page.candidates, page.total_count, page.next_offset)
 
     def _require_artifacts(self) -> _ArtifactRegistry:
         if self._artifacts is None:
@@ -1028,6 +1122,74 @@ class GedcomService:
         *,
         cancellation: CancellationPort | None,
     ) -> GedcomInspectResult:
+        """Retain only verified worker metadata and a source-bound, expiring index lease."""
+        from ancestryllm.gedcom.inspection_worker import run_inspection
+
+        registry = self._require_artifacts()
+        cancellation_port = cancellation or NeverCancelled()
+        cancellation_port.check_cancelled()
+        with self._inspection_lock:
+            if self._inspection_closed:
+                raise DomainFailure(DomainFailureCode.NOT_FOUND)
+        source_path = registry.resolve(
+            request.source, operation="gedcom.inspect", access=ArtifactAccess.READ
+        )
+        inspected = run_inspection(source_path, request, cancellation_port, ingress=self.ingress)
+        retained = False
+        try:
+            cancellation_port.check_cancelled()
+            source = registry.describe_input(request.source, operation="gedcom.inspect")
+            if (
+                source.sha256 is None
+                or source.sha256 != inspected.result.summary.source.sha256
+                or source.size_bytes != inspected.result.summary.source.size_bytes
+            ):
+                raise DomainFailure(DomainFailureCode.ARTIFACT_INVALID)
+            result = replace(
+                inspected.result, summary=replace(inspected.result.summary, source=source)
+            )
+            candidate_count = result.root_candidate_count
+            if candidate_count is None or result.root_candidates:
+                raise DomainFailure(DomainFailureCode.WORKER_FAILED)
+            reference = "root-index:" + secrets.token_hex(16)
+            timer = threading.Timer(
+                self._root_index_ttl_seconds, self._expire_inspection, args=(reference,)
+            )
+            timer.daemon = True
+            result = replace(result, root_index_ref=reference)
+            lease = _InspectionLease(
+                inspected.directory,
+                inspected.index_path,
+                source.artifact_id,
+                source.sha256,
+                candidate_count,
+                time.monotonic() + self._root_index_ttl_seconds,
+                timer,
+            )
+            with self._inspection_lock:
+                if self._inspection_closed:
+                    raise DomainFailure(DomainFailureCode.NOT_FOUND)
+                if len(self._inspection_leases) >= 8:
+                    raise DomainFailure(DomainFailureCode.WORKER_LIMIT)
+                self._inspection_leases[reference] = lease
+                try:
+                    timer.start()
+                except BaseException:
+                    self._inspection_leases.pop(reference, None)
+                    raise
+                retained = True
+            return result
+        finally:
+            if not retained:
+                _remove_inspection_directory(inspected.directory)
+
+    def _execute_inspect_locally(
+        self,
+        request: GedcomInspectRequest,
+        *,
+        cancellation: CancellationPort | None,
+    ) -> GedcomInspectResult:
+        """Worker-only eager parser seam; public inspection always uses isolation."""
         operation = "gedcom.inspect"
         registry = self._require_artifacts()
         cancellation_port = cancellation or NeverCancelled()

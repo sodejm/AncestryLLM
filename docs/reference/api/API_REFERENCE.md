@@ -221,6 +221,16 @@ inspection terminates. Removing a source or revoking its owning document
 discards its private results; the renderer cannot select an arbitrary path or
 execute a provider through this boundary.
 
+Inspection executes in a bounded offline child process. Its retained summary
+contains the candidate count and an opaque, source-bound index reference,
+without an eager candidate collection. Only root queries expose display labels.
+The service retains at most eight private indexes for 15 minutes; job discard,
+document revocation, expiry, and sidecar shutdown erase them. A late result after
+cancellation or shutdown is erased rather than retained. An expired, discarded,
+or unavailable index returns `GEDCOM_JOB_RESULT_UNAVAILABLE`; clients must
+inspect the source again. See the [worker resource contract](../../../INSPECTION_WORKER.md)
+and [inspection lease contract](../../../src/ancestryllm/gedcom/INSPECTION_RESULTS.md).
+
 Completed results are retained only by the process that executed the
 job; after restart, a durably known completed façade job returns the stable
 `GEDCOM_JOB_RESULT_UNAVAILABLE` code rather than being misreported as unknown.

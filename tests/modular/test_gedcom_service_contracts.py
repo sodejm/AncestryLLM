@@ -18,12 +18,15 @@ from ancestryllm.application.dto import (
 )
 from ancestryllm.application.operations import (
     GedcomInspectRequest,
+    GedcomInspectResult,
     GedcomMergeRequest,
     GedcomQualityRequest,
     GedcomSubtreeRequest,
     GedcomSyncRequest,
     GedcomSyncSnapshot,
+    RootCandidate,
 )
+from ancestryllm.core.errors import FileIngressError
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
 from ancestryllm.gedcom.service import GedcomService
@@ -32,6 +35,22 @@ if TYPE_CHECKING:
     from ancestryllm.llm.policy import ConsentGrant
 
 GEDCOM_MEDIA_TYPE = "text/vnd.gedcom"
+
+
+def _root_candidates(
+    service: GedcomService, result: GedcomInspectResult
+) -> tuple[RootCandidate, ...]:
+    offset = 0
+    candidates: list[RootCandidate] = []
+    try:
+        while True:
+            page = service.read_inspection_roots(result, query="", offset=offset, limit=100)
+            candidates.extend(page.candidates)
+            if page.next_offset is None:
+                return tuple(candidates)
+            offset = page.next_offset
+    finally:
+        service.release_inspection(result)
 
 
 def _write_person(
@@ -171,7 +190,9 @@ def test_inspect_uses_only_the_gedc_version_and_source_binds_root_candidates(
     )
 
     assert first_inspection.summary.gedcom_version == "5.5.5"
-    assert first_inspection.root_candidates[0] != second_inspection.root_candidates[0]
+    first_candidates = _root_candidates(service, first_inspection)
+    second_candidates = _root_candidates(service, second_inspection)
+    assert first_candidates[0] != second_candidates[0]
 
     service.execute_merge(
         GedcomMergeRequest(
@@ -187,7 +208,7 @@ def test_inspect_uses_only_the_gedc_version_and_source_binds_root_candidates(
                 artifact_type="gedcom",
             ),
             quality_report=None,
-            root_person_ref=second_inspection.root_candidates[0].person_ref,
+            root_person_ref=second_candidates[0].person_ref,
             provider=_offline_provider(),
             similarity_threshold=70,
         )
@@ -215,11 +236,12 @@ def test_inspect_reports_detected_encoding_not_the_declared_charset(
     content = source.read_text(encoding="utf-8")
     source.write_bytes(prefix + content.encode(codec))
     registry = _ArtifactRegistry()
-    result = GedcomService(artifacts=registry).execute_inspect(
+    service = GedcomService(artifacts=registry)
+    result = service.execute_inspect(
         GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
     )
     assert result.summary.encoding == detected
-    assert result.root_candidates[0].display_name == "Zoë Example"
+    assert _root_candidates(service, result)[0].display_name == "Zoë Example"
 
 
 def test_inspect_rejects_excess_root_candidates_before_tree_materialization(
@@ -249,12 +271,13 @@ def test_inspect_rejects_excess_root_candidates_before_tree_materialization(
         unexpected_materialization,
     )
 
-    with pytest.raises(DomainFailure) as raised:
-        GedcomService(ingress=ingress, artifacts=registry).execute_inspect(
-            GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
+    with pytest.raises(FileIngressError) as raised:
+        GedcomService(ingress=ingress, artifacts=registry)._execute_inspect_locally(
+            GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect")),
+            cancellation=None,
         )
 
-    assert raised.value.code is DomainFailureCode.ARTIFACT_TOO_LARGE
+    assert raised.value.code == "FILE_COLLECTION_LIMIT_EXCEEDED"
 
 
 def test_inspect_reports_preservation_and_normalization_without_leaking_source_text(
@@ -266,7 +289,8 @@ def test_inspect_reports_preservation_and_normalization_without_leaking_source_t
     source.write_bytes(content)
     registry = _ArtifactRegistry()
     with caplog.at_level("INFO"):
-        result = GedcomService(artifacts=registry).execute_inspect(
+        service = GedcomService(artifacts=registry)
+        result = service.execute_inspect(
             GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
         )
     assert {finding.code for finding in result.findings} >= {
@@ -285,8 +309,9 @@ def test_inspect_reports_preservation_and_normalization_without_leaking_source_t
     ):
         assert private_text not in summary
         assert private_text not in caplog.text
+    candidates = _root_candidates(service, result)
     assert all(
-        finding.subject_ref == result.root_candidates[0].person_ref
+        finding.subject_ref == candidates[0].person_ref
         if finding.code == "gedcom-date-invalid"
         else finding.subject_ref is None
         for finding in result.findings
@@ -313,7 +338,8 @@ def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findi
     )
     source.write_text(content, encoding="utf-8")
     registry = _ArtifactRegistry()
-    result = GedcomService(artifacts=registry).execute_inspect(
+    service = GedcomService(artifacts=registry)
+    result = service.execute_inspect(
         GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
     )
     invalid_dates = [
@@ -324,7 +350,7 @@ def test_inspect_anchors_invalid_dates_once_per_person_with_bounded_public_findi
         None,
         *(
             person.person_ref
-            for person in result.root_candidates
+            for person in _root_candidates(service, result)
             if person.source_identifier != "@VALID@"
         ),
     }
@@ -347,9 +373,11 @@ def test_inspect_bounds_untrusted_version_metadata(tmp_path: Path) -> None:
     _write_person(source, pointer="@I1@", given_name="Ada", birth_date="1900")
     source.write_text(source.read_text().replace("5.5.5", "5.5.5\u202e" + "x" * 100))
     registry = _ArtifactRegistry()
-    result = GedcomService(artifacts=registry).execute_inspect(
+    service = GedcomService(artifacts=registry)
+    result = service.execute_inspect(
         GedcomInspectRequest(source=_input_grant(registry, source, operation="gedcom.inspect"))
     )
+    service.release_inspection(result)
     assert len(result.summary.gedcom_version) <= 32
     assert "\u202e" not in result.summary.gedcom_version
     assert "gedcom-version-unsupported" in {finding.code for finding in result.findings}

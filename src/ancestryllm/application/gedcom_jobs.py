@@ -61,6 +61,7 @@ class GedcomJobFacade:
         operation: str,
         grants: tuple[ArtifactGrantRef, ...],
         execute: Callable[[JobReporter], ServiceResult],
+        result_cleanup: Callable[[ServiceResult], None] | None = None,
     ) -> PublicJobSnapshot:
         def work(reporter: JobReporter) -> ServiceResult:
             reporter.update(f"{operation}.running")
@@ -70,21 +71,31 @@ class GedcomJobFacade:
                 if failure.code is DomainFailureCode.CANCELLED:
                     raise CancellationError("The operation was cancelled.") from failure
                 raise map_domain_failure(failure) from failure
-            reporter.set_outcome(
-                "The GEDCOM operation completed.",
-                next_action="Inspect the retained structured result.",
-            )
+            try:
+                reporter.set_outcome(
+                    "The GEDCOM operation completed.",
+                    next_action="Inspect the retained structured result.",
+                )
+            except CancellationError:
+                if result_cleanup is not None:
+                    result_cleanup(result)
+                raise
             return result
 
         submitted = self._jobs.manager.submit_with_progress(
             operation,
             work,
             resource_keys=tuple(grant.grant_id for grant in grants),
+            result_cleanup=result_cleanup,
         )
         return self._jobs.get(submitted.job_id)
 
     def submit_inspect(self, request: GedcomInspectRequest) -> PublicJobSnapshot:
         """Submit a deterministic source inspection."""
+
+        def cleanup(result: ServiceResult) -> None:
+            if isinstance(result, GedcomInspectResult):
+                self._service.release_inspection(result)
 
         return self._submit(
             "gedcom.inspect",
@@ -93,6 +104,7 @@ class GedcomJobFacade:
                 request,
                 cancellation=reporter,
             ),
+            result_cleanup=cleanup,
         )
 
     def submit_merge(self, request: MergeRequest) -> PublicJobSnapshot:
@@ -228,7 +240,7 @@ class GedcomJobFacade:
                 offset = int(match[1], 16)
             if (
                 match is None
-                or offset >= len(result.root_candidates)
+                or offset >= result.summary_result().root_candidate_count
                 or not hmac.compare_digest(
                     cursor, self._cursor(job_id, result, normalized_query, offset)
                 )
@@ -238,6 +250,24 @@ class GedcomJobFacade:
                     "The root candidate cursor is invalid or stale.",
                     "Restart the search for this inspected source.",
                 )
+        if result.root_index_ref is not None:
+            try:
+                window = self._service.read_inspection_roots(
+                    result, query=normalized_query, offset=offset, limit=limit
+                )
+            except DomainFailure as failure:
+                if failure.code is DomainFailureCode.NOT_FOUND:
+                    raise self._result_unavailable() from None
+                raise map_domain_failure(failure) from None
+            return RootCandidatePage(
+                candidates=window.candidates,
+                total_count=window.total_count,
+                next_cursor=(
+                    self._cursor(job_id, result, normalized_query, window.next_offset)
+                    if window.next_offset is not None
+                    else None
+                ),
+            )
         if not normalized_query:
             total_count = len(result.root_candidates)
             page_candidates = result.root_candidates[offset : offset + limit]
