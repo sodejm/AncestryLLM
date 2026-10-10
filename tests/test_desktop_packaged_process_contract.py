@@ -177,10 +177,10 @@ def test_packaged_environment_authenticates_native_keyring_boundaries() -> None:
         "pnpm --dir desktop run build:packaged-native-verification"
     )
     production_assembly = workflow_source.index(
-        "electron-builder --config electron-builder.verification.yml"
+        "run-electron-builder.mjs --config electron-builder.verification.yml"
     )
     verification_assembly = workflow_source.index(
-        "electron-builder --config electron-builder.native-verification.yml"
+        "run-electron-builder.mjs --config electron-builder.native-verification.yml"
     )
     assert production_build < production_assembly < verification_build < verification_assembly
     assert "desktop/release-native-verification" in workflow_source

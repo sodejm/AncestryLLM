@@ -6,6 +6,14 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
+const legacyProxySwitch = process.env.ELECTRON_GET_USE_PROXY
+if (legacyProxySwitch !== undefined && legacyProxySwitch !== '') {
+  console.error(
+    'ELECTRON_GET_USE_PROXY is unsupported because its optional legacy proxy agent has no patched release; unset it before installing desktop dependencies.',
+  )
+  process.exit(2)
+}
+
 const projectRoot = fileURLToPath(new URL('../..', import.meta.url))
 const verifier = fileURLToPath(
   new URL('./verify-electron-install.mjs', import.meta.url),

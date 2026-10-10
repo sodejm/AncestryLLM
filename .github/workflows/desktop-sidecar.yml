@@ -484,7 +484,7 @@ jobs:
         shell: bash
         env:
           PACKAGE_ARGS: ${{ matrix.package_args }}
-        run: pnpm --dir desktop exec electron-builder --config electron-builder.verification.yml $PACKAGE_ARGS
+        run: node desktop/scripts/run-electron-builder.mjs --config electron-builder.verification.yml $PACKAGE_ARGS
       - name: Verify packaged sidecar resource
         shell: bash
         env:
@@ -499,7 +499,7 @@ jobs:
         shell: bash
         env:
           PACKAGE_ARGS: ${{ matrix.package_args }}
-        run: pnpm --dir desktop exec electron-builder --config electron-builder.native-verification.yml $PACKAGE_ARGS
+        run: node desktop/scripts/run-electron-builder.mjs --config electron-builder.native-verification.yml $PACKAGE_ARGS
       - name: Verify packaged native-verification sidecar resource
         if: runner.os != 'Windows'
         shell: bash
@@ -657,7 +657,7 @@ jobs:
         shell: bash
         env:
           PACKAGE_ARGS: ${{ matrix.package_args }}
-        run: pnpm --dir desktop exec electron-builder --config electron-builder.file-grant-verification.yml $PACKAGE_ARGS
+        run: node desktop/scripts/run-electron-builder.mjs --config electron-builder.file-grant-verification.yml $PACKAGE_ARGS
       - name: Verify packaged file-grant sidecar resource
         shell: bash
         env:

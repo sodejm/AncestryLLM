@@ -160,7 +160,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "--config electron-builder.file-grant-verification.yml" in workflow
     production_build = workflow.index("pnpm --dir desktop run build\n")
     production_assembly = workflow.index(
-        "electron-builder --config electron-builder.verification.yml"
+        "run-electron-builder.mjs --config electron-builder.verification.yml"
     )
     production_sidecar_verification = workflow.index(
         'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release'
@@ -169,7 +169,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
         "pnpm --dir desktop run build:packaged-native-verification"
     )
     native_verification_assembly = workflow.index(
-        "electron-builder --config electron-builder.native-verification.yml"
+        "run-electron-builder.mjs --config electron-builder.native-verification.yml"
     )
     native_sidecar_verification = workflow.index(
         'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-native-verification'
@@ -459,7 +459,7 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
     assert "pnpm --dir desktop run test:accessibility" in workflow
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
-    assert package["devDependencies"]["@vitest/coverage-v8"] == "3.2.7"
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.11"
     assert "test:coverage" in package["scripts"]
     coverage = policy["qa"]["desktopCoverage"]
     assert f"provider: '{coverage['provider']}'" in vitest

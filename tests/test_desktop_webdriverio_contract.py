@@ -21,7 +21,7 @@ def test_webdriverio_dependencies_and_commands_are_exactly_locked() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     dependencies = package["devDependencies"]
 
-    assert dependencies["@wdio/electron-service"] == "10.0.0"
+    assert dependencies["@wdio/electron-service"] == "10.3.0"
     for name in (
         "@wdio/cli",
         "@wdio/local-runner",
@@ -29,9 +29,9 @@ def test_webdriverio_dependencies_and_commands_are_exactly_locked() -> None:
         "@wdio/spec-reporter",
         "webdriverio",
     ):
-        assert dependencies[name] == "9.31.2"
-    assert dependencies["@wdio/globals"] == "9.31.1"
-    assert "tsx: 4.21.1" in PNPM_WORKSPACE.read_text(encoding="utf-8")
+        assert dependencies[name] == "9.32.0"
+    assert dependencies["@wdio/globals"] == "9.31.3"
+    assert "tsx: 4.23.15" in PNPM_WORKSPACE.read_text(encoding="utf-8")
 
     scripts = package["scripts"]
     assert "run-wdio.mjs source" in scripts["test:e2e"]

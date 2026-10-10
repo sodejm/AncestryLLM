@@ -13,10 +13,6 @@ import {
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const pnpmWorkspace = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8')
-const electronPatch = await readFile(
-  new URL('../patches/electron@39.8.10.patch', import.meta.url),
-  'utf8',
-)
 const productionMain = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 const productionRuntimeBridge = await readFile(
   new URL('../src/main/runtime-bridge.ts', import.meta.url),
@@ -35,7 +31,7 @@ const packagedNativeVerificationBuilder = await readFile(
   'utf8',
 )
 
-const minimumPatchedElectronVersion = [39, 8, 10]
+const minimumPatchedElectronVersion = [41, 10, 6]
 
 function parseExactVersion(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
@@ -78,27 +74,26 @@ test('packaging pins Electron at the minimum audited security remediation', () =
   const comparison = installed.findIndex((part, index) => part !== minimumPatchedElectronVersion[index])
   assert.ok(
     comparison === -1 || installed[comparison] > minimumPatchedElectronVersion[comparison],
-    `Electron ${packageJson.devDependencies.electron} is below the audited remediation baseline 39.8.10`,
+    `Electron ${packageJson.devDependencies.electron} is below the audited remediation baseline 41.10.6`,
   )
 })
 
 test('dependency overrides preserve the audited transitive remediation floors', () => {
   assert.match(
     pnpmWorkspace,
-    /^ {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5$/m,
+    /^ {2}'@puppeteer\/browsers>extract-zip': npm:@electron-internal\/extract-zip@1\.0\.5$/m,
   )
-  assert.match(pnpmWorkspace, /^ {2}deepmerge-ts: 8\.0\.0$/m)
-  assert.match(pnpmWorkspace, /^ {2}fast-uri: 3\.1\.6$/m)
+  assert.match(pnpmWorkspace, /^ {2}'get-uri>basic-ftp': 6\.2\.1$/m)
+  assert.match(pnpmWorkspace, /^ {2}'@wdio\/mocha-framework>mocha': 11\.8\.0$/m)
+  assert.match(pnpmWorkspace, /^ {2}'mocha>diff': 8\.0\.3$/m)
+  assert.match(pnpmWorkspace, /^ {2}'@electron\/get@3>global-agent': '-'$/m)
+  assert.match(pnpmWorkspace, /^ {2}deepmerge-ts: 8\.0\.2$/m)
+  assert.match(pnpmWorkspace, /^ {2}fast-uri: 3\.1\.8$/m)
   assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.2$/m)
   assert.match(pnpmWorkspace, /^ {2}'@xmldom\/xmldom@0\.8\.13': 0\.8\.15$/m)
   assert.match(pnpmWorkspace, /^ {2}nanoid@<3\.3\.18: 3\.3\.18$/m)
-  assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.0\.3$/m)
-  assert.match(
-    pnpmWorkspace,
-    /^patchedDependencies:\n {2}electron@39\.8\.10: patches\/electron@39\.8\.10\.patch$/m,
-  )
-  assert.match(electronPatch, /\+const \{ extract \} = require\('extract-zip'\);/)
-  assert.doesNotMatch(electronPatch, /\+const extract = require\('extract-zip'\);/)
+  assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.0\.5$/m)
+  assert.doesNotMatch(pnpmWorkspace, /^patchedDependencies:/m)
 })
 
 test('production main entry contains no fixture bridge or test hook', () => {

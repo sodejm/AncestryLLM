@@ -558,7 +558,7 @@ jobs:
             )
           fi
           read -r -a package_args <<< "$PACKAGE_ARGS"
-          pnpm --dir desktop exec electron-builder \
+          node desktop/scripts/run-electron-builder.mjs \
             --config electron-builder.release.yml \
             "${package_args[@]}" --publish never \
             "${signing_args[@]}" \
@@ -603,7 +603,7 @@ jobs:
             )
           }
           $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-          pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
+          node desktop/scripts/run-electron-builder.mjs --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
           if ($LASTEXITCODE -ne 0) { throw "electron-builder exited $LASTEXITCODE" }
       - name: Remove temporary Windows signing credentials
         if: always() && runner.os == 'Windows'
@@ -616,7 +616,7 @@ jobs:
           PACKAGE_ARGS: ${{ matrix.package_args }}
         run: |
           read -r -a package_args <<< "$PACKAGE_ARGS"
-          pnpm --dir desktop exec electron-builder \
+          node desktop/scripts/run-electron-builder.mjs \
             --config electron-builder.release.yml \
             "${package_args[@]}" --publish never \
             --config.extraMetadata.version="$VERSION"
