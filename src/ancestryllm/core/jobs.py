@@ -107,6 +107,7 @@ class _JobRecord:
     token: CancellationToken
     resource_keys: tuple[str, ...]
     resource_locks: tuple[threading.Lock, ...]
+    result_cleanup: Callable[[Any], None] | None
     future: Future[Any] | None = None
     cancellation_was_deferred: bool = False
     cancellation_accepted_at: str | None = None
@@ -256,14 +257,16 @@ class JobManager:
         function: Callable[[], Any],
         *,
         resource_keys: tuple[str, ...] = (),
+        result_cleanup: Callable[[Any], None] | None = None,
     ) -> JobSnapshot:
-        """Submit a background job through the job manager."""
+        """Submit a job, optionally releasing its retained result when discarded."""
         if not callable(function):
             raise ValueError("Background job work must be callable.")
         return self._submit(
             name,
             lambda _reporter: function(),
             resource_keys=resource_keys,
+            result_cleanup=result_cleanup,
         )
 
     def submit_with_progress(
@@ -272,9 +275,15 @@ class JobManager:
         function: Callable[[JobReporter], Any],
         *,
         resource_keys: tuple[str, ...] = (),
+        result_cleanup: Callable[[Any], None] | None = None,
     ) -> JobSnapshot:
-        """Submit a background job with typed progress reporting through the job manager."""
-        return self._submit(name, function, resource_keys=resource_keys)
+        """Submit progress-aware work with optional retained-result cleanup."""
+        return self._submit(
+            name,
+            function,
+            resource_keys=resource_keys,
+            result_cleanup=result_cleanup,
+        )
 
     def _submit(
         self,
@@ -282,10 +291,13 @@ class JobManager:
         function: Callable[[JobReporter], Any],
         *,
         resource_keys: tuple[str, ...],
+        result_cleanup: Callable[[Any], None] | None,
     ) -> JobSnapshot:
         name = _validate_bounded_text(name, "Job name", MAX_JOB_NAME_CHARACTERS)
         if not callable(function):
             raise ValueError("Background job work must be callable.")
+        if result_cleanup is not None and not callable(result_cleanup):
+            raise ValueError("Background job result cleanup must be callable.")
         if not isinstance(resource_keys, tuple) or len(resource_keys) > MAX_JOB_RESOURCE_KEYS:
             raise ValueError("Background job resource keys exceed their bounded count.")
         for resource_key in resource_keys:
@@ -337,7 +349,13 @@ class JobManager:
                 resource_keys=public_resource_keys,
             )
             token = CancellationToken()
-            record = _JobRecord(snapshot, token, normalized_keys, resource_locks)
+            record = _JobRecord(
+                snapshot,
+                token,
+                normalized_keys,
+                resource_locks,
+                result_cleanup,
+            )
             self._records[job_id] = record
             token.subscribe(lambda state: self._sync_cancellation(job_id, state))
         self._notify(snapshot)
@@ -381,6 +399,8 @@ class JobManager:
     ) -> None:
         acquired: list[threading.Lock] = []
         token = self._token(job_id)
+        result: Any = None
+        result_available = False
         try:
             with bind_cancellation_token(token):
                 try:
@@ -391,8 +411,11 @@ class JobManager:
                     token.raise_if_cancelled()
                     self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
                     result = function(JobReporter(self, job_id))
+                    result_available = True
                     token.raise_if_cancelled()
                 except CancellationError:
+                    if result_available:
+                        self._cleanup_result(job_id, result)
                     self._transition_cancelled(job_id)
                 except BaseException as exc:  # noqa: BLE001 - job boundary normalizes failures
                     if (
@@ -482,10 +505,14 @@ class JobManager:
         return bounded if bounded.strip() else "Sensitive background job detail was removed."
 
     def _transition(self, job_id: str, state: JobState, **changes: Any) -> None:
+        cleanup: tuple[Callable[[Any], None], Any] | None = None
         with self._lock:
             record = self._records[job_id]
             current = record.snapshot
+            completed_result = changes.get("result") if state is JobState.COMPLETED else None
             if state is JobState.COMPLETED and record.cancellation_accepted_at is not None:
+                if completed_result is not None and record.result_cleanup is not None:
+                    cleanup = (record.result_cleanup, completed_result)
                 state = JobState.CANCELLED
                 changes.update(
                     result=None,
@@ -544,10 +571,29 @@ class JobManager:
             }
             values.update(changes)
             if record.result_discarded:
+                if completed_result is not None and record.result_cleanup is not None:
+                    cleanup = (record.result_cleanup, completed_result)
                 values["result"] = None
             record.snapshot = JobSnapshot(**values)
             snapshot = record.snapshot
+        if cleanup is not None:
+            self._invoke_result_cleanup(*cleanup)
         self._notify(snapshot)
+
+    def _cleanup_result(self, job_id: str, result: Any) -> None:
+        """Release a produced result that cannot be retained by its job record."""
+
+        with self._lock:
+            cleanup = self._records[job_id].result_cleanup
+        if cleanup is not None and result is not None:
+            self._invoke_result_cleanup(cleanup, result)
+
+    @staticmethod
+    def _invoke_result_cleanup(cleanup: Callable[[Any], None], result: Any) -> None:
+        try:
+            cleanup(result)
+        except BaseException as exc:  # noqa: BLE001 - cleanup cannot break job lifecycle
+            logger.warning("Job result cleanup failed: %s", type(exc).__name__)
 
     def _sync_cancellation(self, job_id: str, state: CancellationState) -> None:
         with self._lock:
@@ -671,11 +717,17 @@ class JobManager:
         Lifecycle metadata remains available. This is deliberately irreversible:
         a late completion cannot restore data that its consumer has discarded.
         """
+        cleanup: tuple[Callable[[Any], None], Any] | None = None
         with self._lock:
             self.get(job_id)
             record = self._records[job_id]
+            result = record.snapshot.result
+            if result is not None and record.result_cleanup is not None:
+                cleanup = (record.result_cleanup, result)
             record.result_discarded = True
             record.snapshot = replace(record.snapshot, result=None)
+        if cleanup is not None:
+            self._invoke_result_cleanup(*cleanup)
 
     def get(self, job_id: str) -> JobSnapshot:
         """Return the current snapshot for one job or raise ``JOB_NOT_FOUND``."""
@@ -779,9 +831,20 @@ class JobManager:
         return self.get(job_id)
 
     def shutdown(self, *, wait: bool = True, cancel: bool = False) -> None:
-        """Release resources owned by the job manager."""
+        """Release manager resources and results with registered cleanup callbacks."""
+        cleanups: list[tuple[Callable[[Any], None], Any]] = []
         with self._lock:
             self._closed = True
+            for record in self._records.values():
+                if record.result_cleanup is None:
+                    continue
+                result = record.snapshot.result
+                record.result_discarded = True
+                record.snapshot = replace(record.snapshot, result=None)
+                if result is not None:
+                    cleanups.append((record.result_cleanup, result))
+        for cleanup in cleanups:
+            self._invoke_result_cleanup(*cleanup)
         if cancel:
             self.cancel_all()
         self._executor.shutdown(wait=wait, cancel_futures=False)
