@@ -313,14 +313,7 @@ class JobManager:
                 raise ValueError("Background job resource key exceeds its bounded size.")
         normalized_keys = tuple(sorted(set(resource_keys)))
         with self._lock:
-            if self._closed:
-                raise AncestryError("JOB_MANAGER_CLOSED", "The background job manager is closed.")
-            if self._next_id > MAX_JOB_ID_NUMBER:
-                raise AncestryError(
-                    "JOB_IDENTIFIER_EXHAUSTED",
-                    "The background job identifier space is exhausted.",
-                    "Restart only after archived job history has been reviewed and rotated.",
-                )
+            self._validate_admission_locked()
         if not self._capacity.acquire(blocking=False):
             raise AncestryError(
                 "JOB_QUEUE_FULL",
@@ -330,16 +323,11 @@ class JobManager:
         public_resource_keys = self._public_resource_keys(normalized_keys)
         with self._lock:
             # Admission and shutdown's cleanup scan share the same lock.
-            if self._closed:
+            try:
+                self._validate_admission_locked()
+            except AncestryError:
                 self._capacity.release()
-                raise AncestryError("JOB_MANAGER_CLOSED", "The background job manager is closed.")
-            if self._next_id > MAX_JOB_ID_NUMBER:
-                self._capacity.release()
-                raise AncestryError(
-                    "JOB_IDENTIFIER_EXHAUSTED",
-                    "The background job identifier space is exhausted.",
-                    "Restart only after archived job history has been reviewed and rotated.",
-                )
+                raise
             job_id = f"j{self._next_id:06d}"
             self._next_id += 1
             resource_locks = self._reserve_resource_locks(normalized_keys)
@@ -380,6 +368,18 @@ class JobManager:
         with self._lock:
             record.future = future
         return snapshot
+
+    def _validate_admission_locked(self) -> None:
+        """Recheck mutable admission state while the caller holds the manager lock."""
+
+        if self._closed:
+            raise AncestryError("JOB_MANAGER_CLOSED", "The background job manager is closed.")
+        if self._next_id > MAX_JOB_ID_NUMBER:
+            raise AncestryError(
+                "JOB_IDENTIFIER_EXHAUSTED",
+                "The background job identifier space is exhausted.",
+                "Restart only after archived job history has been reviewed and rotated.",
+            )
 
     def _public_resource_keys(self, resource_keys: tuple[str, ...]) -> tuple[str, ...]:
         """Return manager-local opaque identifiers for public job snapshots."""
