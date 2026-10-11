@@ -85,9 +85,12 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
-    quit_start = source.index("async function closeApplicationWindow")
-    quit_end = source.index("\nasync function terminateVerificationApplication", quit_start)
+    quit_start = source.index("async function closeApplicationWindow(sidecarPath: string)")
+    quit_end = source.index("\nasync function closeApplicationWindowWithoutSidecar", quit_start)
     quit_source = source[quit_start:quit_end]
+    degraded_quit_start = quit_end + 1
+    degraded_quit_end = source.index("\nasync function rendererProcessIds", degraded_quit_start)
+    degraded_quit_source = source[degraded_quit_start:degraded_quit_end]
     normal_quit_start = normal_source.index("async function requestNormalApplicationQuit")
     normal_quit_end = normal_source.index(
         "\n/** Launches and verifies one selected packaged runtime", normal_quit_start
@@ -102,7 +105,15 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     assert "expectProcessAbsent(activeSidecarPid)" in quit_source
     assert "browser.electron.execute" not in quit_source
     assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
-    assert "await closeApplicationWindow()" not in source
+    assert (
+        "async function closeApplicationWindowWithoutSidecar(): Promise<number>"
+        in degraded_quit_source
+    )
+    assert "await browser.closeWindow()" in degraded_quit_source
+    assert "if (!isExpectedLastWindowCloseError(error)) throw error" in degraded_quit_source
+    assert "await expectProcessAbsent(pid)" in degraded_quit_source
+    assert "sidecarPid(" not in degraded_quit_source
+    assert source.count("await closeApplicationWindowWithoutSidecar()") == 1
 
     assert "CloseMainWindow()" in normal_quit_source
     assert "child.kill('SIGTERM')" in normal_quit_source

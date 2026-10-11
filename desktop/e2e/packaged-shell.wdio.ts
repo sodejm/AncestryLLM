@@ -298,6 +298,17 @@ async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   return pid
 }
 
+async function closeApplicationWindowWithoutSidecar(): Promise<number> {
+  const pid = await mainPid()
+  try {
+    await browser.closeWindow()
+  } catch (error) {
+    if (!isExpectedLastWindowCloseError(error)) throw error
+  }
+  await expectProcessAbsent(pid)
+  return pid
+}
+
 async function rendererProcessIds(): Promise<ReadonlySet<number>> {
   const puppeteer = await browser.getPuppeteer()
   const session = await puppeteer.target().createCDPSession()
@@ -311,13 +322,6 @@ async function rendererProcessIds(): Promise<ReadonlySet<number>> {
   } finally {
     await session.detach()
   }
-}
-
-async function terminateVerificationApplication(): Promise<number> {
-  const pid = await mainPid()
-  await killProcess(pid)
-  await expectProcessAbsent(pid)
-  return pid
 }
 
 async function writeFaultEvidence(
@@ -862,8 +866,8 @@ describe('unpublished unpacked native package', () => {
         automaticRestartsRemaining: 2,
         manualRetriesRemaining: 0,
       })
-      phase = 'termination'
-      await terminateVerificationApplication()
+      phase = 'window close'
+      await closeApplicationWindowWithoutSidecar()
       processExited = true
       phase = 'write fault evidence'
       await writeFaultEvidence(integrityEvidencePath, 'sidecar-integrity-substitution', {
