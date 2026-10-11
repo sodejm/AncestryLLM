@@ -54,6 +54,7 @@ _XREF = re.compile(r"@[^@\r\n]+@")
 _CONTROL_BYTES = 8_192
 _FAILURE_BYTES = 4_096
 _POLL_SECONDS = 0.05
+_ROOT_PREFIX = "ancestryllm-inspection-"
 _LEASE_PREFIX = "ancestryllm-inspect-"
 _OWNER_FILE = "owner.json"
 _RESULT_FILE = "result.json"
@@ -582,17 +583,41 @@ def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
         shutil.rmtree(candidate, ignore_errors=True)
 
 
+def _cleanup_scratch_roots(base: Path, prefix: str, *, maximum: int = 32) -> None:
+    """Recover stale leases only from bounded, current-user-private roots."""
+
+    try:
+        candidates = tuple(islice(base.iterdir(), maximum))
+    except OSError:
+        return
+    for candidate in candidates:
+        if not candidate.name.startswith(prefix) or not is_private_directory(candidate):
+            continue
+        _cleanup_orphans(candidate)
+        with suppress(OSError):
+            candidate.rmdir()
+
+
 def _scratch_root() -> Path:
+    """Create an unguessable private root after bounded restart recovery."""
+
     # macOS commonly exposes the same temporary directory through both /var and
-    # /private/var.  Canonicalize before passing the lease path to a child whose
+    # /private/var. Canonicalize before passing the lease path to a child whose
     # cwd is reported canonically, otherwise the child rejects its own directory.
-    root = Path(tempfile.gettempdir()).resolve() / f"ancestryllm-inspection-{_current_user_scope()}"
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    base = Path(tempfile.gettempdir()).resolve()
+    prefix = f"{_ROOT_PREFIX}{_current_user_scope()}-"
+    _cleanup_scratch_roots(base, prefix)
+    try:
+        root = Path(tempfile.mkdtemp(prefix=prefix, dir=base)).resolve()
+    except OSError as exc:
+        raise _failed() from exc
     try:
         private = harden_private_directory(root)
     except OSError as exc:
+        shutil.rmtree(root, ignore_errors=True)
         raise _failed() from exc
     if not private:
+        shutil.rmtree(root, ignore_errors=True)
         raise _failed()
     return root
 

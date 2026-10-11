@@ -333,17 +333,51 @@ def test_restart_cleanup_removes_only_dead_owned_private_workers(
     assert unrelated.exists()
 
 
-def test_scratch_root_is_scoped_to_the_current_os_user(
+def test_scratch_root_cannot_be_preclaimed_at_a_predictable_user_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(
         "ancestryllm.gedcom.inspection_worker._current_user_scope", lambda: "uid-1001"
     )
+    preclaimed = tmp_path / "ancestryllm-inspection-uid-1001"
+    preclaimed.mkdir()
 
     root = _scratch_root()
 
-    assert root == tmp_path / "ancestryllm-inspection-uid-1001"
+    assert root.parent == tmp_path.resolve()
+    assert root != preclaimed
+    assert root.name.startswith("ancestryllm-inspection-uid-1001-")
+    assert _private_files.is_private_directory(root)
+
+
+def test_scratch_root_recovers_dead_leases_from_a_prior_private_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._current_user_scope", lambda: "uid-1001"
+    )
+    prior = tmp_path / "ancestryllm-inspection-uid-1001-prior"
+    prior.mkdir()
+    assert _private_files.harden_private_directory(prior)
+    dead = prior / "ancestryllm-inspect-dead"
+    dead.mkdir()
+    assert _private_files.harden_private_directory(dead)
+    owner = dead / "owner.json"
+    owner.write_text(json.dumps({"pid": 1001, "start": "dead-start"}), encoding="ascii")
+    assert _private_files.harden_private_file(owner)
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._process_identity",
+        lambda _pid: _ProcessIdentity(running=False, start_token=None),
+    )
+
+    root = _scratch_root()
+
+    assert not prior.exists()
+    assert root.parent == tmp_path.resolve()
+    assert root.name.startswith("ancestryllm-inspection-uid-1001-")
+    assert _private_files.is_private_directory(root)
 
 
 def test_process_identity_uses_windows_process_handles(

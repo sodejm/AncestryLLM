@@ -80,7 +80,7 @@ selects a provider, preserving the provider `none` network-free contract.
 
 The parent fingerprints the source before work and verifies the same path,
 identity, size, and digest after the child exits. It never opens the source for
-writing. Each operating-system user receives a separate private scratch root.
+writing. Each invocation atomically creates an unguessable private scratch root scoped to the current operating-system user.
 On POSIX, lease directories must be owned by the current user at mode `0700`,
 and every accepted output must be a current-user-owned, single-link regular file
 at mode `0600`. On Windows, native owner and DACL checks require ownership by the
@@ -115,13 +115,14 @@ reaps it, and removes the staging directory. Existing outputs and the input are
 unchanged. A successful directory is transferred to the service lease manager;
 it is removed on explicit release, service shutdown, or its 15-minute expiry.
 
-Each invocation also scans at most 32 worker-prefixed directories under the
-per-user private scratch root. A private owner marker binds the supervisor PID
-to its process-start identity. Cleanup removes a directory only when that
-process is dead or the PID now belongs to a different process. Live leases,
-malformed or legacy markers, unknown process state, and unrelated directories
-are preserved. This bounded restart cleanup avoids an unbounded startup
-traversal.
+Each invocation also scans at most 32 prior roots in the temporary directory and
+accepts only the current user's private roots with its scoped prefix. Within each
+accepted root, it scans at most 32 worker leases. A private owner marker binds the
+supervisor PID to its process-start identity. Cleanup removes a lease only when
+that process is dead or the PID now belongs to a different process, then removes
+the root only if it is empty. Live leases, malformed or legacy markers, unknown
+process state, nonprivate roots, and unrelated directories are preserved. This
+bounded restart cleanup avoids an unbounded startup traversal.
 
 ## Testing and operations
 
