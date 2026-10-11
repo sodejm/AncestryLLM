@@ -21,6 +21,7 @@ import {
 } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { prepareLinuxElectronSandbox } from './prepare-electron-sandbox.mjs'
 
 const require = createRequire(import.meta.url)
 const defaultDesktopRoot = fileURLToPath(new URL('../', import.meta.url))
@@ -88,24 +89,6 @@ function packagedSidecarPath(packageRoot, platform = process.platform, architect
   )
 }
 
-function prepareCopiedLinuxSandbox(packageRoot, execFileSyncImpl) {
-  if (process.platform !== 'linux') return
-  const sandboxPath = join(packageRoot, 'chrome-sandbox')
-  const sandbox = lstatSync(sandboxPath)
-  assert.equal(sandbox.isSymbolicLink(), false, 'Copied Chromium sandbox must not be a symlink')
-  assert.equal(sandbox.isFile(), true, 'Copied Chromium sandbox must be a regular file')
-  execFileSyncImpl('sudo', [
-    '--non-interactive', 'chown', 'root:root', '--', sandboxPath,
-  ], { stdio: 'inherit' })
-  execFileSyncImpl('sudo', [
-    '--non-interactive', 'chmod', '4755', '--', sandboxPath,
-  ], { stdio: 'inherit' })
-  const prepared = lstatSync(sandboxPath)
-  assert.equal(prepared.uid, 0, 'Copied Chromium sandbox must be owned by root')
-  assert.equal(prepared.gid, 0, 'Copied Chromium sandbox must use the root group')
-  assert.equal(prepared.mode & 0o7777, 0o4755, 'Copied Chromium sandbox must be mode 4755')
-}
-
 /**
  * Prepares the immutable original package or a disposable fault-injection copy.
  * @param {string} scenario - Selected packaged test name.
@@ -149,7 +132,7 @@ export function preparePackagedScenario(scenario, environment, {
         recursive: true,
       })
     }
-    prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)
+    prepareLinuxElectronSandbox(copiedPackageRoot, { execFileSyncImpl })
     const copiedExecutable = join(
       copiedPackageRoot,
       relative(sourcePackageRoot, resolve(originalExecutable)),

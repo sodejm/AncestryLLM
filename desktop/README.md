@@ -120,8 +120,9 @@ Electron with a deterministic fictional mock bridge; it is not an installer
 or literal packaged-executable test. `test:accessibility` scans every shell
 route in light, dark, and high-contrast modes with the exact locked `axe-core`
 version in real Chromium. Linux CI launches this source scan through
-`xvfb-run --auto-servernum`; WebdriverIO retains its automatic Xvfb fallback,
-and the Electron sandbox stays enabled. `test:visual` checks the minimum
+`xvfb-run --auto-servernum` after verifying the installed Chromium SUID sandbox
+is a regular root-owned file with mode `4755`; WebdriverIO retains its automatic
+Xvfb fallback, and the Electron sandbox stays enabled. `test:visual` checks the minimum
 720-by-560 window at 200% zoom for horizontal clipping. Neither command
 replaces the manual screen-reader review in the
 [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).

@@ -456,7 +456,13 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
 
     assert "verify-release-toolchain.mjs" in workflow
     assert "pnpm --dir desktop run test:coverage" in workflow
-    assert "-- xvfb-run --auto-servernum pnpm --dir desktop run test:accessibility" in workflow
+    sandbox_preparation = "node desktop/scripts/prepare-electron-sandbox.mjs"
+    accessibility = "-- xvfb-run --auto-servernum pnpm --dir desktop run test:accessibility"
+    assert "name: Prepare source Electron sandbox" in workflow
+    assert "if: runner.os == 'Linux'" in workflow
+    assert sandbox_preparation in workflow
+    assert accessibility in workflow
+    assert workflow.index(sandbox_preparation) < workflow.index(accessibility)
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
     assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.11"

@@ -159,6 +159,9 @@ jobs:
           --gate sidecarCompatibilityPassed
           --gate sidecarIntegrityPassed
           -- pnpm --dir desktop run test:coverage
+      - name: Prepare source Electron sandbox
+        if: runner.os == 'Linux'
+        run: node desktop/scripts/prepare-electron-sandbox.mjs
       - name: Verify desktop accessibility
         shell: bash
         env:

@@ -138,6 +138,22 @@ async function expectStartupDiagnostics(expected: StartupExpectation): Promise<v
   }
 }
 
+async function expectRecoveredDiagnosticsSurface(): Promise<void> {
+  try {
+    await browser.waitUntil(async () => {
+      const alertCount = await $$('[role="alert"]').length
+      const retryCount = await $$('button=Retry desktop service').length
+      return alertCount === 0 && retryCount === 0
+    }, {
+      timeout: 30_000,
+      interval: 250,
+      timeoutMsg: 'Packaged Diagnostics did not clear recovered alerts and retry controls',
+    })
+  } catch (error) {
+    throw new Error('Packaged Diagnostics recovery surface did not become ready', { cause: error })
+  }
+}
+
 async function expectSafeDiagnosticsAlert(expectedMessage: RegExp): Promise<void> {
   await click('a=Diagnostics')
   await expectFocusedHeading('Diagnostics')
@@ -771,7 +787,7 @@ describe('unpublished unpacked native package', () => {
       automaticRestartsRemaining: 2,
       manualRetriesRemaining: 0,
     })
-    assert.equal((await $$('[role="alert"]')).length, 0)
+    await expectRecoveredDiagnosticsSurface()
     await closeApplicationWindow(copiedSidecarPath)
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',

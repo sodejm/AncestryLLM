@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
+SANDBOX_PREPARER = ROOT / "desktop" / "scripts" / "prepare-electron-sandbox.mjs"
 NORMAL_LAUNCH_VERIFIER = ROOT / "desktop" / "scripts" / "verify-normal-launch.mjs"
 PACKAGED_NATIVE_VERIFICATION = (
     ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
@@ -342,11 +343,12 @@ def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> 
 
 
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
-    source = PACKAGED_RUNNER.read_text(encoding="utf-8")
+    runner_source = PACKAGED_RUNNER.read_text(encoding="utf-8")
+    source = SANDBOX_PREPARER.read_text(encoding="utf-8")
 
-    assert "function prepareCopiedLinuxSandbox(packageRoot, execFileSyncImpl)" in source
-    assert "if (process.platform !== 'linux') return" in source
-    assert "const sandboxPath = join(packageRoot, 'chrome-sandbox')" in source
+    assert "export function prepareLinuxElectronSandbox(" in source
+    assert "if (platform !== 'linux') return" in source
+    assert "const sandboxPath = join(electronDistributionRoot, 'chrome-sandbox')" in source
     assert "sandbox.isSymbolicLink()" in source
     assert "sandbox.isFile()" in source
     assert "'--non-interactive', 'chown', 'root:root', '--', sandboxPath" in source
@@ -354,8 +356,27 @@ def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
     assert "prepared.uid, 0" in source
     assert "prepared.gid, 0" in source
     assert "prepared.mode & 0o7777, 0o4755" in source
-    assert "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)" in source
-    assert source.index("cpSync(sourcePackageRoot, copiedPackageRoot") < source.index(
-        "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)"
+    assert "prepareLinuxElectronSandbox(copiedPackageRoot, { execFileSyncImpl })" in runner_source
+    assert runner_source.index("cpSync(sourcePackageRoot, copiedPackageRoot") < runner_source.index(
+        "prepareLinuxElectronSandbox(copiedPackageRoot, { execFileSyncImpl })"
     )
-    assert "--no-sandbox" not in source
+    assert "--no-sandbox" not in source + runner_source
+
+
+def test_packaged_diagnostics_recovery_waits_for_renderer_alerts_to_clear() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    helper_start = source.index("async function expectRecoveredDiagnosticsSurface")
+    helper_end = source.index("\nasync function ", helper_start + 1)
+    helper_source = source[helper_start:helper_end]
+    scenario_start = source.index(
+        "it('withholds and restores the packaged sidecar through Diagnostics retry'"
+    )
+    scenario_end = source.index("\n  it('", scenario_start + 1)
+    scenario_source = source[scenario_start:scenario_end]
+
+    assert "await browser.waitUntil(async () =>" in helper_source
+    assert "const alertCount = await $$('[role=\"alert\"]').length" in helper_source
+    assert "const retryCount = await $$('button=Retry desktop service').length" in helper_source
+    assert "return alertCount === 0 && retryCount === 0" in helper_source
+    assert "timeout: 30_000" in helper_source
+    assert "await expectRecoveredDiagnosticsSurface()" in scenario_source
