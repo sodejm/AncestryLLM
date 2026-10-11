@@ -38,10 +38,11 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     assert (
         "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
     )
-    assert "matchesPackagedMainProcess(" in source
+    assert "findPackagedMainProcess(" in source
     assert "record.commandLine" in process_records_source
-    assert "commandLine.includes(expectedExecutable)" in process_records_source
-    assert "commandLine.includes(expectedProfile)" in process_records_source
+    assert "hasExactArgument(commandLine, expectedExecutable)" in process_records_source
+    assert "hasExactUserDataDirectory(commandLine, expectedProfile)" in process_records_source
+    assert "if (excluded.has(record.pid)) continue" in process_records_source
     assert "!commandLine.includes('--type=')" in process_records_source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
     renderer_query = source.split("async function rendererProcessIds()", maxsplit=1)[1].split(
