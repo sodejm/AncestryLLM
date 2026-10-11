@@ -88,7 +88,8 @@ def test_intake_removes_read_only_staging_and_releases_capacity(
             path = tmp_path / f"{stage_id}.ged"
             path.chmod(0o400)
             job = boundary.submit(stage_id, len(CONTENT), hashlib.sha256(CONTENT).hexdigest())
-            assert jobs.manager.wait(job.job_id, timeout=5).state is JobState.COMPLETED
+            snapshot = jobs.manager.wait(job.job_id, timeout=5)
+            assert snapshot.state is JobState.COMPLETED, snapshot.error_code
             boundary.discard(job.job_id)
             assert not path.exists()
 
