@@ -354,16 +354,29 @@ class GedcomService:
             raise ValueError("The private root index lifetime must be finite and positive.")
         self._root_index_ttl_seconds = root_index_ttl_seconds
         self._inspection_lock = threading.Lock()
+        self._inspection_cleanup = threading.Condition(self._inspection_lock)
+        self._inspection_removals = 0
         self._inspection_leases: dict[str, _InspectionLease] = {}
         self._inspection_closed = False
 
     def _expire_inspection(self, reference: str) -> None:
         """Revoke under the lease lock, then erase outside it for safe timer cleanup."""
-        with self._inspection_lock:
+        with self._inspection_cleanup:
             lease = self._inspection_leases.pop(reference, None)
+            if lease is not None:
+                self._inspection_removals += 1
         if lease is not None:
+            self._erase_inspection_lease(lease)
+
+    def _erase_inspection_lease(self, lease: _InspectionLease) -> None:
+        """Finish registered erasure outside the lease lock and wake shutdown."""
+        try:
             lease.timer.cancel()
             _remove_inspection_directory(lease.directory)
+        finally:
+            with self._inspection_cleanup:
+                self._inspection_removals -= 1
+                self._inspection_cleanup.notify_all()
 
     def release_inspection(self, result: GedcomInspectResult) -> None:
         """Revoke a private projection on job discard, including repeated cleanup."""
@@ -371,14 +384,16 @@ class GedcomService:
             self._expire_inspection(result.root_index_ref)
 
     def close(self) -> None:
-        """Erase retained indexes and reject worker results arriving after shutdown."""
-        with self._inspection_lock:
+        """Drain retained and already-revoked erasures before returning from shutdown."""
+        with self._inspection_cleanup:
             self._inspection_closed = True
             leases = tuple(self._inspection_leases.values())
             self._inspection_leases.clear()
+            self._inspection_removals += len(leases)
         for lease in leases:
-            lease.timer.cancel()
-            _remove_inspection_directory(lease.directory)
+            self._erase_inspection_lease(lease)
+        with self._inspection_cleanup:
+            self._inspection_cleanup.wait_for(lambda: self._inspection_removals == 0)
 
     def read_inspection_roots(
         self, result: GedcomInspectResult, *, query: str, offset: int, limit: int

@@ -48,6 +48,11 @@ injected services remain their caller's responsibility. A missing, expired, or
 source-mismatched lease maps to `GEDCOM_JOB_RESULT_UNAVAILABLE` at the job façade.
 Reinspection is the recovery action; private indexes are never durable job data.
 
+Closing also waits for erasure already claimed by an expiry timer, explicit
+release, or concurrent close. Revocation registers pending cleanup under the
+lease lock; deletion stays outside it and signals completion before shutdown
+returns. Repeated close calls share that same drain boundary.
+
 Cleanup failures emit only `GEDCOM_INDEX_CLEANUP_FAILED` and the exception class.
 They do not emit a path, name, search, or genealogy payload. The worker's bounded
 dead-owner scan provides restart cleanup for residual owned directories.
@@ -61,6 +66,7 @@ provider, CLI command, or renderer-specific registry is added.
 Fictional-data tests cover summary privacy, bounded reads, source-binding
 rejection, invalid index admission, repeated release, expiry without requests,
 timer startup failure,
-shutdown during a worker, manager result cleanup, and signed cursor behavior.
+shutdown during a worker or concurrent erasure, manager result cleanup, and
+signed cursor behavior.
 These local tests do not qualify a packaged desktop target or replace its manual
 keyboard and screen-reader acceptance.

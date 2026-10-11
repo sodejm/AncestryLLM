@@ -136,6 +136,57 @@ def test_expiry_erases_projection_without_another_request(
         service.close()
 
 
+@pytest.mark.parametrize("revocation", ["expiry", "close"])
+def test_close_waits_for_a_concurrent_private_index_erasure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revocation: str
+) -> None:
+    """Close cannot return while a revoked projection is still being erased."""
+    service, request, directories = _inspection(tmp_path, monkeypatch)
+    result = service.execute_inspect(request)
+    erasing = threading.Event()
+    resume = threading.Event()
+    closing = threading.Event()
+    closed = threading.Event()
+    original = service_module._remove_inspection_directory
+
+    def paused_erase(path: Path) -> None:
+        erasing.set()
+        assert resume.wait(2)
+        original(path)
+
+    def revoke() -> None:
+        if revocation == "expiry":
+            service.release_inspection(result)
+        else:
+            service.close()
+
+    def close() -> None:
+        closing.set()
+        service.close()
+        closed.set()
+
+    monkeypatch.setattr(service_module, "_remove_inspection_directory", paused_erase)
+    revoker = threading.Thread(target=revoke)
+    closer = threading.Thread(target=close)
+    revoker.start()
+    try:
+        assert erasing.wait(2)
+        closer.start()
+        assert closing.wait(2)
+        assert not closed.wait(0.1)
+        assert directories[0].exists()
+    finally:
+        resume.set()
+        revoker.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+        service.close()
+    assert not revoker.is_alive()
+    assert not closer.is_alive()
+    assert closed.is_set()
+    assert not directories[0].exists()
+
+
 def test_close_rejects_late_worker_result_and_cleans_its_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
