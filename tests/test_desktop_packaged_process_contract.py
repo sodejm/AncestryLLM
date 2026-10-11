@@ -94,6 +94,25 @@ def test_normal_launch_preserves_gui_visibility_for_native_windows_close() -> No
     assert "stdio: 'pipe'" in launch_source
 
 
+def test_warm_launch_measurement_excludes_native_process_query_latency() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    restart_start = source.index("const previousApplicationPid = await mainPid()")
+    restart_end = source.index("const corruptPayload =", restart_start)
+    restart_source = source[restart_start:restart_end]
+
+    reload_index = restart_source.index("await browser.reloadSession()")
+    heading_index = restart_source.index("await expectFocusedHeading('Home')")
+    observed_index = restart_source.index("const warmReadyAt = Date.now()")
+    process_query_index = restart_source.index("await mainPid(new Set([previousApplicationPid]))")
+    start_query_index = restart_source.index("await processStartedAt(replacementApplicationPid)")
+
+    # CIM and PowerShell latency must not inflate the observed launch interval.
+    assert reload_index < heading_index < observed_index < process_query_index < start_query_index
+    assert "const warmLaunchMs = warmReadyAt - warmLaunchedAt" in restart_source
+    assert "assert.ok(warmLaunchedAt <= warmReadyAt" in restart_source
+    assert "assert.match(await text('main'), /Ready/u)" in restart_source
+
+
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")

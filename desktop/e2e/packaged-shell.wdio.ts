@@ -744,10 +744,13 @@ describe('unpublished unpacked native package', () => {
 
     const previousApplicationPid = await mainPid()
     await browser.reloadSession()
+    await expectFocusedHeading('Home')
+    // Observe launch completion before potentially slow native process queries.
+    const warmReadyAt = Date.now()
     const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))
     const warmLaunchedAt = await processStartedAt(replacementApplicationPid)
-    await expectFocusedHeading('Home')
-    const warmLaunchMs = Date.now() - warmLaunchedAt
+    assert.ok(warmLaunchedAt <= warmReadyAt, 'Warm launch observation must follow process startup')
+    const warmLaunchMs = warmReadyAt - warmLaunchedAt
     assert.equal((await $$('h1=Welcome to AncestryLLM')).length, 0)
     assert.deepEqual(await browser.execute(() => ({
       theme: document.documentElement.dataset.theme,

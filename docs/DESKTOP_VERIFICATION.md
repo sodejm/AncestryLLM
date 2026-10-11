@@ -69,7 +69,11 @@ valid receipt set cannot be approved under a substituted policy.
 
 Native performance uses policy `desktop-unpacked-v1`. WebdriverIO measures
 cold launch, warm launch, readiness, process-tree RSS, and renderer outbound
-requests in `desktop/e2e/packaged-shell.wdio.ts`; the aggregate validator in
+requests in `desktop/e2e/packaged-shell.wdio.ts`. Warm launch ends when the new
+session's Home heading is focused; this observation is captured before native
+process metadata queries. The interval still starts at the verified replacement
+process's OS start time, so process-query latency cannot inflate the measurement.
+The aggregate validator in
 `desktop/scripts/verification-evidence.mjs` compares every value with the
 target-specific ceiling. The package boundary is always `unpacked-native`.
 The performance family is authorized only by the declared
