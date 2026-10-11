@@ -250,7 +250,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     for package in (
         "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
-        "xvfb=2:21.1.12-1ubuntu1.6",
+        "xvfb=2:21.1.12-1ubuntu1.8",
     ):
         assert package in job
     assert (

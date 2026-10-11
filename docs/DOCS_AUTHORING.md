@@ -206,6 +206,12 @@ images before committing them. The frozen desktop lock, manifest-owned locale,
 timezone, viewport, fonts, animation settings, and pinned virtual display
 package remain part of the capture contract.
 
+The virtual display pin is `xvfb=2:21.1.12-1ubuntu1.8`, matching the available
+[Ubuntu Noble updates package](https://packages.ubuntu.com/noble-updates/xvfb).
+When Ubuntu replaces that patch, update both the installation and version
+assertion in CI and their workflow contract test. The drift check must still
+pass against the reviewed images before accepting the new display dependency.
+
 A running Docker Desktop or compatible native Linux engine is additionally
 required when the selected manifest has terminal scenarios. Host copies of
 VHS, ttyd, Chromium, FFmpeg, and JetBrains Mono are neither used nor supported
