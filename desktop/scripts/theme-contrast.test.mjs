@@ -1,3 +1,4 @@
+/** Verify opaque header backgrounds and WCAG AA text contrast in every supported theme. */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
