@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ancestryllm.application.operations import RootCandidate
-from ancestryllm.gedcom import root_index
+from ancestryllm.gedcom import _private_files, root_index
 from ancestryllm.gedcom.root_index import (
     RootIndexError,
     RootIndexPage,
@@ -98,6 +98,23 @@ def test_build_requires_a_private_parent_directory(tmp_path: Path) -> None:
             (_candidate(1),),
             max_bytes=1_000_000,
         )
+
+
+def test_windows_privacy_uses_native_acl_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir()
+    calls: list[tuple[Path, bool]] = []
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        _private_files,
+        "_windows_path_is_private",
+        lambda path, *, directory: calls.append((path, directory)) or True,
+    )
+
+    assert _private_files.is_private_directory(directory)
+    assert calls == [(directory, True)]
 
 
 def test_read_empty_query_uses_stable_display_order_and_offsets(tmp_path: Path) -> None:

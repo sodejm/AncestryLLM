@@ -59,9 +59,10 @@ caller cannot relax the application-wide process bound.
 | Failure document | 4 KiB | Child writer and parent parser |
 | Concurrent workers | 2 | Process-wide bounded semaphore |
 
-The wall deadline starts before preflight and semaphore acquisition. Queueing,
-preflight, process startup, parsing, indexing, and result validation all consume
-the same budget. The watchdog samples RSS at intervals no longer than 50 ms. A
+The wall deadline starts before source fingerprinting, preflight, and semaphore
+acquisition. Fingerprinting, queueing, preflight, process startup, parsing,
+indexing, and result validation all consume the same budget. The watchdog samples
+RSS at intervals no longer than 50 ms. A
 platform where RSS cannot be measured fails closed with `WORKER_FAILED`.
 
 Linux combines supervisor RSS checks with an address-space rlimit. macOS uses
@@ -79,9 +80,14 @@ selects a provider, preserving the provider `none` network-free contract.
 
 The parent fingerprints the source before work and verifies the same path,
 identity, size, and digest after the child exits. It never opens the source for
-writing. Lease directories must be mode `0700`; every accepted output must be a
-single-link regular file at mode `0600`. Unknown files, SQLite sidecars,
-symlinks, permission drift, and oversized files fail closed.
+writing. Each operating-system user receives a separate private scratch root.
+On POSIX, lease directories must be owned by the current user at mode `0700`,
+and every accepted output must be a current-user-owned, single-link regular file
+at mode `0600`. On Windows, native owner and DACL checks require ownership by the
+current user and allow access only to that user, Local System, or the built-in
+Administrators group. Unavailable native privacy checks fail closed. Unknown
+files, SQLite sidecars, symlinks, permission drift, and oversized files fail
+closed.
 
 This is a process and credential boundary rather than an operating-system
 network sandbox. Its network-free property follows from the fixed local code
@@ -110,10 +116,12 @@ unchanged. A successful directory is transferred to the service lease manager;
 it is removed on explicit release, service shutdown, or its 15-minute expiry.
 
 Each invocation also scans at most 32 worker-prefixed directories under the
-private scratch root. It removes a directory only when its private owner marker
-names a dead supervisor PID. Live leases, malformed markers, and unrelated
-directories are preserved. This bounded restart cleanup avoids an unbounded
-startup traversal.
+per-user private scratch root. A private owner marker binds the supervisor PID
+to its process-start identity. Cleanup removes a directory only when that
+process is dead or the PID now belongs to a different process. Live leases,
+malformed or legacy markers, unknown process state, and unrelated directories
+are preserved. This bounded restart cleanup avoids an unbounded startup
+traversal.
 
 ## Testing and operations
 

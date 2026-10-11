@@ -7,6 +7,7 @@ content never cross the public error or logging boundary.
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import os
@@ -32,6 +33,15 @@ from ancestryllm.domain.errors import (
     DomainFailureCode,
     DomainFailureDetail,
     DomainScalar,
+)
+from ancestryllm.gedcom._private_files import (
+    current_user_scope as _current_user_scope,
+)
+from ancestryllm.gedcom._private_files import (
+    harden_private_directory,
+    harden_private_file,
+    is_private_directory,
+    is_private_file,
 )
 
 if TYPE_CHECKING:
@@ -90,6 +100,14 @@ class WorkerInspection:
     directory: Path
 
 
+@dataclass(frozen=True, slots=True)
+class _ProcessIdentity:
+    """Liveness and non-reusable start identity for one OS process."""
+
+    running: bool | None
+    start_token: str | None
+
+
 class _PollableProcess(Protocol):
     """Process surface used by the watchdog and its deterministic tests."""
 
@@ -118,13 +136,19 @@ def preflight_source(
     *,
     ingress: FileIngressPolicy | None = None,
     cancellation: CancellationPort | None = None,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Count physical lines and xrefs through the immutable bounded reader."""
 
     policy = ingress or FileIngressPolicy(FileIngressLimits())
     xrefs = 0
+    if deadline is not None and clock() >= deadline:
+        raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
     for line_number, line in enumerate(policy.iter_text_lines(source, FileKind.GEDCOM), 1):
-        if cancellation is not None and line_number % 4_096 == 0:
+        if deadline is not None and clock() >= deadline:
+            raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+        if line_number % 4_096 == 0 and cancellation is not None:
             cancellation.check_cancelled()
         if line_number > budgets.max_physical_lines:
             raise _limit("lines")
@@ -253,24 +277,21 @@ def _monitor_process(
             return
         resident = rss_reader(process)
         if resident is None:
+            # The process can finish after the preceding poll and before RSS is
+            # sampled.  Accept that successful exit instead of misclassifying it.
+            return_code = process.poll()
+            if return_code == 0:
+                return
             raise _failed()
         if resident > budgets.memory_bytes:
             raise _limit("memory")
         sleeper(_POLL_SECONDS)
 
 
-def _private_mode(path: Path, expected: int) -> bool:
-    try:
-        mode = stat.S_IMODE(path.stat(follow_symlinks=False).st_mode)
-    except OSError:
-        return False
-    return mode == expected
-
-
 def _validate_private_outputs(directory: Path, budgets: InspectionBudgets) -> None:
     """Reject unexpected, nonregular, nonprivate, or oversized child outputs."""
 
-    if not _private_mode(directory, 0o700):
+    if not is_private_directory(directory):
         raise _failed()
     try:
         children = tuple(directory.iterdir())
@@ -285,7 +306,7 @@ def _validate_private_outputs(directory: Path, budgets: InspectionBudgets) -> No
             raise _failed() from exc
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise _failed()
-        if stat.S_IMODE(metadata.st_mode) != 0o600:
+        if not is_private_file(child):
             raise _failed()
         if child.name == _RESULT_FILE and metadata.st_size > budgets.summary_bytes:
             raise _limit("summary")
@@ -304,6 +325,8 @@ def _write_private(path: Path, payload: bytes, *, maximum: int) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        if not harden_private_file(path):
+            raise _failed()
     except BaseException:
         path.unlink(missing_ok=True)
         raise
@@ -361,16 +384,149 @@ def _read_failure(path: Path) -> DomainFailure:
         raise _failed() from exc
 
 
-def _pid_is_live(pid: int) -> bool:
+def _process_identity(pid: int) -> _ProcessIdentity:
+    """Read liveness plus an OS start token without sending process signals."""
+
     if pid <= 0:
-        return False
+        return _ProcessIdentity(False, None)
+    operating_system = platform.system()
+    if operating_system == "Windows":
+        return _windows_process_identity(pid)
+    if operating_system == "Darwin":
+        return _darwin_process_identity(pid)
+    if operating_system == "Linux":
+        try:
+            stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            fields = stat_line[stat_line.rindex(")") + 2 :].split()
+            if len(fields) < 20:
+                return _ProcessIdentity(None, None)
+            return _ProcessIdentity(fields[0] != "Z", f"linux:{fields[19]}")
+        except FileNotFoundError:
+            return _ProcessIdentity(False, None)
+        except (OSError, UnicodeError, ValueError):
+            return _ProcessIdentity(None, None)
+    return _ProcessIdentity(None, None)
+
+
+def _darwin_process_identity(pid: int) -> _ProcessIdentity:
+    """Read macOS liveness and start time without a signal or subprocess."""
+
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+        import ctypes
+
+        class _ProcessBsdInfo(ctypes.Structure):
+            _fields_ = [
+                ("flags", ctypes.c_uint32),
+                ("status", ctypes.c_uint32),
+                ("xstatus", ctypes.c_uint32),
+                ("pid", ctypes.c_uint32),
+                ("ppid", ctypes.c_uint32),
+                ("uid", ctypes.c_uint32),
+                ("gid", ctypes.c_uint32),
+                ("ruid", ctypes.c_uint32),
+                ("rgid", ctypes.c_uint32),
+                ("svuid", ctypes.c_uint32),
+                ("svgid", ctypes.c_uint32),
+                ("reserved", ctypes.c_uint32),
+                ("command", ctypes.c_char * 16),
+                ("name", ctypes.c_char * 32),
+                ("nfiles", ctypes.c_uint32),
+                ("pgid", ctypes.c_uint32),
+                ("pjobc", ctypes.c_uint32),
+                ("tty_device", ctypes.c_uint32),
+                ("tty_pgid", ctypes.c_uint32),
+                ("nice", ctypes.c_int32),
+                ("start_seconds", ctypes.c_uint64),
+                ("start_microseconds", ctypes.c_uint64),
+            ]
+
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        proc_pidinfo = libproc.proc_pidinfo
+        proc_pidinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        proc_pidinfo.restype = ctypes.c_int
+        information = _ProcessBsdInfo()
+        received = proc_pidinfo(
+            pid,
+            3,  # PROC_PIDTBSDINFO
+            0,
+            ctypes.byref(information),
+            ctypes.sizeof(information),
+        )
+        if received != ctypes.sizeof(information):
+            return (
+                _ProcessIdentity(False, None)
+                if ctypes.get_errno() == errno.ESRCH
+                else _ProcessIdentity(None, None)
+            )
+        if information.status == 5:  # SZOMB
+            return _ProcessIdentity(False, None)
+        token = f"darwin:{information.start_seconds}:{information.start_microseconds}"
+        return _ProcessIdentity(True, token)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return _ProcessIdentity(None, None)
+
+
+def _windows_process_identity(pid: int) -> _ProcessIdentity:
+    """Read Windows process liveness and creation time through a safe handle."""
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = cast("Any", ctypes).windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.GetLastError.argtypes = []
+        kernel32.GetLastError.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x100000 | 0x1000, False, pid)
+        if not handle:
+            return (
+                _ProcessIdentity(False, None)
+                if kernel32.GetLastError() == 87
+                else _ProcessIdentity(None, None)
+            )
+        try:
+            wait = kernel32.WaitForSingleObject(handle, 0)
+            if wait == 0:
+                return _ProcessIdentity(False, None)
+            if wait != 258:
+                return _ProcessIdentity(None, None)
+            creation = wintypes.FILETIME()
+            exit_time = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            ):
+                return _ProcessIdentity(None, None)
+            token = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            return _ProcessIdentity(True, f"windows:{token}")
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return _ProcessIdentity(None, None)
 
 
 def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
@@ -387,7 +543,13 @@ def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
         try:
             document = json.loads(owner.read_text(encoding="ascii"))
             pid = document["pid"]
-            if type(pid) is not int or _pid_is_live(pid):
+            start = document["start"]
+            if type(pid) is not int or not isinstance(start, str) or not start:
+                continue
+            identity = _process_identity(pid)
+            if identity.running is None:
+                continue
+            if identity.running and identity.start_token == start:
                 continue
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             continue
@@ -398,13 +560,13 @@ def _scratch_root() -> Path:
     # macOS commonly exposes the same temporary directory through both /var and
     # /private/var.  Canonicalize before passing the lease path to a child whose
     # cwd is reported canonically, otherwise the child rejects its own directory.
-    root = Path(tempfile.gettempdir()).resolve() / "ancestryllm-inspection"
+    root = Path(tempfile.gettempdir()).resolve() / f"ancestryllm-inspection-{_current_user_scope()}"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        root.chmod(0o700)
+        private = harden_private_directory(root)
     except OSError as exc:
         raise _failed() from exc
-    if not _private_mode(root, 0o700):
+    if not private:
         raise _failed()
     return root
 
@@ -481,7 +643,15 @@ def run_inspection(
     source = source.absolute()
     try:
         fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
-        preflight_source(source, selected, ingress=policy, cancellation=cancellation)
+        if time.monotonic() >= deadline:
+            raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+        preflight_source(
+            source,
+            selected,
+            ingress=policy,
+            cancellation=cancellation,
+            deadline=deadline,
+        )
     except DomainFailure:
         raise
     except Exception as exc:  # noqa: BLE001 - collapse ingress details at the boundary
@@ -496,10 +666,17 @@ def run_inspection(
         root = _scratch_root()
         _cleanup_orphans(root)
         directory = Path(tempfile.mkdtemp(prefix=_LEASE_PREFIX, dir=root))
-        directory.chmod(0o700)
+        if not harden_private_directory(directory):
+            raise _failed()
+        owner_identity = _process_identity(os.getpid())
+        if not owner_identity.running or owner_identity.start_token is None:
+            raise _failed()
         _write_private(
             directory / _OWNER_FILE,
-            json.dumps({"pid": os.getpid()}, separators=(",", ":")).encode("ascii"),
+            json.dumps(
+                {"pid": os.getpid(), "start": owner_identity.start_token},
+                separators=(",", ":"),
+            ).encode("ascii"),
             maximum=_FAILURE_BYTES,
         )
         payload = _control_payload(source, directory, request, selected, policy.limits)
@@ -592,7 +769,7 @@ def _child_main() -> int:
             return 64
         source = Path(document["source"])
         directory = Path(document["directory"])
-        if Path.cwd() != directory or not _private_mode(directory, 0o700):
+        if Path.cwd() != directory or not is_private_directory(directory):
             return 64
         budgets = InspectionBudgets(**document["budgets"])
         ingress = FileIngressPolicy(FileIngressLimits.from_mapping(document["ingress"]))

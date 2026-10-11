@@ -17,9 +17,12 @@ from ancestryllm.gedcom.inspection_worker import (
     _cleanup_orphans,
     _control_payload,
     _monitor_process,
+    _process_identity,
+    _ProcessIdentity,
     _read_failure,
     _read_rss,
     _sanitized_environment,
+    _scratch_root,
     _stop_process,
     _validate_private_outputs,
     preflight_source,
@@ -79,6 +82,21 @@ def test_preflight_accepts_exact_line_and_xref_budgets(tmp_path: Path) -> None:
     source = tmp_path / "fictional.ged"
     source.write_text("0 @I1@ INDI\n1 FAMC @F1@\n0 TRLR\n")
     preflight_source(source, InspectionBudgets(max_physical_lines=3, max_xrefs=2))
+
+
+def test_preflight_enforces_the_shared_wall_deadline(tmp_path: Path) -> None:
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n0 TRLR\n")
+
+    with pytest.raises(DomainFailure) as caught:
+        preflight_source(
+            source,
+            InspectionBudgets(),
+            deadline=1.0,
+            clock=iter((0.5, 1.0)).__next__,
+        )
+
+    assert caught.value.code.value == "WORKER_TIMEOUT"
 
 
 @pytest.mark.parametrize(
@@ -159,6 +177,20 @@ def test_monitor_classifies_crash_memory_and_timeout_without_process_text(
     assert str(caught.value) == code
 
 
+def test_monitor_accepts_successful_exit_after_rss_lookup_race() -> None:
+    process = _Process([None, 0])
+
+    _monitor_process(
+        process,
+        InspectionBudgets(),
+        _Cancellation(),
+        deadline=1.0,
+        rss_reader=lambda _process: None,
+        clock=lambda: 0.0,
+        sleeper=lambda _seconds: None,
+    )
+
+
 def test_private_output_validation_rejects_oversize_and_nonprivate_files(
     tmp_path: Path,
 ) -> None:
@@ -212,20 +244,61 @@ def test_restart_cleanup_removes_only_dead_owned_private_workers(
     dead = root / "ancestryllm-inspect-dead"
     live = root / "ancestryllm-inspect-live"
     unrelated = root / "other-directory"
-    for directory, pid in ((dead, 1001), (live, 1002), (unrelated, 1003)):
+    reused = root / "ancestryllm-inspect-reused"
+    for directory, pid, start in (
+        (dead, 1001, "dead-start"),
+        (live, 1002, "live-start"),
+        (reused, 1003, "old-start"),
+        (unrelated, 1004, "other-start"),
+    ):
         directory.mkdir(mode=0o700)
         owner = directory / "owner.json"
-        owner.write_text(json.dumps({"pid": pid}), encoding="ascii")
+        owner.write_text(json.dumps({"pid": pid, "start": start}), encoding="ascii")
         owner.chmod(0o600)
 
     monkeypatch.setattr(
-        "ancestryllm.gedcom.inspection_worker._pid_is_live", lambda pid: pid == 1002
+        "ancestryllm.gedcom.inspection_worker._process_identity",
+        lambda pid: {
+            1001: _ProcessIdentity(running=False, start_token=None),
+            1002: _ProcessIdentity(running=True, start_token="live-start"),
+            1003: _ProcessIdentity(running=True, start_token="new-start"),
+        }.get(pid, _ProcessIdentity(running=None, start_token=None)),
     )
     _cleanup_orphans(root)
 
     assert not dead.exists()
     assert live.exists()
+    assert not reused.exists()
     assert unrelated.exists()
+
+
+def test_scratch_root_is_scoped_to_the_current_os_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._current_user_scope", lambda: "uid-1001"
+    )
+
+    root = _scratch_root()
+
+    assert root == tmp_path / "ancestryllm-inspection-uid-1001"
+
+
+def test_process_identity_uses_windows_process_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = _ProcessIdentity(running=True, start_token="windows-start")
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._windows_process_identity",
+        lambda pid: expected if pid == 123 else _ProcessIdentity(False, None),
+    )
+    monkeypatch.setattr(
+        "os.kill", lambda *_args: pytest.fail("Windows process checks must not send signals")
+    )
+
+    assert _process_identity(123) == expected
 
 
 def test_control_payload_round_trips_custom_ingress_limits(tmp_path: Path) -> None:
@@ -325,6 +398,10 @@ def test_worker_launch_uses_the_runtime_entry_point(
     executable = str(tmp_path / ("native-sidecar" if frozen else "python"))
     monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.sys.frozen", frozen, raising=False)
     monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.sys.executable", executable)
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._process_identity",
+        lambda _pid: _ProcessIdentity(True, "test:start"),
+    )
     commands: list[list[str]] = []
 
     def refuse_launch(command: list[str], **kwargs: object) -> None:

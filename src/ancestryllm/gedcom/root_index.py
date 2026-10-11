@@ -17,6 +17,11 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from ancestryllm.application.operations import RootCandidate
+from ancestryllm.gedcom._private_files import (
+    harden_private_file,
+    is_private_directory,
+    is_private_file,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -108,7 +113,8 @@ def build_root_index(
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(staged)
-        staged.chmod(0o600)
+        if not harden_private_file(staged):
+            raise RootIndexError("The private root index could not be protected.")
         _configure_writer(connection)
         _create_schema(connection)
         _check_staged_size(staged, max_bytes)
@@ -135,7 +141,8 @@ def build_root_index(
         connection.close()
         connection = None
 
-        staged.chmod(0o600)
+        if not harden_private_file(staged):
+            raise RootIndexError("The private root index could not be protected.")
         _check_staged_size(staged, max_bytes)
         _sync_file(staged)
         _check_cancelled(cancellation)
@@ -327,11 +334,7 @@ def _validate_budget(max_bytes: int) -> None:
 
 
 def _validate_private_parent(path: Path) -> None:
-    try:
-        parent_mode = path.parent.lstat().st_mode
-    except OSError as exc:
-        raise RootIndexError("The private root index requires a private directory.") from exc
-    if not stat.S_ISDIR(parent_mode) or stat.S_IMODE(parent_mode) & 0o077:
+    if not is_private_directory(path.parent):
         raise RootIndexError("The private root index requires a private directory.")
 
 
@@ -548,7 +551,7 @@ def _index_identity(path: Path) -> _IndexIdentity:
         details = path.lstat()
     except OSError as exc:
         raise RootIndexError("The private root index is unavailable.") from exc
-    if not stat.S_ISREG(details.st_mode) or stat.S_IMODE(details.st_mode) != 0o600:
+    if not stat.S_ISREG(details.st_mode) or not is_private_file(path):
         raise RootIndexError("The private root index has invalid permissions.")
     return (
         details.st_dev,
