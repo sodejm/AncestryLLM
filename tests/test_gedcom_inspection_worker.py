@@ -278,6 +278,113 @@ def test_monitor_classifies_crash_memory_and_timeout_without_process_text(
     assert str(caught.value) == code
 
 
+def test_child_directory_stage_accepts_an_alias_for_the_same_private_directory(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    assert _private_files.harden_private_directory(directory)
+    if platform.system() == "Windows":
+        alias = Path(str(directory).swapcase())
+    else:
+        alias = tmp_path / "alias"
+        alias.symlink_to(directory, target_is_directory=True)
+
+    assert (
+        inspection_worker._child_directory_stage(
+            directory,
+            current_directory=alias,
+        )
+        is None
+    )
+
+
+def test_child_directory_stage_rejects_a_distinct_directory(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    other = tmp_path / "other"
+    other.mkdir(mode=0o700)
+    assert _private_files.harden_private_directory(directory)
+    assert _private_files.harden_private_directory(other)
+
+    assert (
+        inspection_worker._child_directory_stage(
+            directory,
+            current_directory=other,
+        )
+        == "child.directory"
+    )
+
+
+def test_child_directory_stage_fails_closed_when_identity_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    assert _private_files.harden_private_directory(directory)
+
+    def refuse_identity(_self: Path, _other: Path) -> bool:
+        raise OSError("simulated identity lookup failure")
+
+    monkeypatch.setattr(Path, "samefile", refuse_identity)
+
+    assert (
+        inspection_worker._child_directory_stage(
+            directory,
+            current_directory=directory,
+        )
+        == "child.directory"
+    )
+
+
+def test_child_directory_stage_preserves_private_directory_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    monkeypatch.setattr(inspection_worker, "is_private_directory", lambda _path: False)
+
+    assert (
+        inspection_worker._child_directory_stage(
+            directory,
+            current_directory=directory,
+        )
+        == "child.private"
+    )
+
+
+@pytest.mark.parametrize(
+    "return_code,stage",
+    [
+        (64, "child.control"),
+        (65, "child.private"),
+        (66, "child.directory"),
+        (70, "child.failure"),
+        (7, "monitor.exit"),
+    ],
+)
+def test_monitor_reports_path_free_child_exit_stages(
+    return_code: int,
+    stage: str,
+) -> None:
+    with pytest.raises(DomainFailure) as caught:
+        _monitor_process(
+            _Process([return_code]),
+            InspectionBudgets(),
+            _Cancellation(),
+            deadline=1.0,
+            rss_reader=lambda _process: 1,
+            clock=lambda: 0.0,
+            sleeper=lambda _seconds: None,
+        )
+
+    assert caught.value.code.value == "WORKER_FAILED"
+    assert caught.value.details[0].name == "stage"
+    assert caught.value.details[0].value == stage
+
+
 def test_monitor_accepts_successful_exit_after_rss_lookup_race() -> None:
     process = _Process([None, 0])
 
@@ -374,6 +481,7 @@ def test_private_output_validation_rejects_oversize_and_nonprivate_files(
     with pytest.raises(DomainFailure) as caught:
         _validate_private_outputs(directory, InspectionBudgets())
     assert caught.value.code.value == "WORKER_FAILED"
+    assert caught.value.details[0].value == "output.validation"
 
     if platform.system() == "Windows":
         monkeypatch.setattr(
@@ -406,7 +514,7 @@ def test_failure_channel_rejects_structured_or_path_bearing_details(
         with pytest.raises(DomainFailure) as caught:
             _read_failure(failure_path)
         assert caught.value.code.value == "WORKER_FAILED"
-        assert caught.value.details == ()
+        assert caught.value.details[0].value == "output.failure"
 
 
 def test_stop_process_escalates_and_reaps_a_stubborn_child() -> None:
@@ -729,6 +837,7 @@ def test_worker_launch_uses_the_runtime_entry_point(
         run_inspection(source, request, _Cancellation())
 
     assert caught.value.code.value == "WORKER_FAILED"
+    assert caught.value.details[0].value == "startup.spawn"
     expected = (
         [executable, "--inspection-worker"]
         if frozen

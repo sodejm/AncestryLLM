@@ -67,6 +67,16 @@ _FAILURE_FILE = "failure.json"
 _INDEX_FILE = "roots.sqlite3"
 _ALLOWED_OUTPUTS = frozenset({_OWNER_FILE, _RESULT_FILE, _FAILURE_FILE, _INDEX_FILE})
 _WORKER_SLOTS = threading.BoundedSemaphore(2)
+_CHILD_EXIT_CONTROL = 64
+_CHILD_EXIT_PRIVATE = 65
+_CHILD_EXIT_DIRECTORY = 66
+_CHILD_EXIT_FAILURE = 70
+_CHILD_EXIT_STAGES = {
+    _CHILD_EXIT_CONTROL: "child.control",
+    _CHILD_EXIT_PRIVATE: "child.private",
+    _CHILD_EXIT_DIRECTORY: "child.directory",
+    _CHILD_EXIT_FAILURE: "child.failure",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +156,12 @@ def _limit(budget: str) -> DomainFailure:
 def _failed(stage: str | None = None) -> DomainFailure:
     details = () if stage is None else (DomainFailureDetail("stage", stage),)
     return DomainFailure(DomainFailureCode.WORKER_FAILED, details)
+
+
+def _child_exit_failure(return_code: int) -> DomainFailure:
+    """Map reserved child exits to bounded diagnostics without process output."""
+
+    return _failed(_CHILD_EXIT_STAGES.get(return_code, "monitor.exit"))
 
 
 def _check_deadline(
@@ -307,7 +323,7 @@ def _monitor_process(
         return_code = process.poll()
         if return_code is not None:
             if return_code != 0:
-                raise _failed("monitor.exit")
+                raise _child_exit_failure(return_code)
             return
         resident = rss_reader(process)
         if resident is None:
@@ -316,7 +332,7 @@ def _monitor_process(
             return_code = process.poll()
             if return_code is not None:
                 if return_code != 0:
-                    raise _failed("monitor.exit")
+                    raise _child_exit_failure(return_code)
                 return
             consecutive_rss_misses += 1
             if consecutive_rss_misses >= _MAX_CONSECUTIVE_RSS_MISSES:
@@ -333,28 +349,28 @@ def _validate_private_outputs(directory: Path, budgets: InspectionBudgets) -> No
     """Reject unexpected, nonregular, nonprivate, or oversized child outputs."""
 
     if not is_private_directory(directory):
-        raise _failed()
+        raise _failed("output.validation")
     try:
         children = tuple(directory.iterdir())
     except OSError as exc:
-        raise _failed() from exc
+        raise _failed("output.validation") from exc
     for child in children:
         if child.name not in _ALLOWED_OUTPUTS:
-            raise _failed()
+            raise _failed("output.validation")
         try:
             metadata = child.stat(follow_symlinks=False)
         except OSError as exc:
-            raise _failed() from exc
+            raise _failed("output.validation") from exc
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            raise _failed()
+            raise _failed("output.validation")
         if not is_private_file(child):
-            raise _failed()
+            raise _failed("output.validation")
         if child.name == _RESULT_FILE and metadata.st_size > budgets.summary_bytes:
             raise _limit("summary")
         if child.name == _INDEX_FILE and metadata.st_size > budgets.index_bytes:
             raise _limit("index")
         if child.name == _FAILURE_FILE and metadata.st_size > _FAILURE_BYTES:
-            raise _failed()
+            raise _failed("output.validation")
 
 
 def _write_private(path: Path, payload: bytes, *, maximum: int) -> None:
@@ -422,7 +438,7 @@ def _read_failure(path: Path) -> DomainFailure:
             raise ValueError
         return DomainFailure(code, tuple(details))
     except (OSError, UnicodeError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        raise _failed() from exc
+        raise _failed("output.failure") from exc
 
 
 def _process_identity(pid: int) -> _ProcessIdentity:
@@ -745,7 +761,7 @@ def run_inspection(
         _check_deadline(cancellation, deadline)
         owner_identity = _process_identity(os.getpid())
         if not owner_identity.running or owner_identity.start_token is None:
-            raise _failed()
+            raise _failed("startup.identity")
         _write_private(
             directory / _OWNER_FILE,
             json.dumps(
@@ -772,13 +788,13 @@ def run_inspection(
                 env=_sanitized_environment(os.environ, source_root=source_root),
             )
         except OSError:
-            raise _failed() from None
+            raise _failed("startup.spawn") from None
         assert process.stdin is not None
         try:
             process.stdin.write(payload)
             process.stdin.close()
         except (BrokenPipeError, OSError):
-            raise _failed() from None
+            raise _failed("startup.control") from None
         _monitor_process(process, selected, cancellation, deadline=deadline)
         _check_deadline(cancellation, deadline)
         try:
@@ -796,11 +812,11 @@ def run_inspection(
         result_path = directory / _RESULT_FILE
         index_path = directory / _INDEX_FILE
         if not result_path.is_file() or not index_path.is_file():
-            raise _failed()
+            raise _failed("output.missing")
         try:
             result = GedcomInspectResult.from_json(result_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, TypeError, ValueError) as exc:
-            raise _failed() from exc
+            raise _failed("output.result") from exc
         _check_deadline(cancellation, deadline)
         success = True
         return WorkerInspection(
@@ -855,12 +871,30 @@ def _build_child_index(
         raise
 
 
+def _child_directory_stage(
+    directory: Path,
+    *,
+    current_directory: Path | None = None,
+) -> str | None:
+    """Validate child custody by privacy and filesystem object identity."""
+
+    if not is_private_directory(directory):
+        return "child.private"
+    working_directory = Path.cwd() if current_directory is None else current_directory
+    try:
+        if not working_directory.samefile(directory):
+            return "child.directory"
+    except OSError:
+        return "child.directory"
+    return None
+
+
 def _child_main() -> int:
     directory: Path | None = None
     try:
         raw = sys.stdin.buffer.read(_CONTROL_BYTES + 1)
         if len(raw) > _CONTROL_BYTES:
-            return 64
+            return _CHILD_EXIT_CONTROL
         document = json.loads(raw)
         if not isinstance(document, dict) or set(document) != {
             "source",
@@ -869,11 +903,14 @@ def _child_main() -> int:
             "budgets",
             "ingress",
         }:
-            return 64
+            return _CHILD_EXIT_CONTROL
         source = Path(document["source"])
         directory = Path(document["directory"])
-        if Path.cwd() != directory or not is_private_directory(directory):
-            return 64
+        directory_stage = _child_directory_stage(directory)
+        if directory_stage == "child.private":
+            return _CHILD_EXIT_PRIVATE
+        if directory_stage is not None:
+            return _CHILD_EXIT_DIRECTORY
         budgets = InspectionBudgets(**document["budgets"])
         ingress = FileIngressPolicy(FileIngressLimits.from_mapping(document["ingress"]))
         _apply_child_memory_limit(budgets.memory_bytes)
@@ -919,23 +956,23 @@ def _child_main() -> int:
 
             failure = domain_failure_from_exception(exc)
         except Exception:  # noqa: BLE001 - mapping failure cannot escape child boundary
-            failure = _failed()
+            failure = _failed("child.execute")
         if failure.code is DomainFailureCode.INTERNAL:
-            failure = _failed()
+            failure = _failed("child.execute")
     if directory is None:
-        return 70
+        return _CHILD_EXIT_FAILURE
     try:
         _write_private(directory / _FAILURE_FILE, _failure_payload(failure), maximum=_FAILURE_BYTES)
         return 0
     except Exception:  # noqa: BLE001 - a broken failure channel requires abrupt failure
-        return 70
+        return _CHILD_EXIT_FAILURE
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run only the private stdin worker protocol, rejecting other arguments."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
-    return _child_main() if arguments == ["--child"] else 64
+    return _child_main() if arguments == ["--child"] else _CHILD_EXIT_CONTROL
 
 
 if __name__ == "__main__":
