@@ -1,6 +1,7 @@
 """Fictional-input regressions for the isolated inspection resource boundary."""
 
 import json
+import platform
 import subprocess
 from dataclasses import fields, replace
 from pathlib import Path
@@ -12,6 +13,7 @@ from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure
+from ancestryllm.gedcom import _private_files
 from ancestryllm.gedcom.inspection_worker import (
     InspectionBudgets,
     _cleanup_orphans,
@@ -192,18 +194,32 @@ def test_monitor_accepts_successful_exit_after_rss_lookup_race() -> None:
 
 
 def test_private_output_validation_rejects_oversize_and_nonprivate_files(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     directory = tmp_path / "lease"
     directory.mkdir(mode=0o700)
     result = directory / "result.json"
     result.write_bytes(b"{}")
-    result.chmod(0o644)
+    if platform.system() == "Windows":
+        monkeypatch.setattr(
+            _private_files,
+            "_windows_path_is_private",
+            lambda path, *, directory: path != result,
+        )
+    else:
+        result.chmod(0o644)
     with pytest.raises(DomainFailure) as caught:
         _validate_private_outputs(directory, InspectionBudgets())
     assert caught.value.code.value == "WORKER_FAILED"
 
-    result.chmod(0o600)
+    if platform.system() == "Windows":
+        monkeypatch.setattr(
+            _private_files,
+            "_windows_path_is_private",
+            lambda _path, *, directory: True,
+        )
+    else:
+        result.chmod(0o600)
     result.write_bytes(b"x" * 9)
     with pytest.raises(DomainFailure) as caught:
         _validate_private_outputs(directory, InspectionBudgets(summary_bytes=8))

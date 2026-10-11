@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import sqlite3
 import stat
 from contextlib import closing
@@ -87,10 +88,19 @@ def test_build_never_overwrites_an_existing_index(tmp_path: Path) -> None:
     assert path.read_bytes() == b"existing"
 
 
-def test_build_requires_a_private_parent_directory(tmp_path: Path) -> None:
+def test_build_requires_a_private_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     directory = tmp_path / "shared"
     directory.mkdir(mode=0o755)
-    directory.chmod(0o755)
+    if platform.system() == "Windows":
+        monkeypatch.setattr(
+            _private_files,
+            "_windows_path_is_private",
+            lambda _path, *, directory: False,
+        )
+    else:
+        directory.chmod(0o755)
 
     with pytest.raises(RootIndexError, match="private directory"):
         build_root_index(
@@ -115,6 +125,18 @@ def test_windows_privacy_uses_native_acl_validation(
 
     assert _private_files.is_private_directory(directory)
     assert calls == [(directory, True)]
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="requires Windows security APIs")
+def test_windows_native_privacy_accepts_current_user_temp_objects(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir()
+    private_file = directory / "private.bin"
+    private_file.write_bytes(b"private")
+
+    assert _private_files.current_user_scope().startswith("sid-")
+    assert _private_files.harden_private_directory(directory)
+    assert _private_files.harden_private_file(private_file)
 
 
 def test_read_empty_query_uses_stable_display_order_and_offsets(tmp_path: Path) -> None:
