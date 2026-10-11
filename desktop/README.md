@@ -166,7 +166,10 @@ same-document application routes retain the existing renderer identity. In
 packaged builds, main privately starts and verifies the fixed-route native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
-details never enter IPC or the preload bridge. The source-level gated Issue #104
+details never enter IPC or the preload bridge. Its IPC deadline is 30 seconds,
+covering both ten-second startup phases and the final diagnostics request;
+ordinary control requests retain their five-second deadline. Renderer lifecycle
+cancellation and the single manual retry limit still apply. The source-level gated Issue #104
 shutdown preflight is likewise main-process-only: it asks the sidecar whether
 active jobs are safe to drain, wait for, or cancel before the IPC boundary is
 disposed. See

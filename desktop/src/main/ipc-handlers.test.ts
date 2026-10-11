@@ -1292,6 +1292,73 @@ describe('desktop IPC handlers', () => {
     })
   })
 
+  it('allows sidecar recovery to exceed the ordinary IPC deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      const recovered = await control.retrySidecar()
+      const recovery = deferred<typeof recovered>()
+      let retrySignal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((signal?: AbortSignal) => {
+        retrySignal = signal
+        return recovery.promise
+      })
+      const { event, handlers, controller } = harness(control)
+      const request = handlers.get(desktopChannels.retrySidecar)?.(event())
+
+      await vi.advanceTimersByTimeAsync(7_000)
+
+      expect(retrySignal?.aborted).toBe(false)
+      recovery.resolve(recovered)
+      await expect(request).resolves.toMatchObject({ ok: true, data: { state: 'ready' } })
+      controller.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds sidecar retry independently of ordinary requests', async () => {
+    vi.useFakeTimers()
+    try {
+      const control = bridge()
+      const recovered = await control.retrySidecar()
+      const recovery = deferred<typeof recovered>()
+      let retrySignal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((signal?: AbortSignal) => {
+        retrySignal = signal
+        return recovery.promise
+      })
+      const { event, handlers, controller } = harness(control, {
+        operationTimeoutMs: 5,
+        sidecarRetryTimeoutMs: 10,
+      })
+      const request = handlers.get(desktopChannels.retrySidecar)?.(event())
+
+      await vi.advanceTimersByTimeAsync(9)
+      expect(retrySignal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(request).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'REQUEST_TIMEOUT' },
+      })
+      expect(retrySignal?.aborted).toBe(true)
+      recovery.resolve(recovered)
+      await vi.advanceTimersByTimeAsync(0)
+      controller.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid sidecar retry timeout %s',
+    (sidecarRetryTimeoutMs) => {
+      expect(() => harness(bridge(), { sidecarRetryTimeoutMs })).toThrow(
+        'Desktop IPC sidecar retry timeout must be positive.',
+      )
+    },
+  )
+
   it('returns a stable timeout while the underlying operation remains stalled', async () => {
     const control = bridge()
     const signals: AbortSignal[] = []

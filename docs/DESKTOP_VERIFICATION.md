@@ -362,7 +362,11 @@ black-box fault scenarios. It temporarily withholds and restores the real
 packaged sidecar to prove degraded Diagnostics and successful manual retry. A
 missing manifest-bound executable is an integrity failure, so it consumes no
 automatic crash-restart budget; restoring the payload and choosing the bounded
-manual retry is the recovery path. The harness separately
+manual retry is the recovery path. The harness
+requires recovery to clear both the startup and retry error surfaces. The retry
+IPC route allows 30 seconds for startup and diagnostics, independently of the
+ordinary five-second IPC deadline; timeout and renderer cancellation remain
+bounded and return stable coded errors. The harness separately
 kills the real sidecar child repeatedly to prove automatic restart, bounded
 exhaustion, manual recovery, and child cleanup on quit; and substitutes a
 byte-different target-native executable while retaining the original manifest
