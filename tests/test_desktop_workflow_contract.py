@@ -132,7 +132,7 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
 
-    assert workflow.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413") == 2
+    assert workflow.count("pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320") == 2
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
@@ -456,7 +456,7 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
 
     assert "verify-release-toolchain.mjs" in workflow
     assert "pnpm --dir desktop run test:coverage" in workflow
-    assert "pnpm --dir desktop run test:accessibility" in workflow
+    assert "-- xvfb-run --auto-servernum pnpm --dir desktop run test:accessibility" in workflow
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
     assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.11"

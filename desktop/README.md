@@ -119,9 +119,12 @@ inspection. `desktop-e2e` builds the production renderer and launches it in
 Electron with a deterministic fictional mock bridge; it is not an installer
 or literal packaged-executable test. `test:accessibility` scans every shell
 route in light, dark, and high-contrast modes with the exact locked `axe-core`
-version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
-200% zoom for horizontal clipping. Neither command replaces the manual
-screen-reader review in the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
+version in real Chromium. Linux CI launches this source scan through
+`xvfb-run --auto-servernum`; WebdriverIO retains its automatic Xvfb fallback,
+and the Electron sandbox stays enabled. `test:visual` checks the minimum
+720-by-560 window at 200% zoom for horizontal clipping. Neither command
+replaces the manual screen-reader review in the
+[desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
 `desktop-security` runs the high-severity dependency audit, source secret scan,
 produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
 package after verifying the native sidecar resource, and inspects the resulting
