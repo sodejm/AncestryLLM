@@ -10,7 +10,12 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
+import {
+  isExpectedLastWindowCloseError,
+  matchesPackagedMainProcess,
+  recordsForProcessIds,
+  type ProcessRecord,
+} from './process-records'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -281,12 +286,31 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
 async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   const pid = await mainPid()
   const activeSidecarPid = await sidecarPid(pid, sidecarPath)
-  await browser.closeWindow()
+  try {
+    await browser.closeWindow()
+  } catch (error) {
+    if (!isExpectedLastWindowCloseError(error)) throw error
+  }
   await Promise.all([
     expectProcessAbsent(pid),
     expectProcessAbsent(activeSidecarPid),
   ])
   return pid
+}
+
+async function rendererProcessIds(): Promise<ReadonlySet<number>> {
+  const puppeteer = await browser.getPuppeteer()
+  const session = await puppeteer.target().createCDPSession()
+  try {
+    const { processInfo } = await session.send('SystemInfo.getProcessInfo')
+    return new Set(
+      processInfo
+        .filter((record) => record.type === 'renderer')
+        .map((record) => Number(record.id)),
+    )
+  } finally {
+    await session.detach()
+  }
 }
 
 async function terminateVerificationApplication(): Promise<number> {
@@ -510,23 +534,24 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
   const rendererOutboundRequests = rendererOutboundAttemptUrls.length
   assert.deepEqual(rendererOutboundAttemptUrls, [])
 
-  const tree = await eventually(
+  const processBoundary = await eventually(
     'Packaged renderer process was not observed',
-    async () => descendantProcessTree(await processSnapshot(), rootPid),
-    (records) => records.some((record) => (
-      record.commandLine.includes('--type=renderer')
-      && !record.commandLine.includes('--no-sandbox')
-    )),
+    async () => {
+      const tree = descendantProcessTree(await processSnapshot(), rootPid)
+      return { tree, renderers: recordsForProcessIds(tree, await rendererProcessIds()) }
+    },
+    ({ renderers }) => renderers.length > 0,
   )
+  const { tree, renderers } = processBoundary
   assert.ok(tree.some((record) => record.pid === rootPid))
+  assert.equal(renderers.some((record) => record.commandLine.includes('--no-sandbox')), false)
   // The WebdriverIO Electron service supplies a main-process inspector argument
   // for this automated session. Keep it out of renderer processes here; the
   // package-fuse inspection and the separate normal-launch scenario prove that
   // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
   assert.doesNotMatch(
-    tree
-      .filter((record) => record.commandLine.includes('--type=renderer'))
+    renderers
       .map((record) => record.commandLine)
       .join('\n'),
     inspectPattern,

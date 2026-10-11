@@ -1,7 +1,11 @@
 /** Verifies packaged Electron main-process records match across supported platforms. */
 
 import { describe, expect, it } from 'vitest'
-import { matchesPackagedMainProcess } from './process-records'
+import {
+  isExpectedLastWindowCloseError,
+  matchesPackagedMainProcess,
+  recordsForProcessIds,
+} from './process-records'
 
 describe('packaged process records', () => {
   const windowsExecutable = String.raw`C:\a\AncestryLLM\dist\win-unpacked\AncestryLLM.exe`
@@ -40,5 +44,25 @@ describe('packaged process records', () => {
       rssBytes: 1024,
       commandLine: '/opt/AncestryLLM --user-data-dir=/tmp/ancestryllm-profile',
     }, '/opt/ancestryllm', '/tmp/ancestryllm-profile', 'linux')).toBe(false)
+  })
+
+  it('selects CDP renderer PIDs without depending on native command-line labels', () => {
+    const records = [
+      { pid: 45, ppid: 1, rssBytes: 1024, commandLine: '/opt/app --type=zygote' },
+      { pid: 46, ppid: 45, rssBytes: 2048, commandLine: '/opt/app --type=zygote' },
+      { pid: 99, ppid: 1, rssBytes: 512, commandLine: '/opt/unrelated --type=renderer' },
+    ]
+
+    expect(recordsForProcessIds(records, new Set([46, 99]))).toEqual([records[1], records[2]])
+  })
+
+  it('recognizes only the exact final-window session-close exception', () => {
+    expect(isExpectedLastWindowCloseError(new Error(
+      'All window handles were removed, causing WebdriverIO to close the session.',
+    ))).toBe(true)
+    expect(isExpectedLastWindowCloseError(new Error('window close failed'))).toBe(false)
+    expect(isExpectedLastWindowCloseError(
+      'All window handles were removed, causing WebdriverIO to close the session.',
+    )).toBe(false)
   })
 })
