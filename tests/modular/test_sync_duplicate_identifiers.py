@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -64,6 +66,36 @@ def _initial_update_args(master: Path, snapshot: Path, release_root: Path) -> li
         str(release_root),
         "--no-quality-report",
     ]
+
+
+def _rebase_args(master: Path, generation: Path, release_root: Path) -> list[str]:
+    """Build CLI arguments for one fictional manual rebase."""
+
+    return [
+        "rebase",
+        "--master",
+        str(master),
+        "--manifest",
+        str(generation / "manifest.json"),
+        "--release-root",
+        str(release_root),
+        "--reason",
+        "Fictional duplicate-identifier regression",
+        "--accept-manual-deletions",
+    ]
+
+
+def _initialize_release(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Publish one valid fictional generation and return its inputs and path."""
+
+    master = tmp_path / "fictional-master.ged"
+    snapshot = tmp_path / "fictional-snapshot.ged"
+    _write_people(master, ("I1", "Avery /North/", "1 JAN 1900"))
+    _write_people(snapshot, ("I1", "Blair /South/", "2 FEB 1970"))
+    release_root = tmp_path / "releases"
+    initialized = execute_sync(_initial_update_args(master, snapshot, release_root))
+    assert initialized.exit_code == 0
+    return snapshot, release_root, next(release_root.glob("g0001-*"))
 
 
 class _CancelAfterFinalManifestHash(FileIngressPolicy):
@@ -164,6 +196,94 @@ def test_valid_sync_keeps_distinct_people_and_idempotent_retry_is_read_only(
     assert _release_files(release_root) == published_before_retry
     assert master.read_bytes() == master_before
     assert snapshot.read_bytes() == snapshot_before
+
+
+def test_rebase_rejects_duplicate_identifiers_in_current_master_before_publication(
+    tmp_path: Path,
+) -> None:
+    """An ambiguous edited master must not create a manual-rebase generation."""
+
+    _, release_root, generation = _initialize_release(tmp_path)
+    edited = tmp_path / "fictional-edited-master.ged"
+    edited_before = _write_people(
+        edited,
+        ("I1", "Casey /West/", "3 MAR 1930"),
+        ("I1", "Drew /East/", "4 APR 1940"),
+    )
+    published_before = _release_files(release_root)
+
+    rejected = execute_sync(_rebase_args(edited, generation, release_root))
+
+    assert rejected.exit_code == sync_contracts.EXIT_CODES["SYNC_PARSE"]
+    assert "ERROR [SYNC_PARSE]" in rejected.error
+    assert rejected.committed is False
+    assert len(list(release_root.glob("g*-*"))) == 1
+    assert _release_files(release_root) == published_before
+    assert edited.read_bytes() == edited_before
+
+
+def test_rebase_rejects_duplicate_identifiers_in_previous_master_before_publication(
+    tmp_path: Path,
+) -> None:
+    """A coherent legacy bundle with ambiguous IDs must not become a rebase parent."""
+
+    _, release_root, generation = _initialize_release(tmp_path)
+    previous_master = generation / "master.ged"
+    previous_bytes = _write_people(
+        previous_master,
+        ("I1", "Emery /Lake/", "5 MAY 1950"),
+        ("I1", "Finley /Hill/", "6 JUN 1960"),
+    )
+    previous_sha = hashlib.sha256(previous_bytes).hexdigest()
+    manifest_path = generation / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["master"]["sha256"] = previous_sha
+    manifest["releases"][-1]["master_sha256"] = previous_sha
+    manifest["artifact_checksums"]["master.ged"] = previous_sha
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    edited = tmp_path / "fictional-valid-edited-master.ged"
+    edited_before = _write_people(edited, ("I9", "Gray /Field/", "7 JUL 1970"))
+    published_before = _release_files(release_root)
+
+    rejected = execute_sync(_rebase_args(edited, generation, release_root))
+
+    assert rejected.exit_code == sync_contracts.EXIT_CODES["SYNC_PARSE"]
+    assert "ERROR [SYNC_PARSE]" in rejected.error
+    assert rejected.committed is False
+    assert len(list(release_root.glob("g*-*"))) == 1
+    assert _release_files(release_root) == published_before
+    assert edited.read_bytes() == edited_before
+
+
+def test_rebase_accepts_distinct_identifiers_and_preserves_parent_generation(
+    tmp_path: Path,
+) -> None:
+    """Valid manual edits still publish while the immutable parent stays unchanged."""
+
+    _, release_root, generation = _initialize_release(tmp_path)
+    edited = tmp_path / "fictional-valid-edited-master.ged"
+    edited.write_text(
+        (generation / "master.ged")
+        .read_text(encoding="utf-8")
+        .replace(
+            "0 TRLR\n",
+            "0 @I99@ INDI\n1 NAME Harper /Vale/\n1 BIRT\n2 DATE 8 AUG 1980\n0 TRLR\n",
+        ),
+        encoding="utf-8",
+    )
+    parent_before = _release_files(generation)
+
+    rebased = execute_sync(_rebase_args(edited, generation, release_root))
+
+    assert rebased.exit_code == 0
+    assert rebased.committed is True
+    assert len(list(release_root.glob("g*-*"))) == 2
+    assert _release_files(generation) == parent_before
+    next_generation = next(release_root.glob("g0002-*"))
+    assert "0 @I99@ INDI\n" in (next_generation / "master.ged").read_text(encoding="utf-8")
 
 
 def test_idempotent_retry_observes_cancellation_requested_during_final_hash(

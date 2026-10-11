@@ -191,10 +191,12 @@ allocation; filesystem, argument, and record order do not. Origins remain
 independent unless an existing binding explicitly associates them, and
 repeating the same synchronization produces the same semantic bundle.
 
-Before checking for an idempotent update or reconciling identities,
-synchronization validates the master and every snapshot as separate GEDCOM
-documents. Each document must begin with exactly one `HEAD`, end with exactly
-one `TRLR`, and declare every record identifier only once. The same identifier,
+Before checking for an idempotent update, reconciling identities, or comparing
+a manual rebase, synchronization validates every master and snapshot as a
+separate GEDCOM document. A rebase validates both the edited master and the
+immutable parent master named by its manifest before comparing their records.
+Each document must begin with exactly one `HEAD`, end with exactly one `TRLR`,
+and declare every record identifier only once. The same identifier,
 such as `@I1@`, may appear once in each source; source bindings keep those
 records independent unless identity evidence associates them. A duplicate
 identifier within one input fails as `SYNC_PARSE` (exit `3`) without staging a

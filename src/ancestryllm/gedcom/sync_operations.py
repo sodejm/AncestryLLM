@@ -616,6 +616,25 @@ def _perform_rebase(
                 f"Actual SHA-256: {previous_fingerprint.sha256}",
             ),
         )
+    try:
+        core.load_sources(
+            [previous_path, master],
+            ingress,
+            {
+                previous_path: previous_fingerprint.snapshot,
+                master: master_fingerprint.snapshot,
+            },
+            validate_structure=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise SyncError(
+            "SYNC_PARSE",
+            "A current or previous master GEDCOM could not be parsed safely.",
+            "Manual rebase comparison requires unambiguous GEDCOM record identifiers.",
+            ["Open the named file and repair the reported GEDCOM line, then retry."],
+            details=(f"Error class: {type(exc).__name__}",),
+        ) from exc
+    _checkpoint(cancellation_check)
     previous = _master_block_index(
         previous_path,
         core,
