@@ -317,7 +317,9 @@ then independently observe that the packaged Main PID and active sidecar PID
 disappear within bounded deadlines. Because the secure packaged service session
 does not expose its child-process exit tuple, every release row also performs a
 separate transport-free launch of the selected packaged runtime. Windows
-requests native window closure; macOS and Linux send `SIGTERM` through the
+launches the GUI without `windowsHide` so native window discovery can find it,
+then requests native window closure. PowerShell and taskkill console helpers
+remain hidden. macOS and Linux send `SIGTERM` through the
 shared production signal-to-quit path. That process must report the exact
 native result `{ code: 0, signal: null }`; any
 nonzero code, signal termination, or timeout fails the test, and forced

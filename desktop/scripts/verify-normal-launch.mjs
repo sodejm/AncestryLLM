@@ -251,7 +251,8 @@ export async function verifyNormalLaunch({
   const child = spawn(executable, launchArguments, {
     env: await isolatedEnvironment(root, { environment, platform }),
     stdio: 'pipe',
-    windowsHide: true,
+    // Windows native closure requires a visible GUI; hide only console helpers.
+    windowsHide: false,
   })
   let output = ''
   let spawnError

@@ -82,6 +82,18 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "unexpectedErrorCodes: []" in source
 
 
+def test_normal_launch_preserves_gui_visibility_for_native_windows_close() -> None:
+    source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
+    launch_start = source.index("const child = spawn(executable, launchArguments, {")
+    launch_end = source.index("\n  })", launch_start)
+    launch_source = source[launch_start:launch_end]
+
+    # A hidden GUI can emit readiness while CloseMainWindow cannot find its window.
+    assert "windowsHide: false" in launch_source
+    assert "windowsHide: true" not in launch_source
+    assert "stdio: 'pipe'" in launch_source
+
+
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
