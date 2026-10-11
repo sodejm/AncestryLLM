@@ -95,7 +95,7 @@ from ancestryllm.gedcom.quality import (
     refine_quality_report_with_ai,
     valid_quality_date,
 )
-from ancestryllm.gedcom.root_index import RootIndexError, read_root_page
+from ancestryllm.gedcom.root_index import RootIndexError, read_root_page, root_index_count
 from ancestryllm.gedcom.serialization import (
     SUPPORTED_GEDCOM_VERSIONS,
     write_gedcom,
@@ -1150,6 +1150,12 @@ class GedcomService:
             )
             candidate_count = result.root_candidate_count
             if candidate_count is None or result.root_candidates:
+                raise DomainFailure(DomainFailureCode.WORKER_FAILED)
+            try:
+                verified_count = root_index_count(inspected.index_path)
+            except RootIndexError as exc:
+                raise DomainFailure(DomainFailureCode.WORKER_FAILED) from exc
+            if verified_count != candidate_count:
                 raise DomainFailure(DomainFailureCode.WORKER_FAILED)
             reference = "root-index:" + secrets.token_hex(16)
             timer = threading.Timer(

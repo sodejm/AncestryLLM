@@ -12,6 +12,10 @@ reference, not the complete candidate tuple or an index path in a service DTO.
 
 Each service instance owns at most eight successful index leases. A lease binds
 its reference to the input artifact ID, SHA-256 digest, and candidate count.
+Admission validates the worker's SQLite index and requires its verified row count
+to match the summary before creating a lease or starting its expiry timer. A
+missing, corrupt, or count-mismatched index fails with `WORKER_FAILED` and the
+unretained worker directory is erased immediately.
 `read_inspection_roots` verifies that binding and the lifetime before opening the
 index. It accepts queries of at most 128 characters, non-negative scan offsets,
 and page limits from 1 through 100. Its transport-neutral `RootCandidateWindow`
@@ -55,7 +59,8 @@ adapters. Public service inspection always uses the worker and a lease. No
 provider, CLI command, or renderer-specific registry is added.
 
 Fictional-data tests cover summary privacy, bounded reads, source-binding
-rejection, repeated release, expiry without requests, timer startup failure,
+rejection, invalid index admission, repeated release, expiry without requests,
+timer startup failure,
 shutdown during a worker, manager result cleanup, and signed cursor behavior.
 These local tests do not qualify a packaged desktop target or replace its manual
 keyboard and screen-reader acceptance.

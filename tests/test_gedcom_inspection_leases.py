@@ -188,3 +188,38 @@ def test_timer_start_failure_does_not_retain_an_unusable_lease(
         assert not directories[0].exists()
     finally:
         service.close()
+
+
+@pytest.mark.parametrize("defect", ["missing", "corrupt", "count-mismatch"])
+def test_index_is_validated_before_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    """Reject invalid worker output before starting a timer or retaining private data."""
+    service, request, directories = _inspection(tmp_path, monkeypatch)
+    original = worker_module.run_inspection
+    timer_starts: list[threading.Timer] = []
+
+    def invalid_worker(*args: object, **kwargs: object) -> object:
+        inspected = original(*args, **kwargs)
+        if defect == "missing":
+            inspected.index_path.unlink()
+        elif defect == "corrupt":
+            inspected.index_path.write_bytes(b"fictional invalid index")
+        else:
+            inspected.result = replace(inspected.result, root_candidate_count=2)
+        return inspected
+
+    def start_timer(timer: threading.Timer) -> None:
+        timer_starts.append(timer)
+
+    monkeypatch.setattr(worker_module, "run_inspection", invalid_worker)
+    monkeypatch.setattr(threading.Timer, "start", start_timer)
+    try:
+        with pytest.raises(DomainFailure) as failure:
+            service.execute_inspect(request)
+        assert failure.value.code is DomainFailureCode.WORKER_FAILED
+        assert service._inspection_leases == {}
+        assert timer_starts == []
+        assert not directories[0].exists()
+    finally:
+        service.close()
