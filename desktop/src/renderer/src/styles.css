@@ -10,6 +10,8 @@
   --color-text-muted: #405448;
   --color-border: #718276;
   --color-brand: #15382a;
+  --color-brand-interactive: #2c4c3f;
+  --color-brand-interactive-hover: #3f5c50;
   --color-brand-text: #ffffff;
   --color-action: #8c351f;
   --color-action-text: #ffffff;
@@ -59,6 +61,8 @@
   --color-text-muted: #c4cec7;
   --color-border: #84978a;
   --color-brand: #0b2117;
+  --color-brand-interactive: #23372e;
+  --color-brand-interactive-hover: #374941;
   --color-action: #f09a75;
   --color-action-text: #1d130f;
   --color-focus: #ffb18e;
@@ -81,6 +85,8 @@
     --color-text-muted: #c4cec7;
     --color-border: #84978a;
     --color-brand: #0b2117;
+    --color-brand-interactive: #23372e;
+    --color-brand-interactive-hover: #374941;
     --color-action: #f09a75;
     --color-action-text: #1d130f;
     --color-focus: #ffb18e;
@@ -182,20 +188,26 @@ small { overflow-wrap: anywhere; }
   font-family: Georgia, "Times New Roman", serif;
   font-size: 1.35rem;
   font-weight: 700;
+  background-color: var(--color-brand);
 }
 .header-actions { flex-wrap: wrap; gap: var(--space-3); }
-.local-state { gap: var(--space-2); font-size: .9rem; font-weight: 700; }
+.local-state {
+  gap: var(--space-2);
+  background-color: var(--color-brand);
+  font-size: .9rem;
+  font-weight: 700;
+}
 .command-button {
   gap: var(--space-2);
   min-height: 2.75rem;
   border: 1px solid rgb(255 255 255 / 75%);
   border-radius: var(--radius-sm);
   padding: .55rem .75rem;
-  background: rgb(255 255 255 / 10%);
+  background-color: var(--color-brand-interactive);
   color: inherit;
   cursor: pointer;
 }
-.command-button:hover { background: rgb(255 255 255 / 18%); }
+.command-button:hover { background-color: var(--color-brand-interactive-hover); }
 kbd {
   border: 1px solid currentColor;
   border-radius: .25rem;
