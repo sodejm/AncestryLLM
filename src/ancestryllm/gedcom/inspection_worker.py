@@ -58,6 +58,7 @@ _XREF = re.compile(r"@[^@\r\n]+@")
 _CONTROL_BYTES = 8_192
 _FAILURE_BYTES = 4_096
 _POLL_SECONDS = 0.05
+_MAX_CONSECUTIVE_RSS_MISSES = 3
 _ROOT_PREFIX = "ancestryllm-inspection-"
 _LEASE_PREFIX = "ancestryllm-inspect-"
 _OWNER_FILE = "owner.json"
@@ -142,8 +143,9 @@ def _limit(budget: str) -> DomainFailure:
     return DomainFailure(DomainFailureCode.WORKER_LIMIT, (DomainFailureDetail("budget", budget),))
 
 
-def _failed() -> DomainFailure:
-    return DomainFailure(DomainFailureCode.WORKER_FAILED)
+def _failed(stage: str | None = None) -> DomainFailure:
+    details = () if stage is None else (DomainFailureDetail("stage", stage),)
+    return DomainFailure(DomainFailureCode.WORKER_FAILED, details)
 
 
 def _check_deadline(
@@ -268,7 +270,7 @@ def _read_rss(process: _PollableProcess) -> int | None:
             kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
             kernel32.CloseHandle.restype = wintypes.BOOL
 
-            query = 0x1000
+            query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
             handle = kernel32.OpenProcess(query, False, process.pid)
             if not handle:
                 return None
@@ -297,6 +299,7 @@ def _monitor_process(
 ) -> None:
     """Watch cancellation, wall time, RSS, and abrupt child termination."""
 
+    consecutive_rss_misses = 0
     while True:
         cancellation.check_cancelled()
         if clock() >= deadline:
@@ -304,16 +307,23 @@ def _monitor_process(
         return_code = process.poll()
         if return_code is not None:
             if return_code != 0:
-                raise _failed()
+                raise _failed("monitor.exit")
             return
         resident = rss_reader(process)
         if resident is None:
             # The process can finish after the preceding poll and before RSS is
             # sampled.  Accept that successful exit instead of misclassifying it.
             return_code = process.poll()
-            if return_code == 0:
+            if return_code is not None:
+                if return_code != 0:
+                    raise _failed("monitor.exit")
                 return
-            raise _failed()
+            consecutive_rss_misses += 1
+            if consecutive_rss_misses >= _MAX_CONSECUTIVE_RSS_MISSES:
+                raise _failed("monitor.rss")
+            sleeper(_POLL_SECONDS)
+            continue
+        consecutive_rss_misses = 0
         if resident > budgets.memory_bytes:
             raise _limit("memory")
         sleeper(_POLL_SECONDS)

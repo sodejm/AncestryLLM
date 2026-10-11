@@ -2,8 +2,10 @@
 
 import json
 import math
+import os
 import platform
 import subprocess
+import sys
 from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -268,7 +270,11 @@ def test_monitor_classifies_crash_memory_and_timeout_without_process_text(
             sleeper=lambda _seconds: None,
         )
     assert caught.value.code.value == code
-    assert (caught.value.details[0].value if caught.value.details else None) == budget
+    if code == "WORKER_FAILED":
+        assert caught.value.details[0].name == "stage"
+        assert caught.value.details[0].value == "monitor.exit"
+    else:
+        assert (caught.value.details[0].value if caught.value.details else None) == budget
     assert str(caught.value) == code
 
 
@@ -284,6 +290,70 @@ def test_monitor_accepts_successful_exit_after_rss_lookup_race() -> None:
         clock=lambda: 0.0,
         sleeper=lambda _seconds: None,
     )
+
+
+def test_monitor_retries_one_transient_rss_miss_and_enforces_memory_limit() -> None:
+    process = _Process([None, None, None])
+    samples = iter((None, 101))
+    sleeps: list[float] = []
+
+    with pytest.raises(DomainFailure) as caught:
+        _monitor_process(
+            process,
+            InspectionBudgets(memory_bytes=100),
+            _Cancellation(),
+            deadline=1.0,
+            rss_reader=lambda _process: next(samples),
+            clock=lambda: 0.0,
+            sleeper=sleeps.append,
+        )
+
+    assert caught.value.code.value == "WORKER_LIMIT"
+    assert caught.value.details[0].value == "memory"
+    assert sleeps == [0.05]
+
+
+def test_monitor_fails_closed_after_bounded_consecutive_rss_misses() -> None:
+    process = _Process([None] * 6)
+    rss_reads = 0
+
+    def unavailable(_process: _Process) -> None:
+        nonlocal rss_reads
+        rss_reads += 1
+
+    with pytest.raises(DomainFailure) as caught:
+        _monitor_process(
+            process,
+            InspectionBudgets(),
+            _Cancellation(),
+            deadline=1.0,
+            rss_reader=unavailable,
+            clock=lambda: 0.0,
+            sleeper=lambda _seconds: None,
+        )
+
+    assert caught.value.code.value == "WORKER_FAILED"
+    assert caught.value.details[0].name == "stage"
+    assert caught.value.details[0].value == "monitor.rss"
+    assert rss_reads == 3
+
+
+def test_monitor_rss_retry_remains_within_original_deadline() -> None:
+    process = _Process([None, None])
+    clock = iter((0.0, 1.0))
+
+    with pytest.raises(DomainFailure) as caught:
+        _monitor_process(
+            process,
+            InspectionBudgets(),
+            _Cancellation(),
+            deadline=1.0,
+            rss_reader=lambda _process: None,
+            clock=clock.__next__,
+            sleeper=lambda _seconds: None,
+        )
+
+    assert caught.value.code.value == "WORKER_TIMEOUT"
 
 
 def test_private_output_validation_rejects_oversize_and_nonprivate_files(
@@ -699,5 +769,32 @@ def test_windows_rss_api_declares_pointer_safe_signatures(
     assert memory_info.argtypes is not None
     assert memory_info.argtypes[0] is wintypes.HANDLE
     assert close_handle.argtypes == [wintypes.HANDLE]
+    access_mask = cast("int", open_process.calls[0][0])
+    assert access_mask == 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
     assert memory_info.calls[0][0] == 0x1_0000_0001
     assert close_handle.calls == [(0x1_0000_0001,)]
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="requires native Windows APIs")
+def test_windows_rss_reader_samples_the_current_process() -> None:
+    resident = _read_rss(SimpleNamespace(pid=os.getpid()))
+
+    assert isinstance(resident, int)
+    assert resident > 0
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="requires native Windows APIs")
+def test_windows_rss_reader_samples_a_spawned_process() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        resident = _read_rss(process)
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+    assert isinstance(resident, int)
+    assert resident > 0
