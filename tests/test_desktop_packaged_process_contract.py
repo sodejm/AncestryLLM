@@ -43,12 +43,22 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     assert "commandLine.includes(expectedProfile)" in process_records_source
     assert "!commandLine.includes('--type=')" in process_records_source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
-    assert "record.commandLine.includes('--type=renderer')" in source
-    assert "!record.commandLine.includes('--no-sandbox')" in source
+    renderer_query = source.split("async function rendererProcessIds()", maxsplit=1)[1].split(
+        "\nasync function ", maxsplit=1
+    )[0]
+    assert "await browser.getPuppeteer()" in renderer_query
+    assert "await puppeteer.target().createCDPSession()" in renderer_query
+    assert renderer_query.count("session.send(") == 1
+    assert "session.send('SystemInfo.getProcessInfo')" in renderer_query
+    assert "record.type === 'renderer'" in renderer_query
+    assert "Number(record.id)" in renderer_query
+    assert "finally {\n    await session.detach()" in renderer_query
+    assert "recordsForProcessIds(tree, await rendererProcessIds())" in source
+    assert "processIds.has(record.pid)" in process_records_source
+    assert "renderers.some((record) => record.commandLine.includes('--no-sandbox'))" in source
     assert "app.enableSandbox()" in main_source
     for forbidden in (
         "newBrowserCDPSession",
-        "SystemInfo.getProcessInfo",
         "connectOverCDP",
         "remote-debugging-port",
     ):

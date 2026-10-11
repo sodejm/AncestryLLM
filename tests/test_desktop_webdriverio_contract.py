@@ -66,7 +66,6 @@ def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None
         "@playwright/test",
         "connectOverCDP",
         "newBrowserCDPSession",
-        "SystemInfo.getProcessInfo",
         "remote-debugging-port",
         "waitForDevToolsEndpoint",
         "chromium.launch",
@@ -75,6 +74,7 @@ def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None
     assert "browser.electron.execute" in combined
     assert "browser.reloadSession" in combined
     assert "browser.electron.execute" not in PACKAGED_SPEC.read_text(encoding="utf-8")
+    assert "SystemInfo.getProcessInfo" not in SOURCE_SPEC.read_text(encoding="utf-8")
 
 
 def test_wdio_runner_preserves_multiword_filters_without_a_shell() -> None:
