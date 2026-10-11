@@ -27,7 +27,9 @@ def current_user_scope() -> str:
 def harden_private_directory(path: Path) -> bool:
     """Apply native private-directory protection and verify the result."""
 
-    if platform.system() != "Windows":
+    if platform.system() == "Windows":
+        _harden_windows_path(path, directory=True)
+    else:
         path.chmod(0o700)
     return is_private_directory(path)
 
@@ -35,9 +37,60 @@ def harden_private_directory(path: Path) -> bool:
 def harden_private_file(path: Path) -> bool:
     """Apply native private-file protection and verify the result."""
 
-    if platform.system() != "Windows":
+    if platform.system() == "Windows":
+        _harden_windows_path(path, directory=False)
+    else:
         path.chmod(0o600)
     return is_private_file(path)
+
+
+def _harden_windows_path(path: Path, *, directory: bool) -> None:
+    """Replace inherited access with a protected owner-only Windows DACL."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = cast("Any", ctypes).windll.advapi32
+    kernel32 = cast("Any", ctypes).windll.kernel32
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    advapi32.SetFileSecurityW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    advapi32.SetFileSecurityW.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+
+    current_sid = _windows_current_user_sid_string()
+    inheritance = "OICI" if directory else ""
+    descriptor_text = (
+        f"D:P(A;{inheritance};FA;;;{current_sid})(A;{inheritance};FA;;;BA)(A;{inheritance};FA;;;SY)"
+    )
+    descriptor = wintypes.LPVOID()
+    descriptor_size = wintypes.DWORD()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        descriptor_text,
+        1,
+        ctypes.byref(descriptor),
+        ctypes.byref(descriptor_size),
+    ):
+        raise OSError("The private Windows security descriptor is unavailable.")
+    try:
+        if not advapi32.SetFileSecurityW(
+            str(path),
+            0x00000004 | 0x80000000,
+            descriptor,
+        ):
+            raise OSError("The private Windows ACL could not be applied.")
+    finally:
+        kernel32.LocalFree(descriptor)
 
 
 def is_private_directory(path: Path) -> bool:

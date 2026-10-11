@@ -110,6 +110,38 @@ def test_build_requires_a_private_parent_directory(
         )
 
 
+def test_windows_hardening_applies_native_acl_before_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir()
+    private_file = directory / "private.bin"
+    private_file.write_bytes(b"private")
+    calls: list[tuple[str, Path, bool]] = []
+
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        _private_files,
+        "_harden_windows_path",
+        lambda path, *, directory: calls.append(("harden", path, directory)),
+    )
+
+    def validate(path: Path, *, directory: bool) -> bool:
+        calls.append(("validate", path, directory))
+        return calls[-2] == ("harden", path, directory)
+
+    monkeypatch.setattr(_private_files, "_windows_path_is_private", validate)
+
+    assert _private_files.harden_private_directory(directory)
+    assert _private_files.harden_private_file(private_file)
+    assert calls == [
+        ("harden", directory, True),
+        ("validate", directory, True),
+        ("harden", private_file, False),
+        ("validate", private_file, False),
+    ]
+
+
 def test_windows_privacy_uses_native_acl_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
