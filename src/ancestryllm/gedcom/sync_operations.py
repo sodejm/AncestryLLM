@@ -245,6 +245,7 @@ def _perform_update(
         for spec in specs
     ):
         verify_inputs()
+        _checkpoint(cancellation_check)
         return SyncExecutionResult(
             exit_code=0,
             output=(

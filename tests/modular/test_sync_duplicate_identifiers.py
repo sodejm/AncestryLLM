@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
+from ancestryllm.core.cancellation import CancellationError
+from ancestryllm.core.ingress import FileFingerprint, FileIngressPolicy, FileKind
 from ancestryllm.gedcom import sync_contracts
 from ancestryllm.gedcom.sync import execute_sync
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _write_people(path: Path, *people: tuple[str, str, str]) -> bytes:
@@ -65,6 +64,26 @@ def _initial_update_args(master: Path, snapshot: Path, release_root: Path) -> li
         str(release_root),
         "--no-quality-report",
     ]
+
+
+class _CancelAfterFinalManifestHash(FileIngressPolicy):
+    """Request cancellation only after the idempotent manifest rehash."""
+
+    def __init__(self, manifest: Path) -> None:
+        super().__init__()
+        self.manifest = manifest.absolute()
+        self.armed = False
+        self.cancellation_requested = False
+
+    def verify(
+        self,
+        path: str | Path,
+        kind: FileKind,
+        expected: FileFingerprint,
+    ) -> None:
+        super().verify(path, kind, expected)
+        if self.armed and Path(path).absolute() == self.manifest:
+            self.cancellation_requested = True
 
 
 @pytest.mark.parametrize("duplicate_input", ("master", "snapshot"))
@@ -144,6 +163,60 @@ def test_valid_sync_keeps_distinct_people_and_idempotent_retry_is_read_only(
     assert len(list(release_root.glob("g*-*"))) == 1
     assert _release_files(release_root) == published_before_retry
     assert master.read_bytes() == master_before
+    assert snapshot.read_bytes() == snapshot_before
+
+
+def test_idempotent_retry_observes_cancellation_requested_during_final_hash(
+    tmp_path: Path,
+) -> None:
+    """The read-only result must not hide cancellation requested by final verification."""
+
+    master = tmp_path / "fictional-master.ged"
+    snapshot = tmp_path / "fictional-snapshot.ged"
+    _write_people(master, ("I1", "Avery /North/", "1 JAN 1900"))
+    snapshot_before = _write_people(snapshot, ("I1", "Blair /South/", "2 FEB 1970"))
+    release_root = tmp_path / "releases"
+    first = execute_sync(_initial_update_args(master, snapshot, release_root))
+    assert first.exit_code == 0
+    generation = next(release_root.glob("g0001-*"))
+    manifest = generation / "manifest.json"
+    published_before_retry = _release_files(release_root)
+    ingress = _CancelAfterFinalManifestHash(manifest)
+    checkpoint_calls = 0
+
+    def cancellation_check() -> None:
+        nonlocal checkpoint_calls
+        checkpoint_calls += 1
+        if ingress.cancellation_requested:
+            raise CancellationError("fictional cancellation during final input verification")
+        if checkpoint_calls == 2:
+            ingress.armed = True
+
+    with pytest.raises(CancellationError, match="final input verification"):
+        execute_sync(
+            [
+                "update",
+                "--master",
+                str(generation / "master.ged"),
+                "--manifest",
+                str(manifest),
+                "--snapshot",
+                f"fictional-main:other={snapshot}",
+                "--exported-at",
+                "fictional-main=2026-01-15",
+                "--release-root",
+                str(release_root),
+                "--no-quality-report",
+            ],
+            ingress=ingress,
+            cancellation_check=cancellation_check,
+            raise_errors=True,
+        )
+
+    assert ingress.cancellation_requested is True
+    assert checkpoint_calls == 3
+    assert len(list(release_root.glob("g*-*"))) == 1
+    assert _release_files(release_root) == published_before_retry
     assert snapshot.read_bytes() == snapshot_before
 
 

@@ -202,7 +202,8 @@ generation, modifying an input, or replacing the active manifest or release.
 Repair or re-export only the named input, keep the last complete generation,
 and retry. Do not edit a published generation in place. An identical snapshot
 that is already active is still validated before the read-only
-`No update was needed` result.
+`No update was needed` result. Cancellation requested while those final input
+hashes are verified is observed before that result is returned.
 
 Automatic reconciliation can remove only source-owned, uncited, unprotected
 fact blocks. It never removes complete people, families, relationships, source
