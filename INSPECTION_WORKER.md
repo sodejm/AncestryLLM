@@ -80,8 +80,10 @@ selects a provider, preserving the provider `none` network-free contract.
 
 The parent fingerprints the source before work and verifies the same path,
 identity, size, and digest after the child exits. It never opens the source for
-writing. Each invocation atomically creates an unguessable private scratch root scoped to the current operating-system user.
-On POSIX, lease directories must be owned by the current user at mode `0700`,
+writing. Each invocation atomically creates an unguessable private scratch root
+scoped to the current operating-system user. That root is the service-managed
+lease directory. On POSIX, invocation directories must be owned by the current
+user at mode `0700`,
 and every accepted output must be a current-user-owned, single-link regular file
 at mode `0600`. On Windows, native owner and DACL checks require ownership by the
 current user and allow access only to that user, Local System, or the built-in
@@ -118,12 +120,15 @@ unchanged. A successful directory is transferred to the service lease manager;
 it is removed on explicit release, service shutdown, or its 15-minute expiry.
 
 Each invocation also scans at most 32 prior roots in the temporary directory and
-accepts only the current user's private roots with its scoped prefix. Within each
-accepted root, it scans at most 32 worker leases. A private owner marker binds the
-supervisor PID to its process-start identity. Cleanup removes a lease only when
-that process is dead or the PID now belongs to a different process, then removes
-the root only if it is empty. Live leases, malformed or legacy markers, unknown
-process state, nonprivate roots, and unrelated directories are preserved. This
+accepts only the current user's private roots with its scoped prefix. A private
+owner marker directly binds each completed root to the supervisor PID and its
+process-start identity. Cleanup removes a root only when that process is dead or
+the PID now belongs to a different process. Fresh roots without an owner marker
+are preserved so concurrent startup cannot lose custody before writing its marker.
+For migration, each accepted unmarked root scans at most 32 legacy nested leases;
+the legacy root is removed only after a recognized lease was found and the root
+became empty. Live leases, malformed or legacy markers, unknown process state,
+nonprivate roots, and unrelated directories are preserved. This
 bounded restart cleanup avoids an unbounded startup traversal.
 
 ## Testing and operations

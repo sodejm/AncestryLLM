@@ -560,31 +560,41 @@ def _windows_process_identity(pid: int) -> _ProcessIdentity:
         return _ProcessIdentity(None, None)
 
 
-def _cleanup_orphans(root: Path, *, maximum: int = 32) -> None:
-    """Remove a bounded number of stale worker leases after supervisor restart."""
+def _cleanup_owned_directory(directory: Path) -> bool:
+    """Remove a private worker directory only after its owner is proven stale."""
+
+    owner = directory / _OWNER_FILE
+    try:
+        document = json.loads(owner.read_text(encoding="ascii"))
+        pid = document["pid"]
+        start = document["start"]
+        if type(pid) is not int or not isinstance(start, str) or not start:
+            return False
+        identity = _process_identity(pid)
+        if identity.running is None:
+            return False
+        if identity.running and identity.start_token == start:
+            return False
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    shutil.rmtree(directory, ignore_errors=True)
+    return not directory.exists()
+
+
+def _cleanup_orphans(root: Path, *, maximum: int = 32) -> bool:
+    """Remove bounded stale leases from a legacy worker root."""
 
     try:
         candidates = tuple(islice(root.iterdir(), maximum))
     except OSError:
-        return
+        return False
+    found_lease = False
     for candidate in candidates:
         if not candidate.name.startswith(_LEASE_PREFIX) or not candidate.is_dir():
             continue
-        owner = candidate / _OWNER_FILE
-        try:
-            document = json.loads(owner.read_text(encoding="ascii"))
-            pid = document["pid"]
-            start = document["start"]
-            if type(pid) is not int or not isinstance(start, str) or not start:
-                continue
-            identity = _process_identity(pid)
-            if identity.running is None:
-                continue
-            if identity.running and identity.start_token == start:
-                continue
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-            continue
-        shutil.rmtree(candidate, ignore_errors=True)
+        found_lease = True
+        _cleanup_owned_directory(candidate)
+    return found_lease
 
 
 def _cleanup_scratch_roots(base: Path, prefix: str, *, maximum: int = 32) -> None:
@@ -597,9 +607,12 @@ def _cleanup_scratch_roots(base: Path, prefix: str, *, maximum: int = 32) -> Non
     for candidate in candidates:
         if not candidate.name.startswith(prefix) or not is_private_directory(candidate):
             continue
-        _cleanup_orphans(candidate)
-        with suppress(OSError):
-            candidate.rmdir()
+        if (candidate / _OWNER_FILE).is_file():
+            _cleanup_owned_directory(candidate)
+            continue
+        if _cleanup_orphans(candidate):
+            with suppress(OSError):
+                candidate.rmdir()
 
 
 def _scratch_root() -> Path:
@@ -718,12 +731,8 @@ def run_inspection(
     process: subprocess.Popen[bytes] | None = None
     success = False
     try:
-        root = _scratch_root()
-        _cleanup_orphans(root)
+        directory = _scratch_root()
         _check_deadline(cancellation, deadline)
-        directory = Path(tempfile.mkdtemp(prefix=_LEASE_PREFIX, dir=root))
-        if not harden_private_directory(directory):
-            raise _failed()
         owner_identity = _process_identity(os.getpid())
         if not owner_identity.running or owner_identity.start_token is None:
             raise _failed()

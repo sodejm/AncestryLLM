@@ -399,6 +399,46 @@ def test_scratch_root_cannot_be_preclaimed_at_a_predictable_user_path(
     assert _private_files.is_private_directory(root)
 
 
+def test_scratch_root_preserves_a_concurrent_empty_invocation_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._current_user_scope", lambda: "uid-1001"
+    )
+
+    first = _scratch_root()
+    second = _scratch_root()
+
+    assert first.exists()
+    assert second.exists()
+    assert first != second
+
+
+def test_scratch_root_recovers_a_dead_owned_prior_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._current_user_scope", lambda: "uid-1001"
+    )
+    prior = tmp_path / "ancestryllm-inspection-uid-1001-prior"
+    prior.mkdir()
+    assert _private_files.harden_private_directory(prior)
+    owner = prior / "owner.json"
+    owner.write_text(json.dumps({"pid": 1001, "start": "dead-start"}), encoding="ascii")
+    assert _private_files.harden_private_file(owner)
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._process_identity",
+        lambda _pid: _ProcessIdentity(running=False, start_token=None),
+    )
+
+    root = _scratch_root()
+
+    assert not prior.exists()
+    assert root.exists()
+
+
 def test_scratch_root_recovers_dead_leases_from_a_prior_private_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -583,7 +623,7 @@ def test_run_inspection_enforces_deadline_after_source_reverification(
 
     assert caught.value.code.value == "WORKER_TIMEOUT"
     assert source.read_bytes() == before
-    assert list(root.iterdir()) == []
+    assert not root.exists()
 
 
 @pytest.mark.parametrize("frozen", [False, True])
