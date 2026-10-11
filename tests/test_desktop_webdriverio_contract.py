@@ -189,7 +189,10 @@ def test_packaged_warm_launch_timing_starts_at_the_replacement_process() -> None
         in scenario
     )
     assert "const warmLaunchedAt = await processStartedAt(replacementApplicationPid)" in scenario
-    assert "const warmLaunchMs = Date.now() - warmLaunchedAt" in scenario
+    assert "const warmLaunchMs = warmReadyAt - warmLaunchedAt" in scenario
+    assert scenario.index("const warmReadyAt = Date.now()") < scenario.index(
+        "const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))"
+    )
     assert "const warmStartedAt = Date.now()" not in scenario
 
 
