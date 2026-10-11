@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  findPackagedMainProcess,
   isExpectedLastWindowCloseError,
   matchesPackagedMainProcess,
   recordsForProcessIds,
@@ -20,6 +21,15 @@ describe('packaged process records', () => {
     }, windowsExecutable, windowsProfile, 'win32')).toBe(true)
   })
 
+  it('matches a Windows profile switch whose value is quoted after the equals sign', () => {
+    expect(matchesPackagedMainProcess({
+      pid: 43,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}" --user-data-dir="${windowsProfile}"`,
+    }, windowsExecutable, windowsProfile, 'win32')).toBe(true)
+  })
+
   it('rejects Windows renderer processes and unrelated profiles', () => {
     const baseCommand = `"${windowsExecutable}" --user-data-dir=${windowsProfile}`
 
@@ -35,6 +45,40 @@ describe('packaged process records', () => {
       rssBytes: 1024,
       commandLine: `"${windowsExecutable}" --user-data-dir=C:\\a\\_temp\\another-profile`,
     }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
+  })
+
+  it('requires exact Windows executable and profile argument boundaries', () => {
+    expect(matchesPackagedMainProcess({
+      pid: 45,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}.backup" --user-data-dir=${windowsProfile}`,
+    }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
+    expect(matchesPackagedMainProcess({
+      pid: 46,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}" --user-data-dir=${windowsProfile}-copy`,
+    }, windowsExecutable, windowsProfile, 'win32')).toBe(false)
+  })
+
+  it('returns bounded lookup diagnostics without exposing command lines', () => {
+    const profileMismatch = findPackagedMainProcess([{
+      pid: 47,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}" --user-data-dir=C:\\a\\_temp\\another-profile`,
+    }], windowsExecutable, windowsProfile, new Set(), 'win32')
+    const excluded = findPackagedMainProcess([{
+      pid: 48,
+      ppid: 1,
+      rssBytes: 1024,
+      commandLine: `"${windowsExecutable}" --user-data-dir="${windowsProfile}"`,
+    }], windowsExecutable, windowsProfile, new Set([48]), 'win32')
+
+    expect(profileMismatch).toEqual({ pid: -1, status: 'profile_not_observed' })
+    expect(excluded).toEqual({ pid: -1, status: 'excluded' })
+    expect(JSON.stringify([profileMismatch, excluded])).not.toContain('C:')
   })
 
   it('preserves case-sensitive matching on POSIX platforms', () => {

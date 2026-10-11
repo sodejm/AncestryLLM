@@ -11,8 +11,8 @@ import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
 import {
+  findPackagedMainProcess,
   isExpectedLastWindowCloseError,
-  matchesPackagedMainProcess,
   recordsForProcessIds,
   type ProcessRecord,
 } from './process-records'
@@ -169,17 +169,17 @@ async function mainPid(excluded: ReadonlySet<number> = new Set()): Promise<numbe
   if (!automatedPackagedExecutable || !userDataDirectory) {
     throw new Error('Automated packaged executable and isolated user data are required')
   }
-  return eventually(
+  const observed = await eventually(
     'Packaged Electron main-process PID was not observed',
-    async () => (await processSnapshot()).find((record) => (
-      !excluded.has(record.pid) && matchesPackagedMainProcess(
-        record,
-        automatedPackagedExecutable,
-        userDataDirectory,
-      )
-    ))?.pid ?? -1,
-    (pid) => pid > 0,
+    async () => findPackagedMainProcess(
+      await processSnapshot(),
+      automatedPackagedExecutable,
+      userDataDirectory,
+      excluded,
+    ),
+    ({ pid }) => pid > 0,
   )
+  return observed.pid
 }
 
 async function processStartedAt(pid: number): Promise<number> {

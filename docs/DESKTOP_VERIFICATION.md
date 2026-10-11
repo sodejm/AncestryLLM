@@ -292,6 +292,13 @@ claim a direct normal-launch observation of the production package on Linux or
 macOS; the earlier production assembly and scanner remain the production-build
 evidence on those rows.
 
+Packaged main-process discovery matches the executable and isolated profile as
+complete command-line arguments. The profile matcher accepts the Windows form
+where `--user-data-dir=` is followed by a quoted value. If discovery reaches
+its existing timeout, the failure reports only a bounded lookup status such as
+`profile_not_observed`; executable paths, profile paths, and command lines stay
+out of test output.
+
 On macOS only, both automation launches pass Chromium's `--use-mock-keychain`
 because the ad hoc, unpackaged runner build cannot reliably use a login
 keychain. The unpublished native-verification package also accepts one reviewed
