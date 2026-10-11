@@ -8,6 +8,7 @@ import threading
 import pytest
 
 from ancestryllm.core.cancellation import CancellationToken
+from ancestryllm.core.errors import AncestryError
 from ancestryllm.core.jobs import JobManager, JobState
 
 
@@ -212,3 +213,46 @@ def test_result_cleanup_must_be_callable() -> None:
         manager.submit("invalid cleanup", object, result_cleanup="invalid")  # type: ignore[arg-type]
 
     manager.shutdown()
+
+
+def test_shutdown_rejects_submission_paused_before_record_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shutdown cannot miss a result admitted after its cleanup scan."""
+    manager = JobManager(max_workers=1, max_pending=1)
+    entered = threading.Event()
+    resume = threading.Event()
+    called = threading.Event()
+    failures: list[AncestryError | RuntimeError] = []
+    original = manager._public_resource_keys
+
+    def paused_keys(keys: tuple[str, ...]) -> tuple[str, ...]:
+        entered.set()
+        assert resume.wait(2)
+        return original(keys)
+
+    def submit() -> None:
+        try:
+            manager.submit("shutdown admission race", called.set, resource_keys=("private",))
+        except (AncestryError, RuntimeError) as error:
+            failures.append(error)
+
+    monkeypatch.setattr(manager, "_public_resource_keys", paused_keys)
+    thread = threading.Thread(target=submit)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        manager.shutdown(wait=False)
+    finally:
+        resume.set()
+        thread.join(2)
+        manager.shutdown()
+    assert not thread.is_alive()
+    assert len(failures) == 1
+    assert isinstance(failures[0], AncestryError)
+    assert failures[0].code == "JOB_MANAGER_CLOSED"
+    assert not called.is_set()
+    assert manager._records == {}
+    assert manager._resource_locks == {}
+    assert manager._capacity.acquire(blocking=False)
+    manager._capacity.release()

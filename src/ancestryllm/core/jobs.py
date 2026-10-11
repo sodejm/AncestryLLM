@@ -329,6 +329,10 @@ class JobManager:
             )
         public_resource_keys = self._public_resource_keys(normalized_keys)
         with self._lock:
+            # Admission and shutdown's cleanup scan share the same lock.
+            if self._closed:
+                self._capacity.release()
+                raise AncestryError("JOB_MANAGER_CLOSED", "The background job manager is closed.")
             if self._next_id > MAX_JOB_ID_NUMBER:
                 self._capacity.release()
                 raise AncestryError(

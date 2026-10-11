@@ -12,6 +12,11 @@ immediately after the callable returns, so a result produced at that boundary is
 released without being published. Results without a cleanup callback keep their
 existing retention behavior across shutdown.
 
+Admission rechecks shutdown under the record lock after reserving queue capacity.
+A submission paused at that boundary fails with `JOB_MANAGER_CLOSED` and returns
+its capacity without creating a job or resource lock. Every admitted result is
+therefore visible to shutdown's cleanup scan.
+
 Callbacks run outside the manager lock. They should complete promptly because they
 run synchronously on the thread that discards the result, shuts down the manager, or
 finishes the job. A callback exception cannot change job state or stop shutdown; the
