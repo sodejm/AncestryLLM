@@ -1,11 +1,13 @@
 """Fictional-input regressions for the isolated inspection resource boundary."""
 
 import json
+import math
 import platform
 import subprocess
 from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -16,6 +18,7 @@ from ancestryllm.domain.errors import DomainFailure
 from ancestryllm.gedcom import _private_files
 from ancestryllm.gedcom.inspection_worker import (
     InspectionBudgets,
+    WorkerInspection,
     _cleanup_orphans,
     _control_payload,
     _monitor_process,
@@ -65,7 +68,7 @@ class _StubbornProcess:
         self.calls.append(f"wait:{timeout}")
         self._waits += 1
         if self._waits == 1:
-            raise subprocess.TimeoutExpired("worker", timeout)
+            raise subprocess.TimeoutExpired("worker", timeout if timeout is not None else 0.0)
         return -9
 
     def terminate(self) -> None:
@@ -77,6 +80,27 @@ class _StubbornProcess:
 
 class _Cancellation:
     def check_cancelled(self) -> None:
+        return
+
+
+class _CompletedProcess:
+    pid = 789
+
+    def __init__(self) -> None:
+        import io
+
+        self.stdin = io.BytesIO()
+
+    def poll(self) -> int | None:
+        return 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+    def terminate(self) -> None:
+        return
+
+    def kill(self) -> None:
         return
 
 
@@ -127,6 +151,27 @@ def test_worker_budgets_reject_unbounded_or_invalid_values() -> None:
         InspectionBudgets(max_xrefs=0)
     with pytest.raises(ValueError):
         InspectionBudgets(wall_seconds=float("inf"))
+
+
+def test_worker_inspection_preserves_the_absolute_deadline(tmp_path: Path) -> None:
+    inspection = WorkerInspection(
+        result=cast("GedcomInspectResult", object()),
+        index_path=tmp_path / "roots.sqlite3",
+        directory=tmp_path,
+        deadline=2.0,
+    )
+
+    with pytest.raises(DomainFailure) as caught:
+        inspection.check_deadline(_Cancellation(), clock=lambda: 2.0)
+
+    assert caught.value.code.value == "WORKER_TIMEOUT"
+
+    fixture = WorkerInspection(
+        result=cast("GedcomInspectResult", object()),
+        index_path=tmp_path / "roots.sqlite3",
+        directory=tmp_path,
+    )
+    assert fixture.deadline == math.inf
 
 
 def test_child_environment_excludes_provider_credentials_and_dotenv_inputs() -> None:
@@ -394,6 +439,69 @@ def test_real_child_enforces_custom_collection_limit(
 
     assert caught.value.code.value == "ARTIFACT_TOO_LARGE"
     assert source.read_bytes() == before
+
+
+def test_run_inspection_enforces_deadline_after_source_reverification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "fictional.ged"
+    source.write_text("0 HEAD\n1 CHAR UTF-8\n0 TRLR\n", encoding="utf-8")
+    before = source.read_bytes()
+    registry = _ArtifactRegistry()
+    request = GedcomInspectRequest(
+        source=registry.grant_input(
+            source,
+            operation="gedcom.inspect",
+            media_type="application/x-gedcom",
+            artifact_type="gedcom",
+        )
+    )
+    root = tmp_path / "worker-root"
+    root.mkdir(mode=0o700)
+    now = [0.0]
+    original_verify = FileIngressPolicy.verify
+
+    def delayed_verify(
+        policy: FileIngressPolicy,
+        path: Path,
+        kind: object,
+        fingerprint: object,
+    ) -> None:
+        original_verify(policy, path, kind, fingerprint)  # type: ignore[arg-type]
+        now[0] = 2.0
+
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr(FileIngressPolicy, "verify", delayed_verify)
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker._scratch_root", lambda: root)
+    monkeypatch.setattr("ancestryllm.gedcom.inspection_worker._cleanup_orphans", lambda _root: None)
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker.preflight_source",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._process_identity",
+        lambda _pid: _ProcessIdentity(True, "test:start"),
+    )
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker.subprocess.Popen",
+        lambda *_args, **_kwargs: _CompletedProcess(),
+    )
+    monkeypatch.setattr(
+        "ancestryllm.gedcom.inspection_worker._monitor_process",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(DomainFailure) as caught:
+        run_inspection(
+            source,
+            request,
+            _Cancellation(),
+            budgets=InspectionBudgets(wall_seconds=1.0),
+        )
+
+    assert caught.value.code.value == "WORKER_TIMEOUT"
+    assert source.read_bytes() == before
+    assert list(root.iterdir()) == []
 
 
 @pytest.mark.parametrize("frozen", [False, True])

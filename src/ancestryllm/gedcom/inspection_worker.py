@@ -98,6 +98,17 @@ class WorkerInspection:
     result: GedcomInspectResult
     index_path: Path
     directory: Path
+    deadline: float = math.inf
+
+    def check_deadline(
+        self,
+        cancellation: CancellationPort,
+        *,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        """Enforce the original worker deadline during parent-side admission."""
+
+        _check_deadline(cancellation, self.deadline, clock=clock)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +141,20 @@ def _failed() -> DomainFailure:
     return DomainFailure(DomainFailureCode.WORKER_FAILED)
 
 
+def _check_deadline(
+    cancellation: CancellationPort,
+    deadline: float,
+    *,
+    clock: Callable[[], float] | None = None,
+) -> None:
+    """Check cancellation first, then the shared absolute wall deadline."""
+
+    cancellation.check_cancelled()
+    now = time.monotonic if clock is None else clock
+    if now() >= deadline:
+        raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+
+
 def preflight_source(
     source: Path,
     budgets: InspectionBudgets,
@@ -137,16 +162,17 @@ def preflight_source(
     ingress: FileIngressPolicy | None = None,
     cancellation: CancellationPort | None = None,
     deadline: float | None = None,
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] | None = None,
 ) -> None:
     """Count physical lines and xrefs through the immutable bounded reader."""
 
     policy = ingress or FileIngressPolicy(FileIngressLimits())
+    now = time.monotonic if clock is None else clock
     xrefs = 0
-    if deadline is not None and clock() >= deadline:
+    if deadline is not None and now() >= deadline:
         raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
     for line_number, line in enumerate(policy.iter_text_lines(source, FileKind.GEDCOM), 1):
-        if deadline is not None and clock() >= deadline:
+        if deadline is not None and now() >= deadline:
             raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
         if line_number % 4_096 == 0 and cancellation is not None:
             cancellation.check_cancelled()
@@ -639,12 +665,11 @@ def run_inspection(
     policy = ingress or FileIngressPolicy(FileIngressLimits())
     started = time.monotonic()
     deadline = started + selected.wall_seconds
-    cancellation.check_cancelled()
+    _check_deadline(cancellation, deadline)
     source = source.absolute()
     try:
         fingerprint = policy.fingerprint(source, FileKind.GEDCOM)
-        if time.monotonic() >= deadline:
-            raise DomainFailure(DomainFailureCode.WORKER_TIMEOUT)
+        _check_deadline(cancellation, deadline)
         preflight_source(
             source,
             selected,
@@ -652,6 +677,7 @@ def run_inspection(
             cancellation=cancellation,
             deadline=deadline,
         )
+        _check_deadline(cancellation, deadline)
     except DomainFailure:
         raise
     except Exception as exc:  # noqa: BLE001 - collapse ingress details at the boundary
@@ -665,6 +691,7 @@ def run_inspection(
     try:
         root = _scratch_root()
         _cleanup_orphans(root)
+        _check_deadline(cancellation, deadline)
         directory = Path(tempfile.mkdtemp(prefix=_LEASE_PREFIX, dir=root))
         if not harden_private_directory(directory):
             raise _failed()
@@ -679,6 +706,7 @@ def run_inspection(
             ).encode("ascii"),
             maximum=_FAILURE_BYTES,
         )
+        _check_deadline(cancellation, deadline)
         payload = _control_payload(source, directory, request, selected, policy.limits)
         source_root = Path(__file__).resolve().parents[2]
         command = (
@@ -704,13 +732,16 @@ def run_inspection(
         except (BrokenPipeError, OSError):
             raise _failed() from None
         _monitor_process(process, selected, cancellation, deadline=deadline)
+        _check_deadline(cancellation, deadline)
         try:
             policy.verify(source, FileKind.GEDCOM, fingerprint)
         except Exception as exc:  # noqa: BLE001 - collapse ingress details at the boundary
             from ancestryllm.application.errors import domain_failure_from_exception
 
             raise domain_failure_from_exception(exc) from None
+        _check_deadline(cancellation, deadline)
         _validate_private_outputs(directory, selected)
+        _check_deadline(cancellation, deadline)
         failure_path = directory / _FAILURE_FILE
         if failure_path.exists():
             raise _read_failure(failure_path)
@@ -722,8 +753,14 @@ def run_inspection(
             result = GedcomInspectResult.from_json(result_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, TypeError, ValueError) as exc:
             raise _failed() from exc
+        _check_deadline(cancellation, deadline)
         success = True
-        return WorkerInspection(result=result, index_path=index_path, directory=directory)
+        return WorkerInspection(
+            result=result,
+            index_path=index_path,
+            directory=directory,
+            deadline=deadline,
+        )
     finally:
         if process is not None:
             _stop_process(process)
