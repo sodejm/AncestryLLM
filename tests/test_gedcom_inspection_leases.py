@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import shutil
 import threading
 from dataclasses import replace
@@ -19,7 +20,7 @@ from ancestryllm.application.operations import (
     RootCandidate,
 )
 from ancestryllm.domain.errors import DomainFailure, DomainFailureCode
-from ancestryllm.gedcom.root_index import build_root_index
+from ancestryllm.gedcom.root_index import build_root_index, root_index_count
 from ancestryllm.gedcom.service import GedcomService
 
 if TYPE_CHECKING:
@@ -146,7 +147,7 @@ def test_close_waits_for_a_concurrent_private_index_erasure(
     resume = threading.Event()
     closing = threading.Event()
     closed = threading.Event()
-    original = service_module._remove_inspection_directory
+    original = shutil.rmtree
 
     def paused_erase(path: Path) -> None:
         erasing.set()
@@ -283,8 +284,8 @@ def test_shared_wall_deadline_rejects_late_service_validation_without_a_lease(
     service, request, directories = _inspection(tmp_path, monkeypatch)
     original_worker = worker_module.run_inspection
     original_describe = service._require_artifacts().describe_input
-    original_count = service_module.root_index_count
-    original_token = service_module.secrets.token_hex
+    original_count = root_index_count
+    original_token = secrets.token_hex
     original_check = worker_module.WorkerInspection.check_deadline
     now = [100.0]
     worker_finished = [False]
@@ -323,7 +324,7 @@ def test_shared_wall_deadline_rejects_late_service_validation_without_a_lease(
     monkeypatch.setattr(worker_module.WorkerInspection, "check_deadline", check)
     monkeypatch.setattr(_ArtifactRegistry, "describe_input", describe)
     monkeypatch.setattr(service_module, "root_index_count", count)
-    monkeypatch.setattr(service_module.secrets, "token_hex", token)
+    monkeypatch.setattr(secrets, "token_hex", token)
     monkeypatch.setattr(threading.Timer, "start", start_timer)
     try:
         with pytest.raises(DomainFailure) as failure:
