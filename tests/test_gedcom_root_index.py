@@ -416,9 +416,10 @@ def test_byte_budget_failure_removes_staging_and_does_not_publish(tmp_path: Path
     directory = _private_directory(tmp_path)
     path = directory / "roots.sqlite3"
 
-    with pytest.raises(RootIndexError, match="byte budget"):
+    with pytest.raises(RootIndexError, match="byte budget") as caught:
         build_root_index(path, (_candidate(1),), max_bytes=1)
 
+    assert type(caught.value).__name__ == "RootIndexLimitError"
     assert not path.exists()
     assert list(directory.iterdir()) == []
 

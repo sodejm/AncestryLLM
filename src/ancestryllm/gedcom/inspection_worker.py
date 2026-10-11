@@ -45,9 +45,13 @@ from ancestryllm.gedcom._private_files import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
-    from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
+    from ancestryllm.application.operations import (
+        GedcomInspectRequest,
+        GedcomInspectResult,
+        RootCandidate,
+    )
     from ancestryllm.application.ports import CancellationPort
 
 _XREF = re.compile(r"@[^@\r\n]+@")
@@ -814,6 +818,24 @@ def _child_result(result: GedcomInspectResult, count: int) -> GedcomInspectResul
     return replace(result, **cast("Any", changes))
 
 
+def _build_child_index(
+    path: Path,
+    candidates: Iterable[RootCandidate],
+    *,
+    max_bytes: int,
+) -> int:
+    """Build the child index while exposing only its stable budget classification."""
+    module = import_module("ancestryllm.gedcom.root_index")
+    build = cast("Callable[..., int]", module.build_root_index)
+    limit_error = cast("type[Exception]", module.RootIndexLimitError)
+    try:
+        return build(path, candidates, max_bytes=max_bytes)
+    except Exception as exc:
+        if isinstance(exc, limit_error):
+            raise _limit("index") from None
+        raise
+
+
 def _child_main() -> int:
     directory: Path | None = None
     try:
@@ -859,11 +881,7 @@ def _child_main() -> int:
             raise RuntimeError("local inspection seam unavailable")
         result = execute(local_request, cancellation=None)
         root_candidates = result.root_candidates
-        build_root_index = cast(
-            "Callable[..., int]",
-            import_module("ancestryllm.gedcom.root_index").build_root_index,
-        )
-        count = build_root_index(
+        count = _build_child_index(
             directory / _INDEX_FILE,
             root_candidates,
             max_bytes=budgets.index_bytes,

@@ -81,6 +81,10 @@ class RootIndexError(RuntimeError):
     """Report a sanitized private-index validation or publication failure."""
 
 
+class RootIndexLimitError(RootIndexError):
+    """Report that private-index construction exceeded its byte ceiling."""
+
+
 @dataclass(frozen=True, slots=True)
 class RootIndexPage:
     """One bounded page from a private root-candidate index."""
@@ -455,7 +459,7 @@ def _check_staged_size(staged: Path, max_bytes: int) -> None:
         except FileNotFoundError:
             continue
     if total > max_bytes:
-        raise RootIndexError("The private root index exceeds its byte budget.")
+        raise RootIndexLimitError("The private root index exceeds its byte budget.")
 
 
 def _check_cancelled(cancellation: CancellationPort | None) -> None:
@@ -616,6 +620,7 @@ def _validate_schema(connection: sqlite3.Connection) -> None:
 
 __all__ = [
     "RootIndexError",
+    "RootIndexLimitError",
     "RootIndexPage",
     "build_root_index",
     "read_root_page",

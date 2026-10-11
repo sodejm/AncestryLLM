@@ -12,10 +12,14 @@ from typing import cast
 import pytest
 
 from ancestryllm.application._artifacts import _ArtifactRegistry
-from ancestryllm.application.operations import GedcomInspectRequest, GedcomInspectResult
+from ancestryllm.application.operations import (
+    GedcomInspectRequest,
+    GedcomInspectResult,
+    RootCandidate,
+)
 from ancestryllm.core.ingress import FileIngressLimits, FileIngressPolicy
 from ancestryllm.domain.errors import DomainFailure
-from ancestryllm.gedcom import _private_files
+from ancestryllm.gedcom import _private_files, inspection_worker
 from ancestryllm.gedcom.inspection_worker import (
     InspectionBudgets,
     WorkerInspection,
@@ -151,6 +155,50 @@ def test_worker_budgets_reject_unbounded_or_invalid_values() -> None:
         InspectionBudgets(max_xrefs=0)
     with pytest.raises(ValueError):
         InspectionBudgets(wall_seconds=float("inf"))
+
+
+def test_child_index_byte_budget_maps_to_worker_limit(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    assert _private_files.harden_private_directory(directory)
+    candidate = RootCandidate(
+        person_ref="person:0001",
+        reason_code="selectable",
+        display_name="Fictional Person",
+        source_identifier="@I1@",
+    )
+
+    with pytest.raises(DomainFailure) as caught:
+        inspection_worker._build_child_index(
+            directory / "roots.sqlite3",
+            (candidate,),
+            max_bytes=1,
+        )
+
+    assert caught.value.code.value == "WORKER_LIMIT"
+    assert caught.value.details[0].value == "index"
+    assert list(directory.iterdir()) == []
+
+
+def test_child_index_preserves_nonbudget_index_failures(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    assert _private_files.harden_private_directory(directory)
+    candidate = RootCandidate(
+        person_ref="person:0001",
+        reason_code="selectable",
+        display_name="Fictional Person",
+        source_identifier="@I1@",
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate") as caught:
+        inspection_worker._build_child_index(
+            directory / "roots.sqlite3",
+            (candidate, candidate),
+            max_bytes=1_000_000,
+        )
+
+    assert type(caught.value).__name__ == "RootIndexError"
 
 
 def test_worker_inspection_preserves_the_absolute_deadline(tmp_path: Path) -> None:

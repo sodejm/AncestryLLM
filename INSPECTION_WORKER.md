@@ -105,6 +105,8 @@ Public failures are serializable, path-free, and use stable codes:
 | Abrupt exit, invalid output, unavailable RSS, or unclassified child error | `WORKER_FAILED` | None |
 | Cooperative parent cancellation | `CANCELLED` | Existing cancellation mapping |
 
+Only the index builder's byte-ceiling signal maps to `budget=index`; malformed, corrupt, or otherwise invalid indexes remain `WORKER_FAILED`.
+
 Ingress errors retain only the shared allowlisted coded details. The failure
 channel rejects nested values, absolute paths, unknown fields, unknown codes,
 and more than eight scalar details.
