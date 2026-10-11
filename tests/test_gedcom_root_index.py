@@ -424,6 +424,36 @@ def test_byte_budget_failure_removes_staging_and_does_not_publish(tmp_path: Path
     assert list(directory.iterdir()) == []
 
 
+def test_staged_index_sync_uses_a_writable_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model Windows `_commit`, which rejects a read-only file descriptor."""
+    directory = _private_directory(tmp_path)
+    path = directory / "roots.sqlite3"
+    opened: dict[int, int] = {}
+    real_open = root_index.os.open
+    real_fsync = root_index.os.fsync
+
+    def tracked_open(candidate: Path, flags: int) -> int:
+        descriptor = real_open(candidate, flags)
+        opened[descriptor] = flags
+        return descriptor
+
+    def windows_style_fsync(descriptor: int) -> None:
+        writable_flags = root_index.os.O_WRONLY | root_index.os.O_RDWR
+        if opened[descriptor] & writable_flags == 0:
+            raise OSError("simulated Windows read-only flush rejection")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(root_index.os, "open", tracked_open)
+    monkeypatch.setattr(root_index.os, "fsync", windows_style_fsync)
+    monkeypatch.setattr(root_index, "_sync_directory", lambda _path: None)
+
+    assert build_root_index(path, (_candidate(1),), max_bytes=1_000_000) == 1
+    assert root_index_count(path) == 1
+
+
 def test_publication_race_preserves_the_winning_destination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

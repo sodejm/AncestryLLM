@@ -468,7 +468,9 @@ def _check_cancelled(cancellation: CancellationPort | None) -> None:
 
 
 def _sync_file(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
+    # Windows implements fsync through `_commit`, whose underlying durable flush
+    # requires a writable file handle even though this call changes no content.
+    descriptor = os.open(path, os.O_RDWR)
     try:
         os.fsync(descriptor)
     finally:

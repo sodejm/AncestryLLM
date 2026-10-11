@@ -34,6 +34,11 @@ unset in the child result; the parent creates an opaque reference after it has
 validated and retained the successful lease. Names and source paths therefore
 do not cross the public result or error boundary.
 
+Index publication durably flushes the completed private staging file through a
+writable descriptor, as required by the Windows file-flush API, before the
+no-overwrite publication step. The descriptor does not relax the file's private
+permissions or native ACL.
+
 ## Enforced ceilings
 
 Limits are inclusive: an input exactly at a ceiling is accepted and one unit
