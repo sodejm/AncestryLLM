@@ -272,6 +272,10 @@ The packaged WebdriverIO pass launches the unpublished application through the
 pinned WebdriverIO Electron service. The service supplies the native Electron
 automation session. Internally, the service may use its managed Puppeteer/CDP
 bridge where the Electron fuse permits it, including the source-mode suite. The
+source and packaged first-run checks use the configured WebDriver readiness
+budget to wait for readable Welcome content after heading focus. This covers
+native startup where focus becomes observable before the renderer text without
+weakening the content assertion or changing launch-timing measurements. The
 secure packaged build disables the Node CLI inspect-arguments fuse, so its
 specifications deliberately avoid `browser.electron.execute`: renderer state is
 observed through WebDriver, while Main-process and sidecar lifecycle evidence

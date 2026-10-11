@@ -16,6 +16,7 @@ import {
   recordsForProcessIds,
   type ProcessRecord,
 } from './process-records'
+import { waitForExpectedText } from './renderer-readiness'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -56,6 +57,7 @@ const READY_DIAGNOSTICS: StartupExpectation = Object.freeze({
   report: Object.freeze({ schema_version: 1, status: 'ready' }),
 })
 const CAPABILITY_SUMMARY_READY = /^(?:No control capabilities are currently available\.|\d+ local control (?:module is|modules are) available\.)$/u
+const WELCOME_LOCAL_COPY = /Your desktop control shell stays local to this device\./u
 
 const visible = async (selector: string) => {
   const element = await $(selector)
@@ -695,7 +697,13 @@ describe('unpublished unpacked native package', () => {
     assert.ok(Number.isFinite(launchedAt) && launchedAt > 0)
     await expectFocusedHeading('Welcome to AncestryLLM')
     const coldLaunchMs = Date.now() - launchedAt
-    assert.match(await text('main'), /Your desktop control shell stays local to this device\./u)
+    const welcomeText = await waitForExpectedText(
+      () => text('main'),
+      WELCOME_LOCAL_COPY,
+      (condition, options) => browser.waitUntil(condition, options),
+      'Expected Welcome content to become readable',
+    )
+    assert.match(welcomeText, WELCOME_LOCAL_COPY)
     await expectStartupDiagnostics(READY_DIAGNOSTICS)
     const readyMs = Date.now() - launchedAt
     await click('button=Continue to Home')
