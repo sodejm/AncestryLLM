@@ -16,6 +16,9 @@ Admission validates the worker's SQLite index and requires its verified row coun
 to match the summary before creating a lease or starting its expiry timer. A
 missing, corrupt, or count-mismatched index fails with `WORKER_FAILED` and the
 unretained worker directory is erased immediately.
+Source hashing, index validation, and lease admission share the worker's original
+120-second wall deadline. A deadline exceeded during those parent checks fails
+with `WORKER_TIMEOUT`, erases the unretained directory, and starts no lease timer.
 `read_inspection_roots` verifies that binding and the lifetime before opening the
 index. It accepts queries of at most 128 characters, non-negative scan offsets,
 and page limits from 1 through 100. Its transport-neutral `RootCandidateWindow`
@@ -64,8 +67,8 @@ adapters. Public service inspection always uses the worker and a lease. No
 provider, CLI command, or renderer-specific registry is added.
 
 Fictional-data tests cover summary privacy, bounded reads, source-binding
-rejection, invalid index admission, repeated release, expiry without requests,
-timer startup failure,
+rejection, invalid index admission, late parent validation, repeated release,
+expiry without requests, timer startup failure,
 shutdown during a worker or concurrent erasure, manager result cleanup, and
 signed cursor behavior.
 These local tests do not qualify a packaged desktop target or replace its manual

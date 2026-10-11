@@ -1154,6 +1154,7 @@ class GedcomService:
         try:
             cancellation_port.check_cancelled()
             source = registry.describe_input(request.source, operation="gedcom.inspect")
+            inspected.check_deadline(cancellation_port)
             if (
                 source.sha256 is None
                 or source.sha256 != inspected.result.summary.source.sha256
@@ -1170,6 +1171,7 @@ class GedcomService:
                 verified_count = root_index_count(inspected.index_path)
             except RootIndexError as exc:
                 raise DomainFailure(DomainFailureCode.WORKER_FAILED) from exc
+            inspected.check_deadline(cancellation_port)
             if verified_count != candidate_count:
                 raise DomainFailure(DomainFailureCode.WORKER_FAILED)
             reference = "root-index:" + secrets.token_hex(16)
@@ -1188,6 +1190,7 @@ class GedcomService:
                 timer,
             )
             with self._inspection_lock:
+                inspected.check_deadline(cancellation_port)
                 if self._inspection_closed:
                     raise DomainFailure(DomainFailureCode.NOT_FOUND)
                 if len(self._inspection_leases) >= 8:

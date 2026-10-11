@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 import threading
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -40,7 +39,7 @@ def _inspection(
     )
     directories: list[Path] = []
 
-    def worker(*args: object, **kwargs: object) -> SimpleNamespace:
+    def worker(*args: object, **kwargs: object) -> worker_module.WorkerInspection:
         del args, kwargs
         directory = tmp_path / f"worker-{len(directories)}"
         directory.mkdir(mode=0o700)
@@ -66,7 +65,7 @@ def _inspection(
             finding_count=0,
             root_candidate_count=1,
         )
-        return SimpleNamespace(result=result, index_path=path, directory=directory)
+        return worker_module.WorkerInspection(result=result, index_path=path, directory=directory)
 
     monkeypatch.setattr(
         "ancestryllm.gedcom.inspection_worker.run_inspection", worker, raising=False
@@ -257,7 +256,7 @@ def test_index_is_validated_before_lease(
         elif defect == "corrupt":
             inspected.index_path.write_bytes(b"fictional invalid index")
         else:
-            inspected.result = replace(inspected.result, root_candidate_count=2)
+            inspected = replace(inspected, result=replace(inspected.result, root_candidate_count=2))
         return inspected
 
     def start_timer(timer: threading.Timer) -> None:
@@ -269,6 +268,67 @@ def test_index_is_validated_before_lease(
         with pytest.raises(DomainFailure) as failure:
             service.execute_inspect(request)
         assert failure.value.code is DomainFailureCode.WORKER_FAILED
+        assert service._inspection_leases == {}
+        assert timer_starts == []
+        assert not directories[0].exists()
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("stage", ["source-hash", "index-validation", "lease-admission"])
+def test_shared_wall_deadline_rejects_late_service_validation_without_a_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    """Post-worker validation must retain the original request deadline and erase outputs."""
+    service, request, directories = _inspection(tmp_path, monkeypatch)
+    original_worker = worker_module.run_inspection
+    original_describe = service._require_artifacts().describe_input
+    original_count = service_module.root_index_count
+    original_token = service_module.secrets.token_hex
+    original_check = worker_module.WorkerInspection.check_deadline
+    now = [100.0]
+    worker_finished = [False]
+    timer_starts: list[threading.Timer] = []
+
+    def worker(*args: object, **kwargs: object) -> worker_module.WorkerInspection:
+        inspected = original_worker(*args, **kwargs)
+        worker_finished[0] = True
+        return replace(inspected, deadline=105.0)
+
+    def describe(_registry: _ArtifactRegistry, *args: object, **kwargs: object) -> object:
+        source = original_describe(*args, **kwargs)
+        if stage == "source-hash" and worker_finished[0]:
+            now[0] = 106.0
+        return source
+
+    def count(*args: object, **kwargs: object) -> int:
+        total = original_count(*args, **kwargs)
+        if stage == "index-validation":
+            now[0] = 106.0
+        return total
+
+    def token(*args: object, **kwargs: object) -> str:
+        value = original_token(*args, **kwargs)
+        if stage == "lease-admission":
+            now[0] = 106.0
+        return value
+
+    def check(inspected: worker_module.WorkerInspection, cancellation: object) -> None:
+        original_check(inspected, cancellation, clock=lambda: now[0])
+
+    def start_timer(timer: threading.Timer) -> None:
+        timer_starts.append(timer)
+
+    monkeypatch.setattr(worker_module, "run_inspection", worker)
+    monkeypatch.setattr(worker_module.WorkerInspection, "check_deadline", check)
+    monkeypatch.setattr(_ArtifactRegistry, "describe_input", describe)
+    monkeypatch.setattr(service_module, "root_index_count", count)
+    monkeypatch.setattr(service_module.secrets, "token_hex", token)
+    monkeypatch.setattr(threading.Timer, "start", start_timer)
+    try:
+        with pytest.raises(DomainFailure) as failure:
+            service.execute_inspect(request)
+        assert failure.value.code is DomainFailureCode.WORKER_TIMEOUT
         assert service._inspection_leases == {}
         assert timer_starts == []
         assert not directories[0].exists()
