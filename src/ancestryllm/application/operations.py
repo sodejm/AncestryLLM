@@ -428,6 +428,22 @@ class RootCandidatePage(BoundaryDTO):
             raise ValueError("Root candidate cursor exceeds its limit.")
 
 
+@dataclass(frozen=True, slots=True)
+class RootCandidateWindow(BoundaryDTO):
+    """Private service page with a bounded scan continuation, before cursor signing."""
+
+    candidates: tuple[RootCandidate, ...]
+    total_count: int | None
+    next_offset: int | None
+
+    def __post_init__(self) -> None:
+        RootCandidatePage(self.candidates, self.total_count, None)
+        if self.next_offset is not None and (
+            type(self.next_offset) is not int or self.next_offset <= 0
+        ):
+            raise ValueError("Invalid root candidate continuation.")
+
+
 _DEFAULT_MERGE_DECISION_OPTIONS = (
     DecisionOption(
         option_id="retain-both",
@@ -493,12 +509,32 @@ class GedcomInspectRequest(ServiceRequest):
 
 @dataclass(frozen=True, slots=True)
 class GedcomInspectResult(ServiceResult):
-    """Private retained inspection; adapters expose a summary and bounded pages."""
+    """Retain an opaque source-bound index lease; adapters expose bounded pages.
+
+    Worker results carry a count and no eager candidates. The tuple remains for
+    the worker-local parser and compatibility with in-memory service adapters.
+    """
 
     summary: GedcomSourceSummary
     findings: tuple[GedcomValidationFinding, ...]
     root_candidates: tuple[RootCandidate, ...]
     finding_count: int
+    root_index_ref: str | None = None
+    root_candidate_count: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.root_candidate_count is not None and (
+            type(self.root_candidate_count) is not int or self.root_candidate_count < 0
+        ):
+            raise ValueError("Invalid root candidate count.")
+        if self.root_index_ref is not None and (
+            not self.root_index_ref.startswith("root-index:")
+            or len(self.root_index_ref) != 43
+            or any(char not in "0123456789abcdef" for char in self.root_index_ref[11:])
+            or self.root_candidate_count is None
+            or self.root_candidates
+        ):
+            raise ValueError("Invalid private root index reference.")
 
     def summary_result(self) -> GedcomInspectSummary:
         """Project metadata without serializing the complete candidate collection."""
@@ -506,7 +542,11 @@ class GedcomInspectResult(ServiceResult):
             summary=self.summary,
             findings=self.findings[:100],
             finding_count=self.finding_count,
-            root_candidate_count=len(self.root_candidates),
+            root_candidate_count=(
+                self.root_candidate_count
+                if self.root_candidate_count is not None
+                else len(self.root_candidates)
+            ),
         )
 
 
@@ -1141,6 +1181,7 @@ __all__ = [
     "QueryRow",
     "RootCandidate",
     "RootCandidatePage",
+    "RootCandidateWindow",
     "RootsMagicExportArtifact",
     "RootsMagicExportRequest",
     "RootsMagicExportResult",

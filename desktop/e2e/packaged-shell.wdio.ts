@@ -10,7 +10,13 @@ import { PRODUCTION_CSP } from '../src/main/security-policy'
 import type { AncestryBridge, StartupDiagnostics } from '../src/shared-contract/desktop'
 import { bridgeMethods } from './bridge-contract'
 import { normalizeVerificationSelection } from './native-file-dialogs.packaged-verification'
-import { matchesPackagedMainProcess, type ProcessRecord } from './process-records'
+import {
+  findPackagedMainProcess,
+  isExpectedLastWindowCloseError,
+  recordsForProcessIds,
+  type ProcessRecord,
+} from './process-records'
+import { waitForExpectedText } from './renderer-readiness'
 
 const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE
 const metricsPath = process.env.ANCESTRYLLM_PACKAGED_METRICS
@@ -51,6 +57,7 @@ const READY_DIAGNOSTICS: StartupExpectation = Object.freeze({
   report: Object.freeze({ schema_version: 1, status: 'ready' }),
 })
 const CAPABILITY_SUMMARY_READY = /^(?:No control capabilities are currently available\.|\d+ local control (?:module is|modules are) available\.)$/u
+const WELCOME_LOCAL_COPY = /Your desktop control shell stays local to this device\./u
 
 const visible = async (selector: string) => {
   const element = await $(selector)
@@ -133,6 +140,22 @@ async function expectStartupDiagnostics(expected: StartupExpectation): Promise<v
   }
 }
 
+async function expectRecoveredDiagnosticsSurface(): Promise<void> {
+  try {
+    await browser.waitUntil(async () => {
+      const alertCount = await $$('[role="alert"]').length
+      const retryCount = await $$('button=Retry desktop service').length
+      return alertCount === 0 && retryCount === 0
+    }, {
+      timeout: 30_000,
+      interval: 250,
+      timeoutMsg: 'Packaged Diagnostics did not clear recovered alerts and retry controls',
+    })
+  } catch (error) {
+    throw new Error('Packaged Diagnostics recovery surface did not become ready', { cause: error })
+  }
+}
+
 async function expectSafeDiagnosticsAlert(expectedMessage: RegExp): Promise<void> {
   await click('a=Diagnostics')
   await expectFocusedHeading('Diagnostics')
@@ -146,17 +169,17 @@ async function mainPid(excluded: ReadonlySet<number> = new Set()): Promise<numbe
   if (!automatedPackagedExecutable || !userDataDirectory) {
     throw new Error('Automated packaged executable and isolated user data are required')
   }
-  return eventually(
+  const observed = await eventually(
     'Packaged Electron main-process PID was not observed',
-    async () => (await processSnapshot()).find((record) => (
-      !excluded.has(record.pid) && matchesPackagedMainProcess(
-        record,
-        automatedPackagedExecutable,
-        userDataDirectory,
-      )
-    ))?.pid ?? -1,
-    (pid) => pid > 0,
+    async () => findPackagedMainProcess(
+      await processSnapshot(),
+      automatedPackagedExecutable,
+      userDataDirectory,
+      excluded,
+    ),
+    ({ pid }) => pid > 0,
   )
+  return observed.pid
 }
 
 async function processStartedAt(pid: number): Promise<number> {
@@ -281,7 +304,11 @@ async function expectProcessAbsent(pid: number, timeoutMs = 45_000): Promise<voi
 async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   const pid = await mainPid()
   const activeSidecarPid = await sidecarPid(pid, sidecarPath)
-  await browser.closeWindow()
+  try {
+    await browser.closeWindow()
+  } catch (error) {
+    if (!isExpectedLastWindowCloseError(error)) throw error
+  }
   await Promise.all([
     expectProcessAbsent(pid),
     expectProcessAbsent(activeSidecarPid),
@@ -289,11 +316,30 @@ async function closeApplicationWindow(sidecarPath: string): Promise<number> {
   return pid
 }
 
-async function terminateVerificationApplication(): Promise<number> {
+async function closeApplicationWindowWithoutSidecar(): Promise<number> {
   const pid = await mainPid()
-  await killProcess(pid)
+  try {
+    await browser.closeWindow()
+  } catch (error) {
+    if (!isExpectedLastWindowCloseError(error)) throw error
+  }
   await expectProcessAbsent(pid)
   return pid
+}
+
+async function rendererProcessIds(): Promise<ReadonlySet<number>> {
+  const puppeteer = await browser.getPuppeteer()
+  const session = await puppeteer.target().createCDPSession()
+  try {
+    const { processInfo } = await session.send('SystemInfo.getProcessInfo')
+    return new Set(
+      processInfo
+        .filter((record) => record.type === 'renderer')
+        .map((record) => Number(record.id)),
+    )
+  } finally {
+    await session.detach()
+  }
 }
 
 async function writeFaultEvidence(
@@ -510,23 +556,24 @@ async function expectProductionBoundary(rootPid: number): Promise<ProductionBoun
   const rendererOutboundRequests = rendererOutboundAttemptUrls.length
   assert.deepEqual(rendererOutboundAttemptUrls, [])
 
-  const tree = await eventually(
+  const processBoundary = await eventually(
     'Packaged renderer process was not observed',
-    async () => descendantProcessTree(await processSnapshot(), rootPid),
-    (records) => records.some((record) => (
-      record.commandLine.includes('--type=renderer')
-      && !record.commandLine.includes('--no-sandbox')
-    )),
+    async () => {
+      const tree = descendantProcessTree(await processSnapshot(), rootPid)
+      return { tree, renderers: recordsForProcessIds(tree, await rendererProcessIds()) }
+    },
+    ({ renderers }) => renderers.length > 0,
   )
+  const { tree, renderers } = processBoundary
   assert.ok(tree.some((record) => record.pid === rootPid))
+  assert.equal(renderers.some((record) => record.commandLine.includes('--no-sandbox')), false)
   // The WebdriverIO Electron service supplies a main-process inspector argument
   // for this automated session. Keep it out of renderer processes here; the
   // package-fuse inspection and the separate normal-launch scenario prove that
   // a production launch cannot expose a debugging transport.
   const inspectPattern = new RegExp('(?:^|\\s)--inspect(?:-brk)?(?:=|\\s|$)', 'u')
   assert.doesNotMatch(
-    tree
-      .filter((record) => record.commandLine.includes('--type=renderer'))
+    renderers
       .map((record) => record.commandLine)
       .join('\n'),
     inspectPattern,
@@ -650,7 +697,13 @@ describe('unpublished unpacked native package', () => {
     assert.ok(Number.isFinite(launchedAt) && launchedAt > 0)
     await expectFocusedHeading('Welcome to AncestryLLM')
     const coldLaunchMs = Date.now() - launchedAt
-    assert.match(await text('main'), /Your desktop control shell stays local to this device\./u)
+    const welcomeText = await waitForExpectedText(
+      () => text('main'),
+      WELCOME_LOCAL_COPY,
+      (condition, options) => browser.waitUntil(condition, options),
+      'Expected Welcome content to become readable',
+    )
+    assert.match(welcomeText, WELCOME_LOCAL_COPY)
     await expectStartupDiagnostics(READY_DIAGNOSTICS)
     const readyMs = Date.now() - launchedAt
     await click('button=Continue to Home')
@@ -691,10 +744,13 @@ describe('unpublished unpacked native package', () => {
 
     const previousApplicationPid = await mainPid()
     await browser.reloadSession()
+    await expectFocusedHeading('Home')
+    // Observe launch completion before potentially slow native process queries.
+    const warmReadyAt = Date.now()
     const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))
     const warmLaunchedAt = await processStartedAt(replacementApplicationPid)
-    await expectFocusedHeading('Home')
-    const warmLaunchMs = Date.now() - warmLaunchedAt
+    assert.ok(warmLaunchedAt <= warmReadyAt, 'Warm launch observation must follow process startup')
+    const warmLaunchMs = warmReadyAt - warmLaunchedAt
     assert.equal((await $$('h1=Welcome to AncestryLLM')).length, 0)
     assert.deepEqual(await browser.execute(() => ({
       theme: document.documentElement.dataset.theme,
@@ -742,7 +798,7 @@ describe('unpublished unpacked native package', () => {
       automaticRestartsRemaining: 2,
       manualRetriesRemaining: 0,
     })
-    assert.equal((await $$('[role="alert"]')).length, 0)
+    await expectRecoveredDiagnosticsSurface()
     await closeApplicationWindow(copiedSidecarPath)
     await writeFaultEvidence(withholdEvidencePath, 'sidecar-withhold-retry', {
       failure: 'startup_failed',
@@ -837,8 +893,8 @@ describe('unpublished unpacked native package', () => {
         automaticRestartsRemaining: 2,
         manualRetriesRemaining: 0,
       })
-      phase = 'termination'
-      await terminateVerificationApplication()
+      phase = 'window close'
+      await closeApplicationWindowWithoutSidecar()
       processExited = true
       phase = 'write fault evidence'
       await writeFaultEvidence(integrityEvidencePath, 'sidecar-integrity-substitution', {
@@ -950,8 +1006,12 @@ describe('unpublished unpacked native package', () => {
       format: 'gedcom',
       validation: 'replacement-confirmed',
     })
-    assert.deepEqual(results.openRevocation, { ok: true, data: { revoked: true } })
-    assert.deepEqual(results.saveRevocation, { ok: true, data: { revoked: true } })
+    assert.deepEqual(results.openRevocation, {
+      protocolVersion: '1', ok: true, data: { revoked: true },
+    })
+    assert.deepEqual(results.saveRevocation, {
+      protocolVersion: '1', ok: true, data: { revoked: true },
+    })
     const exposedStrings = stringsIn(results)
     for (const selectedPath of new Set([
       fileGrantOpenPath,

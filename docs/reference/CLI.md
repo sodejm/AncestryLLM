@@ -191,6 +191,22 @@ allocation; filesystem, argument, and record order do not. Origins remain
 independent unless an existing binding explicitly associates them, and
 repeating the same synchronization produces the same semantic bundle.
 
+Before checking for an idempotent update, reconciling identities, or comparing
+a manual rebase, synchronization validates every master and snapshot as a
+separate GEDCOM document. A rebase validates both the edited master and the
+immutable parent master named by its manifest before comparing their records.
+Each document must begin with exactly one `HEAD`, end with exactly one `TRLR`,
+and declare every record identifier only once. The same identifier,
+such as `@I1@`, may appear once in each source; source bindings keep those
+records independent unless identity evidence associates them. A duplicate
+identifier within one input fails as `SYNC_PARSE` (exit `3`) without staging a
+generation, modifying an input, or replacing the active manifest or release.
+Repair or re-export only the named input, keep the last complete generation,
+and retry. Do not edit a published generation in place. An identical snapshot
+that is already active is still validated before the read-only
+`No update was needed` result. Cancellation requested while those final input
+hashes are verified is observed before that result is returned.
+
 Automatic reconciliation can remove only source-owned, uncited, unprotected
 fact blocks. It never removes complete people, families, relationships, source
 records, cited facts, or protected/manual facts. A snapshot import never

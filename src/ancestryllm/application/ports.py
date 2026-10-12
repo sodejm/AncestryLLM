@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         GedcomSubtreeResult,
         GedcomSyncRequest,
         GedcomSyncResult,
+        RootCandidateWindow,
     )
 
 
@@ -111,6 +112,14 @@ class GedcomOperationsPort(Protocol):
         cancellation: CancellationPort | None = None,
     ) -> GedcomInspectResult:
         """Inspect one granted GEDCOM source."""
+
+    def read_inspection_roots(
+        self, result: GedcomInspectResult, *, query: str, offset: int, limit: int
+    ) -> RootCandidateWindow:
+        """Read one source-bound private index window while its lease is live."""
+
+    def release_inspection(self, result: GedcomInspectResult) -> None:
+        """Idempotently erase the projection owned by a retained inspection."""
 
     def execute_merge(
         self,

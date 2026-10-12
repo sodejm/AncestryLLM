@@ -221,6 +221,25 @@ def _perform_update(
 
         guarded_identity_resolver = verify_and_resolve
 
+    try:
+        sources = core.load_sources(
+            [master, *(spec.path for spec in specs)],
+            ingress,
+            {
+                master: master_fingerprint.snapshot,
+                **{spec.path: spec.fingerprint.snapshot for spec in specs},
+            },
+            validate_structure=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise SyncError(
+            "SYNC_PARSE",
+            "A master or snapshot GEDCOM could not be parsed safely.",
+            "Publishing a partial generation could break relationships or citations.",
+            ["Open the named file and repair the reported GEDCOM line, then retry."],
+            details=(f"Error class: {type(exc).__name__}",),
+        ) from exc
+    _checkpoint(cancellation_check)
     if all(
         manifest.get("active_snapshots", {}).get(spec.source_id) == spec.snapshot_id
         for spec in specs
@@ -234,24 +253,6 @@ def _perform_update(
                 "with the same SHA-256 checksum. No release files were changed.\n"
             ),
         )
-    try:
-        sources = core.load_sources(
-            [master, *(spec.path for spec in specs)],
-            ingress,
-            {
-                master: master_fingerprint.snapshot,
-                **{spec.path: spec.fingerprint.snapshot for spec in specs},
-            },
-        )
-    except (OSError, ValueError) as exc:
-        raise SyncError(
-            "SYNC_PARSE",
-            "A master or snapshot GEDCOM could not be parsed safely.",
-            "Publishing a partial generation could break relationships or citations.",
-            ["Open the named file and repair the reported GEDCOM line, then retry."],
-            details=(f"Error class: {type(exc).__name__}",),
-        ) from exc
-    _checkpoint(cancellation_check)
     stats = SyncStats()
     pointer_map, bindings, _ = _match_people(
         sources,
@@ -615,6 +616,25 @@ def _perform_rebase(
                 f"Actual SHA-256: {previous_fingerprint.sha256}",
             ),
         )
+    try:
+        core.load_sources(
+            [previous_path, master],
+            ingress,
+            {
+                previous_path: previous_fingerprint.snapshot,
+                master: master_fingerprint.snapshot,
+            },
+            validate_structure=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise SyncError(
+            "SYNC_PARSE",
+            "A current or previous master GEDCOM could not be parsed safely.",
+            "Manual rebase comparison requires unambiguous GEDCOM record identifiers.",
+            ["Open the named file and repair the reported GEDCOM line, then retry."],
+            details=(f"Error class: {type(exc).__name__}",),
+        ) from exc
+    _checkpoint(cancellation_check)
     previous = _master_block_index(
         previous_path,
         core,

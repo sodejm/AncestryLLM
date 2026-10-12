@@ -6,6 +6,9 @@ import '@wdio/native-types'
 import axe from 'axe-core'
 import { PRODUCTION_CSP } from '../src/main/security-policy'
 import { bridgeMethods } from './bridge-contract'
+import { waitForExpectedText } from './renderer-readiness'
+
+const WELCOME_LOCAL_COPY = /Your desktop control shell stays local to this device\./u
 
 const visible = async (selector: string) => {
   const element = await $(selector)
@@ -272,7 +275,13 @@ describe('source-built desktop shell', () => {
     await expectIsolatedUserData()
     await expectFocusedHeading('Welcome to AncestryLLM')
     await expectProductionNavigation()
-    assert.match(await text('main'), /Your desktop control shell stays local to this device\./u)
+    const welcomeText = await waitForExpectedText(
+      () => text('main'),
+      WELCOME_LOCAL_COPY,
+      (condition, options) => browser.waitUntil(condition, options),
+      'Expected Welcome content to become readable',
+    )
+    assert.match(welcomeText, WELCOME_LOCAL_COPY)
     assert.match(await text('main'), /No account, provider, API key, genealogy data, or cloud consent is requested here/iu)
     assert.match(await text('main'), /Updates are installed manually/iu)
     assert.equal(await (await $('a=Open Diagnostics')).getAttribute('href'), '#/diagnostics')

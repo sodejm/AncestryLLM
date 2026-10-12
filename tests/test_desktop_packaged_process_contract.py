@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
+SANDBOX_PREPARER = ROOT / "desktop" / "scripts" / "prepare-electron-sandbox.mjs"
 NORMAL_LAUNCH_VERIFIER = ROOT / "desktop" / "scripts" / "verify-normal-launch.mjs"
 PACKAGED_NATIVE_VERIFICATION = (
     ROOT / "desktop" / "e2e" / "native-verification.packaged-verification.ts"
@@ -37,18 +38,29 @@ def test_packaged_renderer_evidence_uses_the_native_electron_session() -> None:
     assert (
         "const automatedPackagedExecutable = process.env.ANCESTRYLLM_PACKAGED_EXECUTABLE" in source
     )
-    assert "matchesPackagedMainProcess(" in source
+    assert "findPackagedMainProcess(" in source
     assert "record.commandLine" in process_records_source
-    assert "commandLine.includes(expectedExecutable)" in process_records_source
-    assert "commandLine.includes(expectedProfile)" in process_records_source
+    assert "hasExactArgument(commandLine, expectedExecutable)" in process_records_source
+    assert "hasExactUserDataDirectory(commandLine, expectedProfile)" in process_records_source
+    assert "if (excluded.has(record.pid)) continue" in process_records_source
     assert "!commandLine.includes('--type=')" in process_records_source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
-    assert "record.commandLine.includes('--type=renderer')" in source
-    assert "!record.commandLine.includes('--no-sandbox')" in source
+    renderer_query = source.split("async function rendererProcessIds()", maxsplit=1)[1].split(
+        "\nasync function ", maxsplit=1
+    )[0]
+    assert "await browser.getPuppeteer()" in renderer_query
+    assert "await puppeteer.target().createCDPSession()" in renderer_query
+    assert renderer_query.count("session.send(") == 1
+    assert "session.send('SystemInfo.getProcessInfo')" in renderer_query
+    assert "record.type === 'renderer'" in renderer_query
+    assert "Number(record.id)" in renderer_query
+    assert "finally {\n    await session.detach()" in renderer_query
+    assert "recordsForProcessIds(tree, await rendererProcessIds())" in source
+    assert "processIds.has(record.pid)" in process_records_source
+    assert "renderers.some((record) => record.commandLine.includes('--no-sandbox'))" in source
     assert "app.enableSandbox()" in main_source
     for forbidden in (
         "newBrowserCDPSession",
-        "SystemInfo.getProcessInfo",
         "connectOverCDP",
         "remote-debugging-port",
     ):
@@ -70,14 +82,48 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
     assert "unexpectedErrorCodes: []" in source
 
 
+def test_normal_launch_preserves_gui_visibility_for_native_windows_close() -> None:
+    source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
+    launch_start = source.index("const child = spawn(executable, launchArguments, {")
+    launch_end = source.index("\n  })", launch_start)
+    launch_source = source[launch_start:launch_end]
+
+    # A hidden GUI can emit readiness while CloseMainWindow cannot find its window.
+    assert "windowsHide: false" in launch_source
+    assert "windowsHide: true" not in launch_source
+    assert "stdio: 'pipe'" in launch_source
+
+
+def test_warm_launch_measurement_excludes_native_process_query_latency() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    restart_start = source.index("const previousApplicationPid = await mainPid()")
+    restart_end = source.index("const corruptPayload =", restart_start)
+    restart_source = source[restart_start:restart_end]
+
+    reload_index = restart_source.index("await browser.reloadSession()")
+    heading_index = restart_source.index("await expectFocusedHeading('Home')")
+    observed_index = restart_source.index("const warmReadyAt = Date.now()")
+    process_query_index = restart_source.index("await mainPid(new Set([previousApplicationPid]))")
+    start_query_index = restart_source.index("await processStartedAt(replacementApplicationPid)")
+
+    # CIM and PowerShell latency must not inflate the observed launch interval.
+    assert reload_index < heading_index < observed_index < process_query_index < start_query_index
+    assert "const warmLaunchMs = warmReadyAt - warmLaunchedAt" in restart_source
+    assert "assert.ok(warmLaunchedAt <= warmReadyAt" in restart_source
+    assert "assert.match(await text('main'), /Ready/u)" in restart_source
+
+
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
-    quit_start = source.index("async function closeApplicationWindow")
-    quit_end = source.index("\nasync function terminateVerificationApplication", quit_start)
+    quit_start = source.index("async function closeApplicationWindow(sidecarPath: string)")
+    quit_end = source.index("\nasync function closeApplicationWindowWithoutSidecar", quit_start)
     quit_source = source[quit_start:quit_end]
+    degraded_quit_start = quit_end + 1
+    degraded_quit_end = source.index("\nasync function rendererProcessIds", degraded_quit_start)
+    degraded_quit_source = source[degraded_quit_start:degraded_quit_end]
     normal_quit_start = normal_source.index("async function requestNormalApplicationQuit")
     normal_quit_end = normal_source.index(
         "\n/** Launches and verifies one selected packaged runtime", normal_quit_start
@@ -92,7 +138,15 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
     assert "expectProcessAbsent(activeSidecarPid)" in quit_source
     assert "browser.electron.execute" not in quit_source
     assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
-    assert "await closeApplicationWindow()" not in source
+    assert (
+        "async function closeApplicationWindowWithoutSidecar(): Promise<number>"
+        in degraded_quit_source
+    )
+    assert "await browser.closeWindow()" in degraded_quit_source
+    assert "if (!isExpectedLastWindowCloseError(error)) throw error" in degraded_quit_source
+    assert "await expectProcessAbsent(pid)" in degraded_quit_source
+    assert "sidecarPid(" not in degraded_quit_source
+    assert source.count("await closeApplicationWindowWithoutSidecar()") == 1
 
     assert "CloseMainWindow()" in normal_quit_source
     assert "child.kill('SIGTERM')" in normal_quit_source
@@ -177,10 +231,10 @@ def test_packaged_environment_authenticates_native_keyring_boundaries() -> None:
         "pnpm --dir desktop run build:packaged-native-verification"
     )
     production_assembly = workflow_source.index(
-        "electron-builder --config electron-builder.verification.yml"
+        "run-electron-builder.mjs --config electron-builder.verification.yml"
     )
     verification_assembly = workflow_source.index(
-        "electron-builder --config electron-builder.native-verification.yml"
+        "run-electron-builder.mjs --config electron-builder.native-verification.yml"
     )
     assert production_build < production_assembly < verification_build < verification_assembly
     assert "desktop/release-native-verification" in workflow_source
@@ -321,11 +375,12 @@ def test_packaged_startup_diagnostic_poll_retries_transient_unavailability() -> 
 
 
 def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
-    source = PACKAGED_RUNNER.read_text(encoding="utf-8")
+    runner_source = PACKAGED_RUNNER.read_text(encoding="utf-8")
+    source = SANDBOX_PREPARER.read_text(encoding="utf-8")
 
-    assert "function prepareCopiedLinuxSandbox(packageRoot, execFileSyncImpl)" in source
-    assert "if (process.platform !== 'linux') return" in source
-    assert "const sandboxPath = join(packageRoot, 'chrome-sandbox')" in source
+    assert "export function prepareLinuxElectronSandbox(" in source
+    assert "if (platform !== 'linux') return" in source
+    assert "const sandboxPath = join(electronDistributionRoot, 'chrome-sandbox')" in source
     assert "sandbox.isSymbolicLink()" in source
     assert "sandbox.isFile()" in source
     assert "'--non-interactive', 'chown', 'root:root', '--', sandboxPath" in source
@@ -333,8 +388,27 @@ def test_linux_package_copies_restore_the_chromium_suid_sandbox() -> None:
     assert "prepared.uid, 0" in source
     assert "prepared.gid, 0" in source
     assert "prepared.mode & 0o7777, 0o4755" in source
-    assert "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)" in source
-    assert source.index("cpSync(sourcePackageRoot, copiedPackageRoot") < source.index(
-        "prepareCopiedLinuxSandbox(copiedPackageRoot, execFileSyncImpl)"
+    assert "prepareLinuxElectronSandbox(copiedPackageRoot, { execFileSyncImpl })" in runner_source
+    assert runner_source.index("cpSync(sourcePackageRoot, copiedPackageRoot") < runner_source.index(
+        "prepareLinuxElectronSandbox(copiedPackageRoot, { execFileSyncImpl })"
     )
-    assert "--no-sandbox" not in source
+    assert "--no-sandbox" not in source + runner_source
+
+
+def test_packaged_diagnostics_recovery_waits_for_renderer_alerts_to_clear() -> None:
+    source = PACKAGED_SPEC.read_text(encoding="utf-8")
+    helper_start = source.index("async function expectRecoveredDiagnosticsSurface")
+    helper_end = source.index("\nasync function ", helper_start + 1)
+    helper_source = source[helper_start:helper_end]
+    scenario_start = source.index(
+        "it('withholds and restores the packaged sidecar through Diagnostics retry'"
+    )
+    scenario_end = source.index("\n  it('", scenario_start + 1)
+    scenario_source = source[scenario_start:scenario_end]
+
+    assert "await browser.waitUntil(async () =>" in helper_source
+    assert "const alertCount = await $$('[role=\"alert\"]').length" in helper_source
+    assert "const retryCount = await $$('button=Retry desktop service').length" in helper_source
+    assert "return alertCount === 0 && retryCount === 0" in helper_source
+    assert "timeout: 30_000" in helper_source
+    assert "await expectRecoveredDiagnosticsSurface()" in scenario_source

@@ -217,6 +217,10 @@
     "title": "Release evidence index — AncestryLLM",
     "description": "Index of machine-readable and human-reviewed evidence retained for AncestryLLM release decisions."
   },
+  "release-evidence/0.7.0-local-batch-1.md": {
+    "title": "v0.7.0 local batch acceptance — AncestryLLM",
+    "description": "Acceptance criteria, local regression evidence, and remaining release blockers for issues 504, 505, 489, 490, and 491."
+  },
   "release-evidence/issue-10-import-smoke-tests.md": {
     "title": "GEDCOM import smoke-test evidence — AncestryLLM",
     "description": "Reproducible evidence for the fictional GEDCOM importer smoke tests tracked by issue 10."

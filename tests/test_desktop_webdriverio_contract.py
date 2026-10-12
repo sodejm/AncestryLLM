@@ -21,7 +21,7 @@ def test_webdriverio_dependencies_and_commands_are_exactly_locked() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     dependencies = package["devDependencies"]
 
-    assert dependencies["@wdio/electron-service"] == "10.0.0"
+    assert dependencies["@wdio/electron-service"] == "10.3.0"
     for name in (
         "@wdio/cli",
         "@wdio/local-runner",
@@ -29,9 +29,9 @@ def test_webdriverio_dependencies_and_commands_are_exactly_locked() -> None:
         "@wdio/spec-reporter",
         "webdriverio",
     ):
-        assert dependencies[name] == "9.31.2"
-    assert dependencies["@wdio/globals"] == "9.31.1"
-    assert "tsx: 4.21.1" in PNPM_WORKSPACE.read_text(encoding="utf-8")
+        assert dependencies[name] == "9.32.0"
+    assert dependencies["@wdio/globals"] == "9.31.3"
+    assert "tsx: 4.23.15" in PNPM_WORKSPACE.read_text(encoding="utf-8")
 
     scripts = package["scripts"]
     assert "run-wdio.mjs source" in scripts["test:e2e"]
@@ -66,7 +66,6 @@ def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None
         "@playwright/test",
         "connectOverCDP",
         "newBrowserCDPSession",
-        "SystemInfo.getProcessInfo",
         "remote-debugging-port",
         "waitForDevToolsEndpoint",
         "chromium.launch",
@@ -75,6 +74,7 @@ def test_product_suites_have_no_playwright_or_manual_cdp_control_plane() -> None
     assert "browser.electron.execute" in combined
     assert "browser.reloadSession" in combined
     assert "browser.electron.execute" not in PACKAGED_SPEC.read_text(encoding="utf-8")
+    assert "SystemInfo.getProcessInfo" not in SOURCE_SPEC.read_text(encoding="utf-8")
 
 
 def test_wdio_runner_preserves_multiword_filters_without_a_shell() -> None:
@@ -189,7 +189,10 @@ def test_packaged_warm_launch_timing_starts_at_the_replacement_process() -> None
         in scenario
     )
     assert "const warmLaunchedAt = await processStartedAt(replacementApplicationPid)" in scenario
-    assert "const warmLaunchMs = Date.now() - warmLaunchedAt" in scenario
+    assert "const warmLaunchMs = warmReadyAt - warmLaunchedAt" in scenario
+    assert scenario.index("const warmReadyAt = Date.now()") < scenario.index(
+        "const replacementApplicationPid = await mainPid(new Set([previousApplicationPid]))"
+    )
     assert "const warmStartedAt = Date.now()" not in scenario
 
 

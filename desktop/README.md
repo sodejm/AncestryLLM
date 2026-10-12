@@ -102,10 +102,16 @@ pnpm --dir desktop test:visual
 `desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
 locked Electron package, and fails with a stable error if its platform runtime
 is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 39.8.10 remains
-exactly pinned; its installer resolves `extract-zip` to the Electron-maintained
-`@electron-internal/extract-zip` 1.0.5 package through the locked override and
-reviewed compatibility patch.
+shared pnpm store contains stale build-script state. Electron 41.10.6 remains
+exactly pinned. The frozen lockfile scopes reviewed security replacements to
+the affected installer and test-tool dependency paths, including the
+Electron-maintained `@electron-internal/extract-zip` 1.0.5 fork; no runtime
+patch is required for the current Electron installer. WebdriverIO uses Mocha
+11.8.0 so its Chokidar 4 watcher retains Mocha's supported glob handling. The
+unused optional `@electron/get` legacy proxy agent is removed because it has
+no patched release. Installation and packaging fail explicitly when
+`ELECTRON_GET_USE_PROXY` is nonempty instead of silently ignoring that requested
+legacy behavior.
 
 `desktop-check` runs lint, separated main/preload/renderer type checks, unit
 tests, the presentation-boundary contract, and a source-map-free build
@@ -113,9 +119,13 @@ inspection. `desktop-e2e` builds the production renderer and launches it in
 Electron with a deterministic fictional mock bridge; it is not an installer
 or literal packaged-executable test. `test:accessibility` scans every shell
 route in light, dark, and high-contrast modes with the exact locked `axe-core`
-version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
-200% zoom for horizontal clipping. Neither command replaces the manual
-screen-reader review in the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
+version in real Chromium. Linux CI launches this source scan through
+`xvfb-run --auto-servernum` after verifying the installed Chromium SUID sandbox
+is a regular root-owned file with mode `4755`; WebdriverIO retains its automatic
+Xvfb fallback, and the Electron sandbox stays enabled. `test:visual` checks the minimum
+720-by-560 window at 200% zoom for horizontal clipping. Neither command
+replaces the manual screen-reader review in the
+[desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
 `desktop-security` runs the high-severity dependency audit, source secret scan,
 produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
 package after verifying the native sidecar resource, and inspects the resulting
@@ -156,7 +166,10 @@ same-document application routes retain the existing renderer identity. In
 packaged builds, main privately starts and verifies the fixed-route native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
-details never enter IPC or the preload bridge. The source-level gated Issue #104
+details never enter IPC or the preload bridge. Its IPC deadline is 30 seconds,
+covering both ten-second startup phases and the final diagnostics request;
+ordinary control requests retain their five-second deadline. Renderer lifecycle
+cancellation and the single manual retry limit still apply. The source-level gated Issue #104
 shutdown preflight is likewise main-process-only: it asks the sidecar whether
 active jobs are safe to drain, wait for, or cancel before the IPC boundary is
 disposed. See

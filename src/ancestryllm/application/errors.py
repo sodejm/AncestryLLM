@@ -104,6 +104,24 @@ DOMAIN_ERROR_MAPPINGS: Mapping[DomainFailureCode, ErrorMapping] = MappingProxyTy
             "Retry later or choose the offline provider.",
             1,
         ),
+        DomainFailureCode.WORKER_LIMIT: ErrorMapping(
+            "GEDCOM_WORKER_LIMIT",
+            "GEDCOM inspection exceeded a resource budget.",
+            "Choose a smaller source or review the configured worker limits.",
+            2,
+        ),
+        DomainFailureCode.WORKER_TIMEOUT: ErrorMapping(
+            "GEDCOM_WORKER_TIMEOUT",
+            "GEDCOM inspection exceeded its time budget.",
+            "Choose a smaller source or retry the inspection.",
+            2,
+        ),
+        DomainFailureCode.WORKER_FAILED: ErrorMapping(
+            "GEDCOM_WORKER_FAILED",
+            "The GEDCOM inspection worker stopped without a valid result.",
+            "Retry the inspection or run diagnostics.",
+            1,
+        ),
         DomainFailureCode.INTERNAL: ErrorMapping(
             "APPLICATION_FAILURE",
             "The application could not complete the operation safely.",

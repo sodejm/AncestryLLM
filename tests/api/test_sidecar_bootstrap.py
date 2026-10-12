@@ -10,13 +10,22 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+if TYPE_CHECKING:
+    from httpx import Response
+
+    from ancestryllm.application.operations import GedcomInspectRequest
+    from ancestryllm.application.ports import CancellationPort
+    from ancestryllm.core.ingress import FileIngressPolicy
+
 import ancestryllm.api.sidecar as sidecar_module
+import ancestryllm.gedcom.inspection_worker as worker_module
 from ancestryllm.api.contracts import API_CONTRACT
 from ancestryllm.api.sidecar import (
     SIDECAR_BUILD,
@@ -31,10 +40,147 @@ from ancestryllm.application._artifacts import _ArtifactRegistry
 from ancestryllm.core.config import AppConfig
 from ancestryllm.core.errors import ConfigurationError
 from ancestryllm.core.secrets import MemorySecretStore, SecretSourceMode
+from ancestryllm.domain.errors import DomainFailure, DomainFailureCode, DomainFailureDetail
 from ancestryllm.observability.structured_diagnostics import DesktopDiagnosticSeverity
 
 DIAGNOSTIC_RUN_ID = "123e4567-e89b-42d3-a456-426614174000"
 DIAGNOSTIC_DIRECTORY = str(Path.cwd() / "fictional-app-data" / "diagnostics")
+_WORKER_STAGES = frozenset(
+    {
+        "startup.identity",
+        "startup.spawn",
+        "startup.control",
+        "monitor.exit",
+        "monitor.rss",
+        "child.control",
+        "child.private",
+        "child.directory",
+        "child.failure",
+        "child.execute",
+        "output.validation",
+        "output.failure",
+        "output.missing",
+        "output.result",
+    }
+)
+
+
+def _worker_failure_stage(failure: DomainFailure) -> str:
+    """Keep fixture diagnostics limited to known codes, excluding payload text."""
+
+    for detail in failure.details:
+        if detail.name == "stage" and detail.value in _WORKER_STAGES:
+            return str(detail.value)
+    return "unclassified"
+
+
+@pytest.fixture
+def worker_failure_stages(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Expose safe source-worker stages in failed CI tests without changing DTOs."""
+
+    stages: list[str] = []
+    original = worker_module.run_inspection
+
+    def record_failure(
+        source: Path,
+        request: GedcomInspectRequest,
+        cancellation: CancellationPort,
+        *,
+        budgets: worker_module.InspectionBudgets | None = None,
+        ingress: FileIngressPolicy | None = None,
+    ) -> worker_module.WorkerInspection:
+        try:
+            return original(source, request, cancellation, budgets=budgets, ingress=ingress)
+        except DomainFailure as failure:
+            if failure.code is DomainFailureCode.WORKER_FAILED:
+                stages.append(_worker_failure_stage(failure))
+            raise
+
+    monkeypatch.setattr(worker_module, "run_inspection", record_failure)
+    return stages
+
+
+def _await_completed_job(
+    client: TestClient,
+    job_id: str,
+    headers: dict[str, str],
+    *,
+    timeout_seconds: float = 15.0,
+    worker_stages: list[str] | None = None,
+) -> Response:
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot: dict[str, object] | None = None
+    while True:
+        response = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert isinstance(payload, dict)
+        last_snapshot = payload
+        state = last_snapshot.get("state")
+        if state == "completed":
+            return response
+        if state in {"failed", "cancelled"}:
+            stages = f"; source worker stages: {worker_stages!r}" if worker_stages else ""
+            pytest.fail(f"job {job_id} reached terminal state {state}: {last_snapshot!r}{stages}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            pytest.fail(f"job {job_id} did not complete before timeout: {last_snapshot!r}")
+        time.sleep(min(0.05, remaining))
+
+
+def _job_response(state: str) -> Mock:
+    response = Mock(status_code=200, text=json.dumps({"state": state}))
+    response.json.return_value = {"state": state}
+    return response
+
+
+def test_job_poll_waits_until_completed() -> None:
+    client = Mock()
+    client.get.side_effect = [_job_response("running"), _job_response("completed")]
+
+    response = _await_completed_job(client, "job-id", {"Authorization": "Bearer test"})
+
+    assert response.json()["state"] == "completed"
+
+
+@pytest.mark.parametrize("state", ("failed", "cancelled"))
+def test_job_poll_fails_immediately_for_terminal_failure(state: str) -> None:
+    client = Mock()
+    client.get.return_value = _job_response(state)
+
+    with pytest.raises(pytest.fail.Exception, match=state):
+        _await_completed_job(client, "job-id", {}, timeout_seconds=1.0)
+
+
+def test_job_poll_reports_test_only_worker_stage_on_failure() -> None:
+    client = Mock()
+    client.get.return_value = _job_response("failed")
+
+    with pytest.raises(pytest.fail.Exception, match=r"child\.directory"):
+        _await_completed_job(client, "job-id", {}, worker_stages=["child.directory"])
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    (("child.directory", "child.directory"), ("Ada Example", "unclassified"), (7, "unclassified")),
+)
+def test_worker_stage_diagnostics_exclude_unknown_payloads(stage: str | int, expected: str) -> None:
+    failure = DomainFailure(
+        DomainFailureCode.WORKER_FAILED,
+        (DomainFailureDetail("stage", stage), DomainFailureDetail("identity", "Ada Example")),
+    )
+
+    assert _worker_failure_stage(failure) == expected
+
+
+def test_job_poll_timeout_reports_last_snapshot() -> None:
+    client = Mock()
+    client.get.return_value = _job_response("running")
+
+    with pytest.raises(pytest.fail.Exception, match="running"):
+        _await_completed_job(client, "job-id", {}, timeout_seconds=0.0)
+
+    client.get.assert_called_once()
 
 
 def _launch_payload(**updates: str) -> bytes:
@@ -225,6 +371,7 @@ def test_packaged_sidecar_exposes_only_bounded_control_routes() -> None:
 
 def test_packaged_sidecar_executes_an_injected_opaque_gedcom_grant(
     tmp_path: Path,
+    worker_failure_stages: list[str],
 ) -> None:
     source = tmp_path / "fictional-family.ged"
     source.write_text(
@@ -284,13 +431,7 @@ def test_packaged_sidecar_executes_an_injected_opaque_gedcom_grant(
         )
         assert submitted.status_code == 200
         job_id = submitted.json()["job_id"]
-        for _ in range(100):
-            snapshot = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
-            if snapshot.json()["state"] == "completed":
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("fictional GEDCOM inspect job did not complete")
+        _await_completed_job(client, job_id, headers, worker_stages=worker_failure_stages)
         result = client.get(
             f"/api/v1/gedcom/jobs/{job_id}/result",
             headers=headers,
@@ -304,7 +445,9 @@ def test_packaged_sidecar_executes_an_injected_opaque_gedcom_grant(
     assert "@I1@" not in result.text
 
 
-def test_packaged_sidecar_native_intake_is_read_only_and_session_private(tmp_path: Path) -> None:
+def test_packaged_sidecar_native_intake_is_read_only_and_session_private(
+    tmp_path: Path, worker_failure_stages: list[str]
+) -> None:
     stage = tmp_path / "private-intake"
     stage.mkdir()
     source = stage / ("a" * 64 + ".ged")
@@ -339,13 +482,7 @@ def test_packaged_sidecar_native_intake_is_read_only_and_session_private(tmp_pat
         submitted = client.post("/api/v1/gedcom/intake", headers=headers, json=payload)
         assert submitted.status_code == 200, submitted.text
         job_id = submitted.json()["job_id"]
-        for _ in range(100):
-            snapshot = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
-            if snapshot.json()["state"] == "completed":
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("native GEDCOM intake did not complete")
+        _await_completed_job(client, job_id, headers, worker_stages=worker_failure_stages)
         result = client.get(f"/api/v1/gedcom/intake/{job_id}", headers=headers)
         assert result.status_code == 200
         assert result.json()["value"]["summary"]["individual_count"] == 1

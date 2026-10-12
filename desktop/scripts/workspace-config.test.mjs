@@ -33,30 +33,38 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
     assert.match(workspace, new RegExp(`^${name}: ${value}$`, 'm'))
   }
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
-  assert.match(
-    workspace,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
-  )
-  assert.match(
-    lockfile,
-    /^overrides:\n {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5\n {2}fast-uri: 3\.1\.6$/m,
-  )
-  assert.match(
-    lockfile,
-    /^patchedDependencies:\n {2}electron@39\.8\.10: [0-9a-f]{64}$/m,
-  )
+  for (const [selector, resolution] of [
+    ['@puppeteer/browsers>extract-zip', 'npm:@electron-internal/extract-zip@1.0.5'],
+    ['get-uri>basic-ftp', '6.2.1'],
+    ['@wdio/mocha-framework>mocha', '11.8.0'],
+    ['mocha>diff', '8.0.3'],
+  ]) {
+    assert.match(workspace, new RegExp(`^  '${selector.replaceAll('/', '\\/')}': ${resolution}$`, 'm'))
+    assert.match(lockfile, new RegExp(`^  '?${selector.replaceAll('/', '\\/')}'?: ${resolution}$`, 'm'))
+  }
   assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
   assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
-  assert.match(lockfile, /^ {2}fast-uri@3\.1\.6:$/m)
+  assert.match(lockfile, /^ {2}basic-ftp@6\.2\.1:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}basic-ftp@5\.3\.1:$/m)
+  assert.match(lockfile, /^ {2}chokidar@4\.0\.3:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}braces@3\.0\.3:$/m)
+  assert.match(lockfile, /^ {2}diff@8\.0\.3:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}diff@7\.0\.0:$/m)
+  assert.match(lockfile, /^ {2}fast-uri@3\.1\.8:$/m)
   assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.[45]:$/m)
   assert.match(lockfile, /^ {2}js-yaml@4\.3\.2:$/m)
   assert.doesNotMatch(lockfile, /^ {2}js-yaml@4\.3\.[01]:$/m)
   assert.match(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.15':$/m)
   assert.doesNotMatch(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.13':$/m)
-  assert.match(lockfile, /^ {2}deepmerge-ts@8\.0\.0:$/m)
-  assert.doesNotMatch(lockfile, /^ {2}deepmerge-ts@7\.1\.6:$/m)
-  assert.match(lockfile, /^ {2}serialize-javascript@7\.0\.3:$/m)
-  assert.doesNotMatch(lockfile, /^ {2}serialize-javascript@6\.0\.2:$/m)
+  assert.match(lockfile, /^ {2}deepmerge-ts@8\.0\.2:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}deepmerge-ts@8\.0\.0:$/m)
+  assert.match(lockfile, /^ {2}serialize-javascript@7\.0\.5:$/m)
+  assert.doesNotMatch(lockfile, /^ {2}serialize-javascript@(?:6\.0\.2|7\.0\.3):$/m)
+  assert.equal(packageJson.devDependencies['expect-webdriverio'], '6.1.0')
+  assert.match(
+    workspace,
+    /^packageExtensions:\n {2}'@wdio\/electron-service@10\.3\.0':\n {4}dependencies:\n {6}expect-webdriverio: 5\.6\.5$/m,
+  )
   assert.equal(packageJson.devDependencies['@testing-library/dom'], '10.4.1')
   assert.equal(packageJson.devDependencies['electron-builder'], '26.15.7')
   assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.15.7')

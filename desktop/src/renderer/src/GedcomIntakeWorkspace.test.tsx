@@ -20,6 +20,18 @@ const job: JobSnapshot = {
   outcome_summary: null, next_action: null, error_code: null, error_message: null,
   error_remediation: null, progress: null, cancellation_requested_at: null, cancellation_deferred_by: null,
 }
+const runningJob: JobSnapshot = {
+  ...job,
+  state: 'running',
+  finished_at: null,
+  progress: {
+    schema_version: 1,
+    operation: 'gedcom.inspect',
+    timestamp: '2026-08-12T12:00:01+00:00',
+    completed: 24,
+    total: 100,
+  },
+}
 const inspection: GedcomInspection = {
   schema_version: 1, operation: 'gedcom.inspect', value: {
     summary: { source: { artifact_id: `art_${'a'.repeat(64)}`, artifact_type: 'gedcom',
@@ -116,7 +128,7 @@ describe('GEDCOM intake workspace', () => {
     render(<GedcomIntakeWorkspace bridge={bridge} />)
     await addSource()
     await waitFor(() => expect(bridge.inspectGedcom).toHaveBeenCalled())
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Source 1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel Source 1 inspection' }))
     vi.mocked(bridge.requestOpenFileGrant).mockImplementationOnce(() => new Promise((resolve) => { second = resolve }))
     await addSource()
     await act(async () => { first(success(job)) })
@@ -197,6 +209,7 @@ describe('GEDCOM intake workspace', () => {
     expect(screen.getByText('No root selected.')).toBeVisible()
     const candidates = await screen.findAllByRole('radio')
     expect(candidates).toHaveLength(3)
+    expect(screen.getByRole('list', { name: 'Root candidates for Source 1' })).toBeVisible()
     expect(candidates.every((candidate) => !(candidate as HTMLInputElement).checked)).toBe(true)
     const second = screen.getByRole('radio', { name: /Alex Example.*@I2@.*1930/ })
     second.focus()
@@ -210,6 +223,41 @@ describe('GEDCOM intake workspace', () => {
       query: '', limit: 25, cursor: null })
     expect(bridge.revokeFileGrant).toHaveBeenCalledWith(grant.grantId)
     expect(screen.queryByRole('button', { name: /upload|merge|export|import/i })).not.toBeInTheDocument()
+  })
+
+  it('announces bounded progress and exposes keyboard-accessible cancellation', async () => {
+    const bridge = bridgeFor()
+    vi.mocked(bridge.inspectGedcom).mockResolvedValue(success(runningJob))
+    const view = render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Inspecting source. 24 of 100 work units complete.',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel Source 1 inspection' }))
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledTimes(1)
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledWith({ schema_version: 1, job_id: job.job_id })
+    view.unmount()
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { code: 'REQUEST_TIMEOUT', failureKind: 'timeout' },
+    { code: 'GEDCOM_INTAKE_CAPACITY', failureKind: 'limit' },
+    { code: 'JOB_SERVICE_UNAVAILABLE', failureKind: 'crash' },
+  ] as const)('renders the stable $code code for an accessible $failureKind failure without backend details', async ({ code }) => {
+    const bridge = bridgeFor()
+    vi.mocked(bridge.inspectGedcom).mockResolvedValue({
+      ok: false,
+      protocolVersion: '1',
+      error: { code, message: '/private/family/secret.ged', remediation: 'Reveal raw worker output.' },
+    })
+    render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(`Code: ${code}`)
+    expect(alert).not.toHaveTextContent('secret.ged')
+    expect(alert).not.toHaveTextContent('worker output')
+    expect(screen.getByRole('button', { name: 'Remove Source 1' })).toBeEnabled()
   })
 
   it('continues polling a valid inspection beyond 300 attempts', async () => {
@@ -289,13 +337,29 @@ describe('GEDCOM intake workspace', () => {
     render(<GedcomIntakeWorkspace bridge={bridge} />)
     await addSource()
     await waitFor(() => expect(bridge.inspectGedcom).toHaveBeenCalled())
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Source 1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel Source 1 inspection' }))
     expect(bridge.revokeFileGrant).toHaveBeenCalledWith(grant.grantId)
     expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeEnabled()
     await act(async () => { resolve(success(job)) })
     expect(bridge.discardGedcomInspection).toHaveBeenCalledWith({ schema_version: 1, job_id: job.job_id })
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledTimes(1)
     expect(bridge.getGedcomInspection).not.toHaveBeenCalled()
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
+  })
+
+  it('does not discard a failed inspection again when the workspace unmounts', async () => {
+    const bridge = bridgeFor()
+    vi.mocked(bridge.inspectGedcom).mockResolvedValue(success({
+      ...job,
+      state: 'failed',
+      error_code: 'GEDCOM_PARSE_INVALID',
+    }))
+    const view = render(<GedcomIntakeWorkspace bridge={bridge} />)
+    await addSource()
+    expect(await screen.findByText('Code: GEDCOM_PARSE_INVALID')).toBeVisible()
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledTimes(1)
+    view.unmount()
+    expect(bridge.discardGedcomInspection).toHaveBeenCalledTimes(1)
   })
 
   it('preserves valid sources on picker cancellation or coded failure without rendering raw errors', async () => {

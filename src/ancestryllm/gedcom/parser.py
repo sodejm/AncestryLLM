@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from ancestryllm.core.cancellation import cancellation_checkpoint
 from ancestryllm.core.errors import FileIngressError
@@ -91,20 +91,44 @@ def iter_gedcom_records(
         )
 
 
-def _unique_pointer(original: str, used: set[str], source_number: int) -> str:
-    """Return a collision-free pointer while retaining the original when safe."""
-    if original not in used:
-        used.add(original)
-        return original
-    match = re.fullmatch(r"@([A-Za-z_]+)(\d+)@", original)
-    prefix = match.group(1) if match else "X"
-    counter = 1
-    candidate = f"@{prefix}{source_number}_{counter}@"
-    while candidate in used:
-        counter += 1
-        candidate = f"@{prefix}{source_number}_{counter}@"
-    used.add(candidate)
-    return candidate
+_ALLOCATION_PROBES_PER_CHECKPOINT = 64
+
+
+class _PointerAllocator:
+    """Allocate deterministic global xrefs without rescanning rejected suffixes."""
+
+    def __init__(self, used: set[str], *, checkpoint: Callable[[], None]) -> None:
+        """Share occupied identifiers and cancellation checks across allocations."""
+        self._used = used
+        self._checkpoint = checkpoint
+        self._next_suffix: dict[tuple[str, int], int] = {}
+
+    def allocate(self, original: str, source_number: int) -> str:
+        """Return a unique pointer, preserving ``original`` when it is available."""
+        if original not in self._used:
+            self._checkpoint()
+            self._used.add(original)
+            return original
+
+        match = re.fullmatch(r"@([A-Za-z_]+)(\d+)@", original)
+        prefix = match.group(1) if match else "X"
+        namespace = (prefix, source_number)
+        suffix = self._next_suffix.get(namespace, 1)
+        probes_since_checkpoint = 0
+        self._checkpoint()
+
+        while True:
+            candidate = f"@{prefix}{source_number}_{suffix}@"
+            suffix += 1
+            if candidate not in self._used:
+                self._checkpoint()
+                self._next_suffix[namespace] = suffix
+                self._used.add(candidate)
+                return candidate
+            probes_since_checkpoint += 1
+            if probes_since_checkpoint >= _ALLOCATION_PROBES_PER_CHECKPOINT:
+                self._checkpoint()
+                probes_since_checkpoint = 0
 
 
 def _validate_input_document_structure(records: Sequence[GedcomRecord]) -> None:
@@ -145,7 +169,7 @@ def load_sources(
     Undefined references are namespaced as well as declared records so a
     dangling pointer in one source cannot bind to a record in another.
     """
-    used: set[str] = set()
+    allocator = _PointerAllocator(set(), checkpoint=cancellation_checkpoint)
     sources: list[ParsedSource] = []
     policy = ingress or FileIngressPolicy()
     for source_number, raw_path in enumerate(paths, 1):
@@ -165,10 +189,10 @@ def load_sources(
         for record in original_records:
             cancellation_checkpoint()
             if record.pointer:
-                pointer_map[record.pointer] = _unique_pointer(record.pointer, used, source_number)
+                pointer_map[record.pointer] = allocator.allocate(record.pointer, source_number)
         for xref in sorted(all_xrefs - pointer_map.keys()):
             cancellation_checkpoint()
-            pointer_map[xref] = _unique_pointer(xref, used, source_number)
+            pointer_map[xref] = allocator.allocate(xref, source_number)
         rewritten: list[GedcomRecord] = []
         normalized_dates = False
         preserved_extensions = False

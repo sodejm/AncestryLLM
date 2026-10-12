@@ -94,6 +94,11 @@ incompatible comparison into an authorized release backend. See the human
 
 ## Test-suite audit records
 
+[`0.7.0-local-batch-1.md`](0.7.0-local-batch-1.md) records acceptance criteria,
+local regression results, and remaining release blockers for issues #504,
+#505, #489, #490, and #491. It is a source-level engineering record; its local
+checks do not replace exact-candidate hosted or packaged release acceptance.
+
 [`issue-453-test-suite-audit.md`](issue-453-test-suite-audit.md) records the
 v0.7.0 consolidation audit, its before-and-after collection, runtime, and
 coverage measurements, and the rationale for both consolidated and retained

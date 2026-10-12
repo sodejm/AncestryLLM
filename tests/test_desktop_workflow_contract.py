@@ -132,7 +132,7 @@ def test_workflow_uploads_partial_windows_diagnostics_after_a_failure() -> None:
 def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> None:
     workflow = _workflow()
 
-    assert workflow.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413") == 2
+    assert workflow.count("pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320") == 2
     assert workflow.count('version: "11.9.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
@@ -160,7 +160,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     assert "--config electron-builder.file-grant-verification.yml" in workflow
     production_build = workflow.index("pnpm --dir desktop run build\n")
     production_assembly = workflow.index(
-        "electron-builder --config electron-builder.verification.yml"
+        "run-electron-builder.mjs --config electron-builder.verification.yml"
     )
     production_sidecar_verification = workflow.index(
         'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release'
@@ -169,7 +169,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
         "pnpm --dir desktop run build:packaged-native-verification"
     )
     native_verification_assembly = workflow.index(
-        "electron-builder --config electron-builder.native-verification.yml"
+        "run-electron-builder.mjs --config electron-builder.native-verification.yml"
     )
     native_sidecar_verification = workflow.index(
         'verify-sidecar.mjs "$SIDECAR_TARGET" desktop/release-native-verification'
@@ -456,10 +456,16 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
 
     assert "verify-release-toolchain.mjs" in workflow
     assert "pnpm --dir desktop run test:coverage" in workflow
-    assert "pnpm --dir desktop run test:accessibility" in workflow
+    sandbox_preparation = "node desktop/scripts/prepare-electron-sandbox.mjs"
+    accessibility = "-- xvfb-run --auto-servernum pnpm --dir desktop run test:accessibility"
+    assert "name: Prepare source Electron sandbox" in workflow
+    assert "if: runner.os == 'Linux'" in workflow
+    assert sandbox_preparation in workflow
+    assert accessibility in workflow
+    assert workflow.index(sandbox_preparation) < workflow.index(accessibility)
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
-    assert package["devDependencies"]["@vitest/coverage-v8"] == "3.2.7"
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.11"
     assert "test:coverage" in package["scripts"]
     coverage = policy["qa"]["desktopCoverage"]
     assert f"provider: '{coverage['provider']}'" in vitest

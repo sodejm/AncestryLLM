@@ -104,11 +104,17 @@ Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL.
 
 ## Update procedure
 
-1. Edit the narrow direct dependency in `pyproject.toml`. Keep application
-   extras separate from repository tooling groups and preserve exact pins for
-   trust-sensitive verifiers.
-2. Run `make lock`. This verifies and executes repository-local `uv` 0.12.1
-   before regenerating the complete lock for all extras and groups.
+1. Record the failing audit, affected dependency paths, advisory identifiers,
+   and available fixed versions before changing the graph. Keep raw audit
+   output outside tracked documentation; record only sanitized findings and
+   validation results in release evidence.
+2. Edit the narrow direct dependency in `pyproject.toml` when its constraint
+   prevents a fix. Keep application extras separate from repository tooling
+   groups and preserve exact pins for trust-sensitive verifiers. For an
+   already-compatible transitive fix, use verified repository-local `uv lock
+   --upgrade-package <package>` rather than adding an unused direct dependency.
+   `make lock` verifies and executes repository-local `uv` 0.12.1 when a
+   manifest change requires regenerating the complete lock.
 3. Run `make lock-check`, then inspect both the direct-dependency diff and every
    changed package record in `uv.lock`. An unrelated version change, missing
    artifact hash, alternate source, or unexplained transitive re-resolution is
@@ -126,6 +132,47 @@ canonical command is `uv lock --check`.
 Stock-`pip` wheel and source-distribution smoke jobs remain intentionally
 outside these repository-tool profiles: they verify supported non-`uv`
 consumer installation and do not build or authorize release artifacts.
+
+## Security-remediation acceptance
+
+A dependency-only fix uses the observed failing audit as its initial failure
+evidence. If compatibility requires application behavior changes, first add
+and observe a focused failing regression test under the normal
+red-green process documented in the repository's `CONTRIBUTING.md`. Do not add
+audit exclusions, suppress advisory identifiers, lower severity thresholds,
+or remove security checks to obtain a passing result.
+
+For Python, require `make lock-check`, `make security`, `make test`, `make lint`,
+and `make typecheck` on the integrated locked graph. `make security` must
+complete both the full-export dependency audit and the pinned static scan.
+Update code documentation when compatibility changes alter a code contract;
+record why architecture, threat-model, user, API, and release surfaces are
+unaffected when the change only selects fixed dependency versions.
+
+For desktop, use the Node and pnpm versions pinned in `desktop/package.json`,
+preserve the frozen-lockfile installation, and review every changed dependency
+path in `desktop/pnpm-lock.yaml`. Capture the complete `pnpm --dir desktop
+audit --json` result, including findings below the canonical high-severity
+threshold. Require `make desktop-check`, `make desktop-security`, and the
+affected source E2E checks. The security gate includes package construction,
+ASAR integrity, and Electron fuse verification; an audit alone does not replace
+those checks. Any transitive override needs an identified dependency path,
+upstream compatibility evidence, and regression validation.
+
+When an advisory has no published fixed version, an optional dependency may
+be removed only after reviewing its callers and documenting the resulting
+unsupported capability. Keep the complete audit scope unchanged. Reject any
+explicit request for that removed capability before dependency installation
+or packaging; do not silently fall back to a different network path. Exercise
+normal operation and the rejection path in regression tests. A major-version
+override must preserve the parent package's actual contract, including archive
+extraction, proxy handling, or watch globs where applicable.
+
+Integrate independently owned Python and desktop changes sequentially, then
+rerun the canonical gates on their combined revision. Record tested commit,
+audit counts, checks, skipped tests, and package target in release evidence.
+A passing local dependency remediation does not establish hosted checks,
+manual desktop acceptance, signing, notarization, or published provenance.
 
 ## Review checklist
 

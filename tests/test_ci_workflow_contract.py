@@ -245,12 +245,12 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
     assert 'node-version: "26.5.0"' in job
-    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
+    assert "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0" in job
     assert 'version: "11.9.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
-        "xvfb=2:21.1.12-1ubuntu1.6",
+        "xvfb=2:21.1.12-1ubuntu1.8",
     ):
         assert package in job
     assert (
@@ -260,7 +260,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
 
     assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
     assert desktop_package["packageManager"] == "pnpm@11.9.0"
-    assert desktop_package["devDependencies"]["electron"] == "39.8.10"
+    assert desktop_package["devDependencies"]["electron"] == "41.10.6"
     assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
@@ -272,6 +272,21 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "retention-days: 7" in job
     assert "docs/assets" not in job
     assert ".png" not in job
+
+
+def test_all_workflows_use_the_cross_platform_pnpm_setup_action() -> None:
+    workflow_paths = (
+        ROOT / ".github/workflows/ci.yml",
+        ROOT / ".github/workflows/desktop-sidecar.yml",
+        ROOT / ".github/workflows/release-readiness.yml",
+        ROOT / ".github/workflows/release.yml",
+    )
+    workflows = "\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
+
+    assert (
+        workflows.count("pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0") == 7
+    )
+    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413" not in workflows
 
 
 def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
@@ -517,7 +532,7 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
     setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
-    setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
+    setup_pnpm = "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320"
 
     for quality_job in (ci_quality, readiness_quality):
         assert quality_job.count("make lint") == 1

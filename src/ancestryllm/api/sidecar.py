@@ -244,7 +244,14 @@ class _SidecarLifecycle:
             self.intake = None
         if job_service is not None:
             actions.append(job_service.close)
-        actions.extend((self.chat_service.close, self.llm_service.close, self.database.close))
+        actions.extend(
+            (
+                self.gedcom_service.close,
+                self.chat_service.close,
+                self.llm_service.close,
+                self.database.close,
+            )
+        )
         for action in actions:
             try:
                 action()

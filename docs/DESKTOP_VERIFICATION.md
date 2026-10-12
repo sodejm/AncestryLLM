@@ -35,7 +35,7 @@ evidence before a packaged application can claim this Chat destination.
 The desktop portion of `config/release-quality-policy-v1.json` is the only
 release-quality authority for tool versions, coverage, receipt gates,
 performance budgets, and diagnostics policy. Hosted verification uses Python
-3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 3.2.7, and WebdriverIO 9.31.2;
+3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 4.1.11, and WebdriverIO 9.32.0;
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
 
@@ -50,6 +50,8 @@ The source verification matrix is deliberately layered:
 | Native launch, security, lifecycle, and performance scenarios | `pnpm --dir desktop run test:e2e:packaged` | Unpublished unpacked native package |
 
 V8 coverage fails below 70% branches or 75% functions, lines, or statements.
+The existing explicit `src/**/*.{ts,tsx}` inclusion keeps unexecuted application modules
+in the denominator after the Vitest 4 coverage migration.
 Only `e2e/**`, declaration files under `src/**/*.d.ts`, and the renderer test
 bootstrap `src/renderer/src/test-setup.ts` are excluded. Tests and canaries use
 deterministic fictional records; real genealogy, credentials, prompts,
@@ -67,7 +69,11 @@ valid receipt set cannot be approved under a substituted policy.
 
 Native performance uses policy `desktop-unpacked-v1`. WebdriverIO measures
 cold launch, warm launch, readiness, process-tree RSS, and renderer outbound
-requests in `desktop/e2e/packaged-shell.wdio.ts`; the aggregate validator in
+requests in `desktop/e2e/packaged-shell.wdio.ts`. Warm launch ends when the new
+session's Home heading is focused; this observation is captured before native
+process metadata queries. The interval still starts at the verified replacement
+process's OS start time, so process-query latency cannot inflate the measurement.
+The aggregate validator in
 `desktop/scripts/verification-evidence.mjs` compares every value with the
 target-specific ceiling. The package boundary is always `unpacked-native`.
 The performance family is authorized only by the declared
@@ -270,6 +276,10 @@ The packaged WebdriverIO pass launches the unpublished application through the
 pinned WebdriverIO Electron service. The service supplies the native Electron
 automation session. Internally, the service may use its managed Puppeteer/CDP
 bridge where the Electron fuse permits it, including the source-mode suite. The
+source and packaged first-run checks use the configured WebDriver readiness
+budget to wait for readable Welcome content after heading focus. This covers
+native startup where focus becomes observable before the renderer text without
+weakening the content assertion or changing launch-timing measurements. The
 secure packaged build disables the Node CLI inspect-arguments fuse, so its
 specifications deliberately avoid `browser.electron.execute`: renderer state is
 observed through WebDriver, while Main-process and sidecar lifecycle evidence
@@ -285,6 +295,13 @@ helper cannot satisfy the renderer-readiness gate. This bounded check does not
 claim a direct normal-launch observation of the production package on Linux or
 macOS; the earlier production assembly and scanner remain the production-build
 evidence on those rows.
+
+Packaged main-process discovery matches the executable and isolated profile as
+complete command-line arguments. The profile matcher accepts the Windows form
+where `--user-data-dir=` is followed by a quoted value. If discovery reaches
+its existing timeout, the failure reports only a bounded lookup status such as
+`profile_not_observed`; executable paths, profile paths, and command lines stay
+out of test output.
 
 On macOS only, both automation launches pass Chromium's `--use-mock-keychain`
 because the ad hoc, unpackaged runner build cannot reliably use a login
@@ -304,7 +321,9 @@ then independently observe that the packaged Main PID and active sidecar PID
 disappear within bounded deadlines. Because the secure packaged service session
 does not expose its child-process exit tuple, every release row also performs a
 separate transport-free launch of the selected packaged runtime. Windows
-requests native window closure; macOS and Linux send `SIGTERM` through the
+launches the GUI without `windowsHide` so native window discovery can find it,
+then requests native window closure. PowerShell and taskkill console helpers
+remain hidden. macOS and Linux send `SIGTERM` through the
 shared production signal-to-quit path. That process must report the exact
 native result `{ code: 0, signal: null }`; any
 nonzero code, signal termination, or timeout fails the test, and forced
@@ -347,7 +366,11 @@ black-box fault scenarios. It temporarily withholds and restores the real
 packaged sidecar to prove degraded Diagnostics and successful manual retry. A
 missing manifest-bound executable is an integrity failure, so it consumes no
 automatic crash-restart budget; restoring the payload and choosing the bounded
-manual retry is the recovery path. The harness separately
+manual retry is the recovery path. The harness
+requires recovery to clear both the startup and retry error surfaces. The retry
+IPC route allows 30 seconds for startup and diagnostics, independently of the
+ordinary five-second IPC deadline; timeout and renderer cancellation remain
+bounded and return stable coded errors. The harness separately
 kills the real sidecar child repeatedly to prove automatic restart, bounded
 exhaustion, manual recovery, and child cleanup on quit; and substitutes a
 byte-different target-native executable while retaining the original manifest
