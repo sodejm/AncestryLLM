@@ -36,6 +36,9 @@ All notable changes to AncestryLLM are recorded here. The project follows
 
 ### Security
 
+- Updated the locked transitive Mako dependency from 1.3.12 to 1.4.3 to
+  address GHSA-5639-2j2p-m4mx, a Windows `TemplateLookup` path traversal.
+  Alembic retains its existing migration behavior.
 - Release and release-readiness workflows now verify the policy-bound
   release-quality approval against the exact commit and both source artifacts.
   Release verifies it again immediately before publication so stale, edited,
