@@ -1,92 +1,13 @@
 # AncestryLLM desktop shell
 
 This directory contains the UI-only Electron adapter and the packaged
-control-sidecar supervisor. It intentionally implements no genealogy domain
-behavior and does not access files, databases, provider credentials, the
-network, or operating-system services from the renderer. The versioned
-`window.ancestry` bridge retains the six 0.5 control methods for application
-information, startup diagnostics, capabilities, bounded sidecar retry,
-preference reads, and optimistic-concurrency preference updates. Source-level
-gated Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
-settings and credential methods, Issue #108 adds six fixed provider-profile,
-endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
-request methods and one validated job-event listener, Issue #348 adds three fixed
-local-runtime status/preview/apply methods, Issue #111 adds three fixed chat-stream
-methods and one validated chat-event listener, and Issue #112 adds three fixed
-chat-lifecycle methods plus two fixed native-action methods. Development uses
-deterministic fictional fixtures; packaged main is the sole authenticated client
-for the fixed sidecar routes. Packaged main stores the bounded local-preference
-schema in `preferences.json` beneath Electron's OS app-data directory. The
-renderer never receives that path and has no storage access.
-
-Source-level gated Issue #110 adds the fixed synchronous transient-chat service, Issue
-#111 adds the Main-owned bounded stream transport, and Issue #112 adds the
-renderer **Chat** destination over those fixed contracts. The combined surface
-adds no generic request channel, renderer network access, tool surface, file or
-database authority, genealogy operation, or persistent conversation store.
+control-sidecar supervisor.
 
 The supported 0.6.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
 
-Source-level gated Issue #106 adds the reusable, responsive presentation shell for the
-0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
-`AsyncState`, `CodedErrorView`, and dialog-focus contracts provide persistent
-navigation, a workspace header, context help, deterministic keyboard focus,
-and plain-language loading, empty, offline, degraded, error, success, and
-permission-denied states. These components do not call the bridge, network,
-filesystem, sidecar, or Electron APIs and do not grant capabilities or decide
-service policy. Development and review use only the versioned bridge plus
-fictional fixtures.
-
-Source-level gated Issue #107 makes that first-run surface explicitly local-only and
-fail closed. **Local Desktop** is the recommended and only available choice;
-Connect Remote and Host Remote remain visibly advanced but unavailable. A
-schema-v1 startup report covers configuration, SQLCipher, keyring, and workspace
-readiness using stable codes and sanitized remediation. Any blocking component
-keeps settings, credentials, and capabilities read-only. The one manual retry
-rechecks existing state without initializing a database, overwriting a key,
-falling back to plaintext, or widening a listener.
-
-Source-level gated Issue #108 adds separate **Local Providers**, **Cloud Providers**,
-and **Consent & Privacy** sections without adding provider execution. The
-renderer may request an explicit endpoint test, save a profile only against the
-tested endpoint identity and current revision, preview the complete consent
-scope, create that exact preview, and revoke consent. Secrets remain blank,
-write-only fields managed through Issue #105's credential boundary; presence of
-a stored key cannot select a provider or grant consent.
-
-Source-level gated Issue #104 adds a main-process-only safe-shutdown preflight and a
-Python-owned, UI-neutral job lifecycle. It adds no renderer bridge method,
-event listener, supported job screen, or job-submission surface. During an
-application quit, Electron main can present the native choices **Wait**,
-**Request cancellation**, and **Stay open** without exposing the authenticated
-sidecar session or job event stream to the renderer.
-
-Source-level gated Issue #109 adds a **Tasks** destination over that lifecycle. Five
-fixed requests list, inspect, cancel, subscribe, and unsubscribe, while one
-validated event listener receives only the main-owned subscription's events.
-The renderer rebuilds state from backend snapshots after reload, resynchronizes
-on event gaps, and closes a subscription after one terminal state. It stores no
-job state, admits no work, receives no sidecar session or artifact path, and
-adds no provider or genealogy operation. Artifact cards display only safe
-metadata; any future open or save action must use Issue #103's grant mediation.
-
-Issues #110-#112 keep authenticated chat routes private to Electron Main. Every
-short-lived session is bound to an exact stored profile and model; provider
-policy and fresh consent are rechecked before each run, and fixed message,
-context, output, retry, timeout, and session limits apply before provider access.
-The renderer reaches only six fixed chat methods and one validated event
-listener through preload; it receives no bearer token, HTTP client, endpoint, or
-generic route authority. Messages remain bounded process memory, the fixed
-system instruction exposes no tools, and audit data contains only reviewed
-identifiers, counters, and content hashes.
-
-Issue #103 is a source-level gated security foundation, not a supported 0.6 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
-
-The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
-
 ## Reproducible setup and gates
 
-Use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
+From the repository root, use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
 
 ```sh
 corepack enable
@@ -147,6 +68,91 @@ pnpm --dir desktop dev:gallery
 
 The production build verifier rejects gallery copy and fixtures, embedded
 remote assets, and remote network endpoints.
+
+## Source-level contracts
+
+This adapter intentionally implements no genealogy domain
+behavior and does not access files, databases, provider credentials, the
+network, or operating-system services from the renderer. The versioned
+`window.ancestry` bridge retains the six 0.5 control methods for application
+information, startup diagnostics, capabilities, bounded sidecar retry,
+preference reads, and optimistic-concurrency preference updates. Source-level
+gated Issue #103 adds three path-free file-grant methods, Issue #105 adds five fixed
+settings and credential methods, Issue #108 adds six fixed provider-profile,
+endpoint-test, and consent methods, Issue #109 adds five fixed task-lifecycle
+request methods and one validated job-event listener, Issue #348 adds three fixed
+local-runtime status/preview/apply methods, Issue #111 adds three fixed chat-stream
+methods and one validated chat-event listener, and Issue #112 adds three fixed
+chat-lifecycle methods plus two fixed native-action methods. Development uses
+deterministic fictional fixtures; packaged main is the sole authenticated client
+for the fixed sidecar routes. Packaged main stores the bounded local-preference
+schema in `preferences.json` beneath Electron's OS app-data directory. The
+renderer never receives that path and has no storage access.
+
+Source-level gated Issue #110 adds the fixed synchronous transient-chat service, Issue
+#111 adds the Main-owned bounded stream transport, and Issue #112 adds the
+renderer **Chat** destination over those fixed contracts. The combined surface
+adds no generic request channel, renderer network access, tool surface, file or
+database authority, genealogy operation, or persistent conversation store.
+
+
+
+Source-level gated Issue #106 adds the reusable, responsive presentation shell for the
+0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
+`AsyncState`, `CodedErrorView`, and dialog-focus contracts provide persistent
+navigation, a workspace header, context help, deterministic keyboard focus,
+and plain-language loading, empty, offline, degraded, error, success, and
+permission-denied states. These components do not call the bridge, network,
+filesystem, sidecar, or Electron APIs and do not grant capabilities or decide
+service policy. Development and review use only the versioned bridge plus
+fictional fixtures.
+
+Source-level gated Issue #107 makes that first-run surface explicitly local-only and
+fail closed. **Local Desktop** is the recommended and only available choice;
+Connect Remote and Host Remote remain visibly advanced but unavailable. A
+schema-v1 startup report covers configuration, SQLCipher, keyring, and workspace
+readiness using stable codes and sanitized remediation. Any blocking component
+keeps settings, credentials, and capabilities read-only. The one manual retry
+rechecks existing state without initializing a database, overwriting a key,
+falling back to plaintext, or widening a listener.
+
+Source-level gated Issue #108 adds separate **Local Providers**, **Cloud Providers**,
+and **Consent & Privacy** sections without adding provider execution. The
+renderer may request an explicit endpoint test, save a profile only against the
+tested endpoint identity and current revision, preview the complete consent
+scope, create that exact preview, and revoke consent. Secrets remain blank,
+write-only fields managed through Issue #105's credential boundary; presence of
+a stored key cannot select a provider or grant consent.
+
+Source-level gated Issue #104 adds a main-process-only safe-shutdown preflight and a
+Python-owned, UI-neutral job lifecycle. It adds no renderer bridge method,
+event listener, supported job screen, or job-submission surface. During an
+application quit, Electron main can present the native choices **Wait**,
+**Request cancellation**, and **Stay open** without exposing the authenticated
+sidecar session or job event stream to the renderer.
+
+Source-level gated Issue #109 adds a **Tasks** destination over that lifecycle. Five
+fixed requests list, inspect, cancel, subscribe, and unsubscribe, while one
+validated event listener receives only the main-owned subscription's events.
+The renderer rebuilds state from backend snapshots after reload, resynchronizes
+on event gaps, and closes a subscription after one terminal state. It stores no
+job state, admits no work, receives no sidecar session or artifact path, and
+adds no provider or genealogy operation. Artifact cards display only safe
+metadata; any future open or save action must use Issue #103's grant mediation.
+
+Issues #110-#112 keep authenticated chat routes private to Electron Main. Every
+short-lived session is bound to an exact stored profile and model; provider
+policy and fresh consent are rechecked before each run, and fixed message,
+context, output, retry, timeout, and session limits apply before provider access.
+The renderer reaches only six fixed chat methods and one validated event
+listener through preload; it receives no bearer token, HTTP client, endpoint, or
+generic route authority. Messages remain bounded process memory, the fixed
+system instruction exposes no tools, and audit data contains only reviewed
+identifiers, counters, and content hashes.
+
+Issue #103 is a source-level gated security foundation, not a supported 0.6 domain workflow. Its reusable selected-file card displays only a safe basename, byte size, kind, and replacement status. Electron main owns the native open/save dialogs, random opaque grant identifiers, path map, purpose and access checks, lifecycle revocation, input fingerprints, explicit replacement confirmation, and output locks. Only main-process adapters may redeem a grant through `resolveReadGrant` or `resolveWriteGrant`; a future domain adapter must still pass the resolved internal path through the shared bounded Python file-ingress policy.
+
+The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
 
 ## Architecture
 
