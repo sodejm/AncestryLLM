@@ -21,7 +21,7 @@ data directories inside that run directory.
 
 ## Prerequisites
 
-- A checkout of this repository and Python 3.12 or newer.
+- A checkout of this repository and a system-supplied Python 3.12 through 3.14.
 - A shell in the repository root.
 - A disposable output parent such as `./ancestryllm-tutorial-output`. Do not
   use a directory containing real genealogy data, a RootsMagic database, a
@@ -33,15 +33,18 @@ not open a database.
 
 ## 1. Create the supported environment
 
-Create the project environment once:
+From the repository root, follow the authentication and verification
+prerequisites in the [verified uv bootstrap guide](../security/verified-uv-bootstrap.md).
+Then create the project environment:
 
 ```console
 make setup
 ```
 
-If dependency installation cannot use your configured package index, stop
-here. The tutorial's merge itself is offline, but initial package installation
-is a separate setup operation and can contact that configured index.
+If bootstrap verification or dependency installation fails, stop here and use
+the bootstrap guide's recovery steps. Bootstrap verification contacts GitHub,
+and dependency installation can contact your configured package index. These
+setup operations are separate from the network-free merge below.
 
 ## 2. Run the fictional merge
 
@@ -88,9 +91,10 @@ evidence.
 
 ## Recovery and cleanup
 
-- If `make setup` fails, repair the Python or package-index problem and rerun
-  it before using `--skip-install`; do not point `ANCESTRYLLM_PYTHON` at an
-  unverified interpreter.
+- If `make setup` fails, follow the bootstrap guide to resolve the Python,
+  authentication, verification, or package-index problem. Rerun setup before
+  using `--skip-install`; do not point `ANCESTRYLLM_PYTHON` at an unverified
+  interpreter.
 - If the merge reports an error, keep the printed error and inspect the
   fictional input named there. A rejected merge invocation publishes neither
   its GEDCOM nor its report. Correct only a disposable copy, then rerun the

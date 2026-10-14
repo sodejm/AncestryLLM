@@ -20,9 +20,9 @@ links to or summarises the applicable contract without redefining it.
 
 ## File classification
 
-Every Git-tracked file belongs to exactly one classification. Unknown extensions in
-comment-capable categories fail the inventory check. The `check_code_documentation.py`
-script enforces this at every CI run.
+Every Git-tracked file belongs to exactly one classification. Any unclassified tracked
+path fails the inventory check, regardless of its extension or whether its format permits
+comments. The `check_code_documentation.py` script enforces this at every CI run.
 
 | Classification | Description | Examples |
 |---|---|---|
@@ -38,8 +38,9 @@ script enforces this at every CI run.
 
 ### Non-comment formats
 
-Files whose formats do not safely permit comments (JSON, plist/XML property lists) are
-classified as `non-comment-format` and excluded from file-level documentation requirements.
+Files whose formats do not safely permit comments (JSON, plist/XML property lists) must be
+explicitly classified as `non-comment-format`, mapped in `NON_COMMENT_FORMAT_MAP`, and are
+then excluded from file-level documentation requirements.
 This also applies to the three `containers/compose*.yaml` manifests: despite their suffix,
 they intentionally remain strict JSON-compatible YAML so duplicate keys and non-JSON YAML
 constructs fail closed. Their semantics must be explained in an adjacent authoritative

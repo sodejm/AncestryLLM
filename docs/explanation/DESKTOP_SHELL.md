@@ -12,12 +12,12 @@ operations outside the sandboxed renderer, turns user-selected files into
 opaque grants, and lets backend-owned cancellation finish at a declared safe
 point.
 
-For a source-level v0.6 learning path, start with
-[Desktop first run](../tutorials/desktop-first-run.md), use the focused
-[desktop how-to guides](../Home.md#how-to-guides), and keep the
+For the supported 0.6.0 installer, start with
+[Desktop first run](../tutorials/desktop-first-run.md) and keep the
 [desktop reference](../reference/DESKTOP.md) open for exact states and stable
-codes. These pages describe the current source contracts; they do not expand
-the supported 0.6.0 installer claim below.
+codes. The separately marked
+[desktop source-level guides](../Home.md#desktop-source-level-guides) describe
+gated adapters; they do not expand the supported installer claim below.
 
 ## Supported surface
 
@@ -33,6 +33,24 @@ The supported desktop destinations are deliberately small:
   motion. The internal onboarding flag is not a user-facing setting.
 
 ![Home shows the local desktop shell, Ready status, and local action cards.](../assets/screenshots/electron/ready-home.png)
+
+### Source-level gates
+
+The released bounded Electron desktop control shell uses the authenticated
+health/capability sidecar. The 0.6.0 source also includes explicitly bounded
+file-grant, provider-configuration, presentation-only **Tasks** adapters, a
+source-level synchronous transient-chat API, and a transient **Chat**
+destination over a Main-owned private stream. That chat boundary requires an
+exact stored profile and model plus current policy and compatible consent,
+keeps bounded content only in memory, grants no tools or domain authority,
+renders model Markdown through a closed allowlist, and keeps external-link
+confirmation in Electron Main. Desktop-domain capabilities such
+as target-matched packaged and adversarial chat evidence, genealogy/domain task
+admission or execution, direct artifact access, cloud accounts, and updater
+flows remain planned or incomplete. The current desktop records distinguish
+the supported packaged control surface from source-level gated adapters and
+the verification needed for later expansion; they
+are not a current journey for excluded domain capabilities.
 
 The 0.6.0 source from Issue #109 adds a **Tasks** destination to present
 backend-owned work. It remains outside the supported 0.6.0 installer claim.
@@ -89,7 +107,7 @@ shipping renderer.
 
 ## First run and revisit
 
-The `0.6.0` source-level gated first launch opens a bounded welcome on **Home**
+The `0.6.0` first launch opens a bounded welcome on **Home**
 and presents three explicit deployment intents:
 
 - **Local Desktop (Recommended)** is the only available choice. It uses the

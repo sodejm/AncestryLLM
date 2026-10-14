@@ -123,7 +123,7 @@
   },
   "tutorials/desktop-first-run.md": {
     "title": "Desktop first run — AncestryLLM",
-    "description": "A safe first journey through the v0.6 desktop source using fictional local state, provider none, and bounded recovery."
+    "description": "Reach the supported 0.6.0 desktop Home with provider none and bounded recovery. Fictional development previews have a separate procedure."
   },
   "how-to/desktop-diagnostics.md": {
     "title": "Recover with desktop diagnostics — AncestryLLM",

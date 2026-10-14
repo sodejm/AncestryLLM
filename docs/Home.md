@@ -1,54 +1,49 @@
 # AncestryLLM documentation
 
-AncestryLLM is a local-first command-line tool for genealogy research. It
-combines deterministic RootsMagic and GEDCOM workflows with optional,
-explicitly selected LLM providers.
+AncestryLLM is a local-first genealogy tool with one-shot commands, an
+interactive console, and a bounded desktop control shell. Choose a task below.
+The desktop supports local setup and diagnostics; use the CLI or console for
+genealogy workflows.
 
-The canonical source is this `docs/` directory. It is published to the
-[AncestryLLM documentation site](https://sodejm.github.io/AncestryLLM/) and the
-[GitHub Wiki](https://github.com/sodejm/AncestryLLM/wiki); the Wiki remains
-available, but neither published view is an independent documentation source.
+## Tutorials
 
-## Current product surfaces
+Follow a complete workflow:
 
-The CLI, interactive REPL, and released bounded Electron desktop control shell
-are the implemented product surfaces. The shell supports Home, Diagnostics,
-Settings, and capability onboarding.
+- [Desktop first run](tutorials/desktop-first-run.md) — reach a network-free
+  Home state in the supported 0.6.0 installer and choose the next supported surface
+- [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
+  — produce a rooted GEDCOM 5.5.5 file and quality report with `provider=none`
+  and no network calls.
 
-The CLI and REPL use the same command specification, transport-neutral
-executor, application DTOs, and genealogy services.
+## How-to guides
 
-- Start with the [CLI reference](reference/CLI.md) for one-shot commands.
-- Start with the [interactive console guide](CONSOLE.md) for the prompt-toolkit
-  and Rich REPL.
+Complete a specific task or recover from a problem:
 
-All user-selected files are governed by the shared
-[bounded file-ingress policy](reference/FILE_INGRESS.md), including byte and record
-budgets, race detection, output alias rejection, and transactional publication.
+- [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md) — merge
+  the public fictional fixtures, verify the results, and recover from failure
+- [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
+  — inspect the implemented prompt-toolkit/Rich REPL safely
+- [Recover with desktop diagnostics](how-to/desktop-diagnostics.md) — interpret
+  sanitized startup state and retry the private desktop service
+- [Interactive console guide](CONSOLE.md) — start and use the REPL
+- [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md) — create and restore backups
+- [First-run storage diagnostics](SETUP_DIAGNOSTICS.md) — troubleshoot setup
+- [Release runbook](RELEASING.md) — prepare and publish a release
 
-The released bounded Electron desktop control shell uses the authenticated
-health/capability sidecar. The 0.6.0 source also includes explicitly bounded
-file-grant, provider-configuration, presentation-only **Tasks** adapters, a
-source-level synchronous transient-chat API, and a transient **Chat**
-destination over a Main-owned private stream. That chat boundary requires an
-exact stored profile and model plus current policy and compatible consent,
-keeps bounded content only in memory, grants no tools or domain authority,
-renders model Markdown through a closed allowlist, and keeps external-link
-confirmation in Electron Main. Desktop-domain capabilities such
-as target-matched packaged and adversarial chat evidence, genealogy/domain task
-admission or execution, direct artifact access, cloud accounts, and updater
-flows remain planned or incomplete. The current desktop records distinguish
-the supported packaged control surface from source-level gated adapters and
-the verification needed for later expansion; they
-are not a current journey for excluded domain capabilities.
+### Desktop source-level guides
 
-The accepted deployment architecture now has a source-level profile control
-plane: Local Desktop is the safe default, while Connect Remote and advanced
-Host Remote remain explicit unavailable intents. The bounded desktop shell
-also has reviewed macOS arm64 controls for acquiring and managing app-owned
-Colima, Lima, Docker Engine, and Compose tools. Those controls do not ship or
-activate an AncestryLLM application container or a remote runtime; the local
-CLI, REPL, and bounded desktop shell remain the only product surfaces.
+These guides cover gated adapters in source. They are outside the supported
+0.6.0 installer claim and require target-matched packaged and security evidence
+before support can expand. A fictional development preview is not that evidence.
+
+- [Grant desktop file access](how-to/desktop-file-access.md) — understand
+  scoped opaque grants and the immutable-input boundary
+- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
+  — test an endpoint, review exact disclosure scope, and revoke consent
+- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md) — follow
+  backend-owned progress and cancellation safe points
+- [Use transient desktop chat](how-to/desktop-chat.md) — work with the bounded,
+  unsaved advisory conversation surface
 
 ## v0.6 desktop learning path
 
@@ -62,42 +57,24 @@ silently grant provider, network, filesystem, or genealogy authority.
 
 ![Home shows the local desktop shell, Ready status, and local action cards.](assets/screenshots/electron/ready-home.png)
 
-## Tutorials
+## Current product surfaces
 
-Learn a complete, safe workflow with fictional data:
+The CLI, interactive REPL, and released bounded Electron desktop control shell
+are the implemented product surfaces. The shell supports Home, Diagnostics,
+Settings, and capability onboarding. Desktop-domain capabilities remain
+planned or gated; see the [desktop shell guide](explanation/DESKTOP_SHELL.md)
+for the supported boundary and source-level contracts.
 
-- [Desktop first run](tutorials/desktop-first-run.md) — reach a verified,
-  network-free Home state and choose the next supported surface
-- [Merge fictional GEDCOM records offline](tutorials/offline-gedcom-merge.md)
-  — produce a rooted GEDCOM 5.5.5 file and quality report with `provider=none`
-  and no network calls.
+The CLI and REPL use the same command specification, transport-neutral
+executor, application DTOs, and genealogy services. User-selected files follow
+the shared [bounded file-ingress policy](reference/FILE_INGRESS.md), including
+byte and record budgets, race detection, output alias rejection, and
+transactional publication.
 
-## How-to guides
-
-Task-oriented guidance for common goals:
-
-- [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md) — merge
-  the public fictional fixtures, verify the results, and recover from failure
-- [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
-  — inspect the implemented prompt-toolkit/Rich REPL safely
-- [Recover with desktop diagnostics](how-to/desktop-diagnostics.md) — interpret
-  sanitized startup state and retry the private desktop service
-- [Grant desktop file access](how-to/desktop-file-access.md) — understand
-  scoped opaque grants and the immutable-input boundary
-- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
-  — test an endpoint, review exact disclosure scope, and revoke consent
-- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md) — follow
-  backend-owned progress and cancellation safe points
-- [Use transient desktop chat](how-to/desktop-chat.md) — work with the bounded,
-  unsaved advisory conversation surface
-- [Interactive console guide](CONSOLE.md) — start and use the REPL
-- [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md) — create and restore backups
-- [First-run storage diagnostics](SETUP_DIAGNOSTICS.md) — troubleshoot setup
-- [Release runbook](RELEASING.md) — prepare and publish a release
-
-The established root paths for the last four guides remain published while
-release packaging and contract consumers use them. Their inventory records the
-later `git mv` cutover that will update those consumers together.
+The [deployment guide](DEPLOYMENT.md) covers the reviewed macOS arm64
+runtime-tool controls. They do not activate an AncestryLLM application
+container or a remote runtime; Local Desktop remains the only available
+deployment choice.
 
 ## Reference
 
@@ -134,6 +111,7 @@ Concepts, rationale, and design context:
 
 ## Supporting records and publishing
 
+- [Published documentation](https://sodejm.github.io/AncestryLLM/) — browse the canonical guides on GitHub Pages
 - [Wiki synchronization](WIKI_SYNC.md) — reproduce the publishing step locally
 - [Wiki operations and recovery](WIKI_OPERATIONS.md) — dispatch, verify, rollback
 - [Security response checklist](SECURITY_RESPONSE.md)
@@ -149,14 +127,3 @@ Concepts, rationale, and design context:
 - [Provider framework evaluation ADR](ADR-0024-provider-framework-evaluation.md) — recorded provider choice
 - [Data-flow threat model and control matrix](THREAT_MODEL.md) — security governance
 - [Release evidence index](release-evidence/README.md) — retained verification artifacts
-
-## Documentation links
-
-Documentation links use relative Markdown filenames (for example,
-`[Console guide](CONSOLE.md)`). This keeps links valid from this `docs/`
-directory in the repository. The Pages build rewrites local links only in its
-generated staging directory, from `.md` targets to site paths. Wiki
-synchronization rewrites the same local targets to extensionless Wiki page
-links. The canonical source remains unchanged.
-
-Use the sidebar to navigate the complete published documentation set.

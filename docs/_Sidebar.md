@@ -14,14 +14,19 @@
 - [Run an offline GEDCOM merge](how-to/run-an-offline-gedcom-merge.md)
 - [Explore commands in the interactive console](how-to/explore-the-interactive-console.md)
 - [Recover with desktop diagnostics](how-to/desktop-diagnostics.md)
-- [Grant desktop file access](how-to/desktop-file-access.md)
-- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
-- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md)
-- [Use transient desktop chat](how-to/desktop-chat.md)
 - [Interactive console guide](CONSOLE.md)
 - [Encrypted backup and recovery](ENCRYPTED_BACKUPS.md)
 - [First-run storage diagnostics](SETUP_DIAGNOSTICS.md)
 - [Release runbook](RELEASING.md)
+
+### Desktop source-level guides
+
+Gated source adapters; outside the supported 0.6.0 installer claim.
+
+- [Grant desktop file access](how-to/desktop-file-access.md)
+- [Configure a desktop provider and consent](how-to/desktop-provider-consent.md)
+- [Monitor and cancel desktop tasks](how-to/desktop-tasks.md)
+- [Use transient desktop chat](how-to/desktop-chat.md)
 
 ### Reference
 

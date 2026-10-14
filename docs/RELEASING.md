@@ -367,9 +367,93 @@ self-approval; do not make that change during the one-maintainer release.
    each dependency in the selected iteration is closed and verified. Closed
    historical dependencies outside that iteration do not need to be added to
    the release Project.
-6. Run `Release readiness` with the exact `main` commit and semantic version,
-   and affirm the branch/worktree lifecycle audit input, backed by the
-   documented reachability, unique-commit, cleanup, and preservation record.
+6. Dispatch `Release readiness` from `main` with the exact candidate commit,
+   semantic version, and completed lifecycle audit. Set all three workflow
+   inputs explicitly: `commit_sha`, `version`, and
+   `lifecycle_cleanup_confirmed=true`. This branch/worktree lifecycle audit input
+   attests that the
+   reachability, unique-commit, cleanup, and preservation record required by
+   step 2 is complete.
+
+   Run these commands only after steps 1 through 5 are complete. They capture
+   the run URL returned by GitHub CLI instead of guessing which recent run to
+   inspect. Stop if GitHub CLI does not return one unambiguous run URL.
+
+   ```bash
+   set -euo pipefail
+
+   repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+   git fetch --no-tags origin main
+   test -z "$(git status --short)"
+   release_commit="$(git rev-parse origin/main)"
+   test "$(git rev-parse HEAD)" = "$release_commit"
+   release_version="$(jq -er '.release' .github/release-config.json)"
+
+   .venv/bin/python scripts/verify_release_configuration.py \
+     --config .github/release-config.json \
+     --version "$release_version"
+
+   readiness_dispatch_output="$(
+     gh workflow run release-readiness.yml \
+       --repo "$repository" \
+       --ref main \
+       --raw-field "commit_sha=$release_commit" \
+       --raw-field "version=$release_version" \
+       --raw-field lifecycle_cleanup_confirmed=true
+   )"
+   readiness_url="$(
+     sed -nE \
+       's#.*(https://[^[:space:]]+/actions/runs/[0-9]+).*#\1#p' \
+       <<<"$readiness_dispatch_output" | sort -u
+   )"
+   if [[ -z "$readiness_url" || "$readiness_url" == *$'\n'* ]]; then
+     echo "Release readiness did not return one unambiguous run URL:" >&2
+     echo "$readiness_dispatch_output" >&2
+     exit 1
+   fi
+   readiness_run="${readiness_url##*/}"
+   ```
+
+   Bind the recorded run ID to the expected workflow and commit before waiting
+   for it. After it succeeds, download the named evidence artifact into a new
+   temporary directory and verify the same version, commit, and gate statuses
+   that the publication workflow consumes. Continue in the same Bash shell so
+   the recorded repository, commit, version, URL, and run ID remain available.
+
+   ```bash
+   release_readiness_workflow_id="$(
+     gh api "repos/$repository/actions/workflows/release-readiness.yml" --jq .id
+   )"
+   readiness_json="$(gh api "repos/$repository/actions/runs/$readiness_run")"
+   test "$(jq -r '.workflow_id' <<<"$readiness_json")" = \
+     "$release_readiness_workflow_id"
+   test "$(jq -r '.event' <<<"$readiness_json")" = workflow_dispatch
+   test "$(jq -r '.head_sha' <<<"$readiness_json")" = "$release_commit"
+   test "$(jq -r '.html_url' <<<"$readiness_json")" = "$readiness_url"
+
+   gh run watch "$readiness_run" --repo "$repository" --exit-status
+
+   readiness_json="$(gh api "repos/$repository/actions/runs/$readiness_run")"
+   test "$(jq -r '.status' <<<"$readiness_json")" = completed
+   test "$(jq -r '.conclusion' <<<"$readiness_json")" = success
+   test "$(jq -r '.head_sha' <<<"$readiness_json")" = "$release_commit"
+
+   readiness_evidence="$(mktemp -d)"
+   gh run download "$readiness_run" \
+     --repo "$repository" \
+     --name release-evidence \
+     --dir "$readiness_evidence"
+   test "$(jq -r '.release' "$readiness_evidence/gates.json")" = \
+     "$release_version"
+   test "$(jq -r '.commit' "$readiness_evidence/gates.json")" = \
+     "$release_commit"
+   test "$(jq -r '[.gates[].status == "verified"] | all' \
+     "$readiness_evidence/gates.json")" = true
+   grep -F -- "- Version: \`$release_version\`" \
+     "$readiness_evidence/release-evidence.md"
+   grep -F -- "- Commit: \`$release_commit\`" \
+     "$readiness_evidence/release-evidence.md"
+   ```
 7. Confirm the successful exact-head `Desktop sidecar` aggregate is for the
    same commit and contains all six unpublished native-package rows. This is
    an input to the installer gate, not release-installer evidence by itself.
@@ -606,7 +690,7 @@ artifact from that run and the draft assets into separate directories, then
 require:
 
 ```bash
-python scripts/verify_release_assets.py \
+.venv/bin/python scripts/verify_release_assets.py \
   --expected /path/to/release-distributions \
   --actual /path/to/draft-download
 ```
