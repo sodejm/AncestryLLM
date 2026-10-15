@@ -306,6 +306,13 @@ with identical IDs or matching logic are deduplicated before Semgrep runs. A
 changed archive, missing reviewed rule, conflicting rule ID, or unreviewed
 redirect fails closed.
 
+The registry snapshots contain 151 Python rules and 52 secrets rules, plus the
+ten selected Trail of Bits rules below. When registry content changes, review
+the downloaded rules and selected IDs, update both the byte and semantic pins
+in `scripts/run_pinned_semgrep.py` and its contract tests, and run the security
+gate before committing. Remove obsolete byte encodings when the semantic digest
+changes; a previous encoding cannot satisfy the new semantic contract.
+
 The reviewed third-party additions deliberately cover only current repository
 surfaces:
 

@@ -64,119 +64,33 @@ RULE_BUNDLES = (
     RuleBundle(
         name="python",
         url="https://semgrep.dev/c/p/python",
-        semantic_sha256="80eeb6e5e772926c4fb1e0c6dd49def6d197305127e002a6bdb24b35bf3e6b80",
-        # Registry edges served these reviewed YAML and JSON encodings of the
-        # same 151-rule set. All remain byte-pinned and must also match the
-        # canonical semantic digest; every other response fails.
+        semantic_sha256="058375e039e6ddf738c23faa469d195dacc3751851dc02464311a22652c2e271",
         revisions=(
             RuleRevision(
-                sha256="f65001af74892a76d941e11694a0f6b84c3b5ab558ae5202af6b3fd070566f56",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="6c5830b3c92994be81404c599c7d5595538aa8d6036fb8042eb3861e6608638d",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="e9f042a0c53c33e67ad43288b548a52a20b23dc3f0feea7bfffaba17cc63949a",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="c475a61f25c07ed68fbe20b1f0747a89218063a9ba85465999c53db57255017a",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="0b7d2717d79da2ce99bffa329d954833e2ecc034b7ff86f0932a38ce416b5946",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="2fd889488c318acc98cdf84fc3736ed5b9b20c68ca5ea619af35cac716f961e7",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="5bf4a3a5080baa129b0080d2deb1edbe140464a48bced044901c69fdf581d71d",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="babf8c5994a3074d041077174ae3f5d14a88e807084ece1a53a29c7cbbdf5851",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="18d4f94e9cbd3944c752dcad2d9b643b562d37abe12705c61176fd9a7cc1f0c1",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="a8a155d58dc346b4358e9f9e347d93c0869a542304a216b9f63701ea1d737b12",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="c8a84a1877ad8c93e189377b80c798ed27aec80ee85a977409af05a526c54b4b",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="c030c27616041435f0c1f7bfc6d18b9241401c3c1936ad7380229b692c8473d6",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="84f7b1202051b2d4beb6861b5de46e652bd56c7bebc90e128f0cf64fc1d54934",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="7476830701b31be1c4a76432e23950b86ec76635888103877ca24708e7c01c76",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="449934d9be1f6f2ea91ff5175a8629cc93c38f8f52ca3da44e43089bcca44260",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="f2855115c92ee2e01f6cc769ec86eaf1a50cc65bb12adb8e4fa01edeec04e71d",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="084e9272b4297bbdc7afcd0b8ece70816f2e9c9973639b26eab2c071456ccc6b",
-                size=432_695,
-            ),
-            RuleRevision(
-                sha256="8a3d322e2e4c33ea25652239eba734b6d8418227af7ff3cd6a1d53e371f80e56",
-                size=487_962,
-            ),
-            RuleRevision(
-                sha256="10aaa4c312789cc5834d721e71ed20a4fce6251abbc43a21218cf6633cc88e21",
-                size=487_962,
+                sha256="de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5",
+                size=502_198,
             ),
         ),
     ),
     RuleBundle(
         name="secrets",
         url="https://semgrep.dev/c/p/secrets",
-        semantic_sha256="58f2b776c275f1adad42aecf8ace71774632d95e1d81db717bc63aeeb12308fa",
-        # Registry edges served reviewed YAML and JSON encodings of the same
-        # 52-rule set. The raw pins constrain transport bytes while the shared
-        # semantic digest prevents a newly pinned encoding from changing rules.
+        semantic_sha256="87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b",
         revisions=(
             RuleRevision(
-                sha256="139b35ad3442bc83d1f0864db82fa4fdc7e1f1ee4b5ac872bfbeb604c82c6518",
-                size=89_772,
-            ),
-            RuleRevision(
-                sha256="7c0b0163d7cbfe44f16cec78556662655bedeec1d41c6e091ddef5d85c1d5eff",
-                size=82_768,
+                sha256="d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a",
+                size=94_643,
             ),
         ),
     ),
     RuleBundle(
         name="trailofbits",
         url="https://semgrep.dev/c/p/trailofbits",
-        semantic_sha256="8b1a7d47796f1d002fa6ca1a960efefaf775b2d0cd864a413aa23a5210ed59ea",
+        semantic_sha256="94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
         revisions=(
             RuleRevision(
-                sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
-                size=185_537,
+                sha256="3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
+                size=195_569,
             ),
         ),
         include_rule_ids=(
