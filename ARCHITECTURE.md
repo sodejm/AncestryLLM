@@ -934,7 +934,8 @@ described in
 - secret-like option names are rejected, while the secrets command uses
   no-echo prompt-toolkit password prompts;
 - history is stored under the private data directory with owner-only mode where
-  supported;
+  supported, capped at 1,000 entries and 1 MiB with a 16 KiB serialized-entry
+  limit; startup reads a bounded tail and persistence uses atomic replacement;
 - bounded background jobs expose structured progress, cooperative cancellation,
   and cancellation-resistant shutdown.
 

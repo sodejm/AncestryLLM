@@ -89,6 +89,11 @@ dependency.
   snapshot data, and permitted local directory listings only.
 - Secret entry is no-echo, secrets and secret-like commands are excluded from
   history, and interactive history is stored with owner-only permissions.
+  History bounds both memory and disk retention to 1,000 entries and 1 MiB, with
+  a 16 KiB serialized-entry limit. Loading reads only a bounded tail; compaction
+  and writes use a private temporary file and atomic replacement. Persistence
+  failures leave the original file intact and fall back to bounded session
+  history in memory.
 - Provider selection and consent stay explicit. `provider=none` remains
   network-free even when keys or provider SDKs are installed.
 - The shared services keep RootsMagic inputs immutable and GEDCOM processing

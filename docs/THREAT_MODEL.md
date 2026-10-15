@@ -120,6 +120,14 @@ evidence that every packaged assurance control has passed. Each adapter must
 reuse the implemented service contracts and complete its named
 verification before a planned control can be treated as effective.
 
+Issue #503 bounds the REPL history availability and privacy boundary: startup
+reads at most a 1 MiB tail plus one boundary byte, retains at most 1,000 entries
+and 1 MiB, and rejects serialized entries larger than 16 KiB. Legacy compaction
+and subsequent writes use private temporary files and atomic replacement, with
+symlink checks and bounded in-memory fallback on persistence failure. Sensitive
+commands remain excluded; history is not sent to providers or diagnostics.
+These local REPL controls do not supply packaged desktop or deployment evidence.
+
 [ADR-0026](ADR-0026-local-first-container-remote-deployment.md) accepts a
 local-first multi-container backend, an advanced remote-client profile, and a
 separately operated remote-server profile as the target architecture. Issue

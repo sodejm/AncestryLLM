@@ -246,7 +246,11 @@ values.
 
 Interactive history is stored with owner-only permissions. Secret entry and
 secret-like commands are excluded from history and defensively redacted from
-persisted history. Do not paste credentials, private genealogy records, or
+persisted history. Retention is limited to 1,000 entries and 1 MiB, with a 16 KiB
+limit per serialized entry. Legacy files retain only valid entries from their
+newest 1 MiB; older history is discarded during compaction. See
+[history and privacy](../CONSOLE.md#history-and-privacy) for persistence behavior.
+Do not paste credentials, private genealogy records, or
 prompt/response payloads into ordinary commands.
 
 
