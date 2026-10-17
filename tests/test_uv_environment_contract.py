@@ -400,39 +400,49 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
             validate_python_version(unsupported)
 
 
-def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
+def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     expected_commands = {
-        (".github/workflows/ci.yml", "lockfile"): ("make lock-check",),
-        (".github/workflows/ci.yml", "test"): ("make test",),
+        (".github/workflows/ci.yml", "lockfile"): ("uv lock --check",),
+        (".github/workflows/ci.yml", "test"): (
+            "uv run --locked --group test pytest --verbose",
+        ),
         (".github/workflows/ci.yml", "quality"): (
-            "make lint",
-            "make typecheck",
-            "make typecheck-ty",
-            "make code-docs-check",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
+            "uv run --locked --group typecheck ty check src/ancestryllm",
         ),
         (".github/workflows/ci.yml", "security"): (
-            "make dependency-audit",
-            "make security-static",
-            "make sbom",
+            "uv run --locked --group security pip-audit",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file sbom.json .venv/bin/python",
         ),
-        (".github/workflows/ci.yml", "package"): ("make package",),
-        (".github/workflows/ci.yml", "workflow-audit"): ("make workflow-audit",),
+        (".github/workflows/ci.yml", "package"): (
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+        ),
+        (".github/workflows/ci.yml", "workflow-audit"): (
+            "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
+        ),
         (".github/workflows/release-readiness.yml", "quality"): (
-            "make test",
-            "make lint",
-            "make typecheck",
-            "make code-docs-check",
+            "uv run --locked --group test pytest --verbose",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/release-readiness.yml", "security"): (
-            "make dependency-audit",
-            "make security-static",
-            "make workflow-audit",
-            "make sbom",
+            "uv run --locked --group security pip-audit",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security zizmor --persona=pedantic "
+            ".github/workflows .github/actions",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file sbom.json .venv/bin/python",
         ),
-        (".github/workflows/release-readiness.yml", "package"): ("make package",),
+        (".github/workflows/release-readiness.yml", "package"): (
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+        ),
         (".github/workflows/release.yml", "build"): (
-            "make package",
-            "make sbom SBOM_OUTPUT=dist/sbom.json",
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+            "uv run --locked --group security cyclonedx-py environment "
+            "--output-file dist/sbom.json .venv/bin/python",
         ),
     }
 
@@ -440,7 +450,11 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
         job = _workflow_job(relative_path, job_name)
         for command in commands:
             command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
-            assert len(command_line.findall(job)) == 1, (relative_path, job_name, command)
+            assert len(command_line.findall(job)) == 1, (
+                relative_path,
+                job_name,
+                command,
+            )
 
     canonical_workflows = (
         ROOT / ".github/workflows/ci.yml",
@@ -451,6 +465,7 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
     for workflow_path in canonical_workflows:
         workflow = workflow_path.read_text(encoding="utf-8")
         assert all(command not in workflow for command in forbidden), workflow_path
+        assert not re.search(r"(?m)^\s*[^#\n]*\bmake(?:\s|$)", workflow), workflow_path
 
 
 def test_python_matrix_remains_system_supplied_and_supported() -> None:

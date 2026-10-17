@@ -48,9 +48,10 @@ policy-pinned GitHub CLI archive passes its own hash and archive checks.
 `uv` is supplied by this bootstrap, not by an application extra or PEP 735
 dependency group. After verification, `make setup` runs
 `uv sync --locked --all-extras --all-groups`, including the release verifier.
-Purpose-specific workflows may synchronize smaller locked profiles before
-calling the same canonical Make targets, and the production PyPI verification
-job installs only `release-verifier`. See [Dependency
+Purpose-specific workflows synchronize smaller locked profiles and invoke
+their verifier commands directly; local Make targets remain developer
+interfaces. The production PyPI verification job installs only
+`release-verifier`. See [Dependency
 maintenance](../reference/DEPENDENCY_MAINTENANCE.md) for the complete group contract.
 
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an

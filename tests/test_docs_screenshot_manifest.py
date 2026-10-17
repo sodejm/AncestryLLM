@@ -330,7 +330,8 @@ def test_make_exposes_publication_and_nonmutating_drift_targets() -> None:
         path.read_text(encoding="utf-8")
         for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
     )
-    assert "make docs-screenshots-check" in workflows
+    assert "scripts/docs_screenshots.py check --manifest" in workflows
+    assert "uv run --locked --group lint python" in workflows
 
 
 def test_contract_ownership_and_impact_are_documented() -> None:

@@ -19,10 +19,11 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   `.github/actions/`.
 
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
-0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
-the checked-in GFM structural checks to every tracked Markdown file, whether
-or not a contributor installed the hooks. `make code-docs-check` is the
-separate, canonical declaration-documentation gate for Python, Swift, and the
+0.12.1 versions. CI workflows invoke their verifier commands directly rather
+than delegating hosted enforcement to candidate-controlled Make targets. Local
+Make targets remain the supported developer interfaces. The lint commands also
+apply the checked-in GFM structural checks to every tracked Markdown file, and
+the separate declaration-documentation gate covers Python, Swift, and the
 desktop TypeScript/JavaScript tree.
 
 `make setup` first runs the
@@ -53,9 +54,9 @@ feedback alongside the focused container contract tests.
 The complete `uv.lock` covers every application extra and repository tool
 group. Full local setup installs that complete graph, including the release
 verifier. Purpose-specific workflow jobs pass `--no-default-groups` and
-synchronize only the profile they execute. The lock consistency job installs no
-group and calls `make lock-check`, whose canonical command is
-`uv lock --check`.
+synchronize only the profile they execute. The hosted lock consistency job
+installs no group and calls `uv lock --check` directly; `make lock-check`
+remains the local interface for that command.
 
 | Work | Locked environment |
 |---|---|
@@ -70,16 +71,17 @@ group and calls `make lock-check`, whose canonical command is
 | Release-project proof | `test` only |
 
 The dedicated documentation-screenshot job installs the exact repository
-toolchain, then runs the canonical `make docs-screenshots-check` target under a
-pinned virtual display with fixed locale and timezone. It recaptures all
+toolchain, then runs `scripts/docs_screenshots.py check` under a pinned virtual
+display with fixed locale and timezone. It recaptures all
 Electron and terminal scenarios and performs exact-byte comparison without
 changing the checkout. On failure it retains only the bounded schema-v1
 hash-drift report for seven days; screenshots, DOM text, transcripts, fixtures,
 environment values, and host details are never uploaded as drift evidence.
 
 No quality, security, or build job installs provider extras. After any allowed
-narrow synchronization, workflow jobs call the same canonical Make target used
-locally; they do not restate or vary its command arguments. The Python 3.12
+narrow synchronization, workflow jobs execute their canonical verifier
+commands directly; they do not delegate enforcement to the candidate
+Makefile. The Python 3.12
 release-readiness row first exercises the provider-aware test profile, then
 replaces it with `lint` and `typecheck` before static checks; the separate
 security-evidence job installs `security`. This prevents a successful gate from
@@ -88,15 +90,16 @@ maintenance procedure are documented in [Dependency
 maintenance](DEPENDENCY_MAINTENANCE.md).
 
 The Python 3.12 quality job and its release-readiness counterpart install exact
-Node 26.5.0 and pnpm 11.9.0 before calling `make code-docs-check`. That Make
-target owns the Ruff declaration subset, the tracked-file and Swift DocC
-classifier, the TypeScript compiler-AST export/security-boundary check, and the
-exact-pinned `eslint-plugin-jsdoc` syntax and description rules. The desktop
-workspace is installed with the frozen lockfile; the checker itself reads only
-the candidate tree and performs no network or provider calls.
+Node 26.5.0 and pnpm 11.9.0 before running the declaration-documentation
+commands directly. These checks cover the Ruff declaration subset, the
+tracked-file and Swift DocC classifier, the TypeScript compiler-AST
+export/security-boundary check, and the exact-pinned `eslint-plugin-jsdoc`
+syntax and description rules. The desktop workspace is installed with the
+frozen lockfile; the checker itself reads only the candidate tree and performs
+no network or provider calls.
 
-The Python 3.12 quality job keeps `make typecheck` as the blocking strict-mypy
-gate. A separate `make typecheck-ty` step runs exact `ty 0.0.69` over
+The Python 3.12 quality job keeps strict mypy as the blocking type-check gate.
+A separate step runs exact `ty 0.0.69` over
 `src/ancestryllm` with `continue-on-error: true`; it does not use `|| true`, so
 the Actions UI retains ty's actual status. Release readiness and release
 evidence continue to require the schema-v1 `mypy` result. The counts, parity
@@ -107,14 +110,14 @@ all-extras setup resolves five optional provider imports without satisfying the
 cutover gate.
 
 Ruff remains lock-resolved at 0.16.1. Quality jobs select GitHub annotation
-output through `RUFF_OUTPUT_FORMAT=github` and still invoke the canonical
-`make lint` target without restating its flags. The enabled rule families,
+output through `RUFF_OUTPUT_FORMAT=github` and invoke Ruff directly with the
+reviewed flags. The enabled rule families,
 reviewed diagnostic batches, provider-import contract, and cold-start evidence
 are recorded in the [Ruff rule-expansion evaluation](RUFF_EXPANSION_EVALUATION.md).
 Declaration documentation remains a distinct gate so changes to the normal
 lint surface cannot silently weaken its cross-language contract.
 
-Production package and release jobs continue to call `make package` with
+Production package and release jobs invoke the build script directly with
 setuptools as the authoritative backend. `make evaluate-uv-build` is a
 maintainer-only, locked-`build`-group comparison: it builds the same clean
 commit with setuptools and `uv_build`, records schema-v1 artifact and semantic
@@ -139,7 +142,7 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Pull request | An early direct `uv lock --check` gate; tests on Python 3.12; one Python 3.12 quality job including direct declaration-documentation checks; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
 | Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate, including declaration documentation on the Python 3.12 quality row. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
