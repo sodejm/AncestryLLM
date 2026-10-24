@@ -296,8 +296,8 @@ def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> No
     assert install_job.count("github.event_name == 'pull_request'") == 3
     assert "'[\"ubuntu-latest\"]'" in install_job
     assert '\'["ubuntu-latest","macos-latest","windows-latest"]\'' in install_job
-    assert "'[\"3.12\"]'" in install_job
-    assert '\'["3.12","3.13","3.14"]\'' in install_job
+    assert '\'["3.12","3.15"]\'' in install_job
+    assert '\'["3.12","3.13","3.14","3.15"]\'' in install_job
     assert "runs-on: ${{ matrix.os }}" in install_job
 
 
@@ -311,7 +311,7 @@ def test_ci_limits_pull_request_test_matrix_and_runner_parallelism() -> None:
     )
     assert (
         "python: ${{ fromJSON(github.event_name == 'pull_request' "
-        '&& \'["3.12"]\' || \'["3.12","3.13","3.14"]\') }}'
+        '&& \'["3.12","3.15"]\' || \'["3.12","3.13","3.14","3.15"]\') }}'
     ) in test_job
     assert "max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}" in (
         install_job

@@ -21,7 +21,7 @@ data directories inside that run directory.
 
 ## Prerequisites
 
-- A checkout of this repository and a system-supplied Python 3.12 through 3.14.
+- A checkout of this repository and a system-supplied Python 3.12 through 3.15.
 - A shell in the repository root.
 - A disposable output parent such as `./ancestryllm-tutorial-output`. Do not
   use a directory containing real genealogy data, a RootsMagic database, a

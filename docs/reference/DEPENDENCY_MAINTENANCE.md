@@ -10,7 +10,7 @@ on undeclared cross-profile tools.
 
 The repository-local, verified `uv` 0.12.1 bootstrap is the only supported way
 to create or update these environments. It requires a system-supplied Python
-3.12-3.14; `.python-version` selects 3.12 by default, and `[tool.uv]` prohibits
+3.12-3.15; `.python-version` selects 3.12 by default, and `[tool.uv]` prohibits
 Python downloads. `uv` is not a project dependency and must not be installed
 through a dependency group, `pip`, an alternate index, or an unverified
 executable on `PATH`.

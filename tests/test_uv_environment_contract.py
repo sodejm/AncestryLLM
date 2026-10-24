@@ -38,7 +38,7 @@ def _workflow_job(relative_path: str, job_name: str) -> str:
 def test_uv_requires_the_reviewed_version_and_never_downloads_python() -> None:
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert configuration["project"]["requires-python"] == ">=3.12,<3.15"
+    assert configuration["project"]["requires-python"] == ">=3.12,<3.16"
     assert configuration["tool"]["uv"] == {
         "required-version": "==0.12.1",
         "python-preference": "only-system",
@@ -392,10 +392,10 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
     assert completed.returncode != 0
     assert "UVENV_PYTHON_NOT_FOUND" in completed.stderr
 
-    for supported in ((3, 12, 0), (3, 13, 9), (3, 14, 0)):
+    for supported in ((3, 12, 0), (3, 13, 9), (3, 14, 0), (3, 15, 0)):
         validate_python_version(supported)
 
-    for unsupported in ((3, 11, 9), (3, 15, 0), (4, 0, 0)):
+    for unsupported in ((3, 11, 9), (3, 16, 0), (4, 0, 0)):
         with pytest.raises(SystemPythonError, match="UVENV_PYTHON_VERSION_UNSUPPORTED"):
             validate_python_version(unsupported)
 
@@ -460,5 +460,5 @@ def test_python_matrix_remains_system_supplied_and_supported() -> None:
 
     assert setup_python in ci
     assert setup_python in readiness
-    assert '["3.12","3.13","3.14"]' in ci
-    assert 'python: ["3.12", "3.13", "3.14"]' in readiness
+    assert '["3.12","3.13","3.14","3.15"]' in ci
+    assert 'python: ["3.12", "3.13", "3.14", "3.15"]' in readiness
