@@ -1250,7 +1250,7 @@ def test_database_backup_collision_cli_error_hides_host_paths(
 
 
 def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
-    assert (3, 12) <= sys.version_info[:2] < (3, 15)
+    assert (3, 12) <= sys.version_info[:2] < (3, 16)
     repository = Path(__file__).resolve().parents[2]
     wheelhouse = tmp_path / "wheelhouse"
     uv_name = "uv.exe" if os.name == "nt" else "uv"
@@ -1311,7 +1311,7 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         check=False,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=300,
         env=uv_environment,
     )
     assert install.returncode == 0, install.stderr

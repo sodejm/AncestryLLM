@@ -1697,7 +1697,7 @@ wrong-head, over-budget, or unapproved-exception evidence blocks delivery.
 
 CI may synchronize a purpose-specific PEP 735 dependency group before running
 a gate, but it invokes the same Make target and cannot vary the actual command
-or flags. The Python 3.12-3.14 test matrix installs `test` with the `all-llm`
+or flags. The Python 3.12-3.15 test matrix installs `test` with the `all-llm`
 application extra; quality installs only `lint` and `typecheck`; dependency
 audit, SBOM, and workflow audit install `security`; and package construction
 installs `build`. The production artifact-verification job installs only the

@@ -1,6 +1,6 @@
 # Contributing
 
-Use a system-supplied Python 3.12-3.14, create a focused branch under the branch
+Use a system-supplied Python 3.12-3.15, create a focused branch under the branch
 contract below, and run `make setup`. The checked-in `.python-version` selects
 3.12 by default, and repository policy prevents `uv` from downloading another
 interpreter. The setup target verifies the pinned `uv` release before its first

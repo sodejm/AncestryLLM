@@ -28,7 +28,7 @@ desktop TypeScript/JavaScript tree.
 `make setup` first runs the
 [verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
 repository-local `.tools/uv/uv` binary to install the locked environment
-without changing Git hooks. It requires a system-supplied Python 3.12-3.14;
+without changing Git hooks. It requires a system-supplied Python 3.12-3.15;
 `.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
 downloads. Setup runs the exact full-profile command
 `uv sync --locked --all-extras --all-groups`. The bootstrap refuses an
@@ -139,8 +139,8 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
-| Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
+| Pull request | An early `make lock-check` gate; tests on Python 3.12 and 3.15; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 and 3.15 wheel smoke tests; a Python 3.12 source-distribution smoke test; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Push to `main` | The pull-request coverage plus all twelve Ubuntu/macOS/Windows and Python 3.12-3.15 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate, including declaration documentation on the Python 3.12 quality row. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |

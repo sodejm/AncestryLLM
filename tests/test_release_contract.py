@@ -201,7 +201,7 @@ def test_readme_orients_new_readers_to_the_released_product_boundary() -> None:
 
     assert readme.startswith("# AncestryLLM\n")
     assert "people researching family history" in prose
-    assert "Python 3.12 through 3.14" in prose
+    assert "Python 3.12 through 3.15" in prose
     assert "working OS credential store" in prose
     assert "headless/CI environment-injection fallback" in prose
     assert "ancestry --json database diagnose" in prose
