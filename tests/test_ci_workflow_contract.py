@@ -246,9 +246,9 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "LC_ALL: en_US.UTF-8" in job
     assert "TZ: UTC" in job
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
-    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
+    assert "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0" in job
     assert 'node-version: "26.5.0"' in job
-    assert "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0" in job
+    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
     assert 'version: "11.9.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.9",
@@ -268,7 +268,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
 
-    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1" in job
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2" in job
     assert "if: failure()" in job
     assert "path: ${{ runner.temp }}/docs-screenshot-drift-v1.json" in job
     assert "if-no-files-found: error" in job
@@ -287,9 +287,9 @@ def test_all_workflows_use_the_cross_platform_pnpm_setup_action() -> None:
     workflows = "\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
 
     assert (
-        workflows.count("pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0") == 7
+        workflows.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0") == 7
     )
-    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413" not in workflows
+    assert "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320" not in workflows
 
 
 def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
@@ -528,8 +528,8 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
 
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
-    setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
-    setup_pnpm = "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320"
+    setup_node = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
+    setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
 
     for quality_job in (ci_quality, readiness_quality):
         assert quality_job.count("make code-docs-check") == 1

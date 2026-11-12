@@ -463,7 +463,7 @@ def test_ci_enforces_canonical_commands_independently_of_make() -> None:
 
 
 def test_python_matrix_remains_system_supplied_and_supported() -> None:
-    setup_python = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+    setup_python = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0"
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
 
