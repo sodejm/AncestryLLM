@@ -39,6 +39,12 @@ All notable changes to AncestryLLM are recorded here. The project follows
 - Updated the locked transitive Mako dependency from 1.3.12 to 1.4.3 to
   address GHSA-5639-2j2p-m4mx, a Windows `TemplateLookup` path traversal.
   Alembic retains its existing migration behavior.
+- Local pre-push validation now requires branch test changes alongside
+  implementation changes, scans the committed tree with Trivy, and selects
+  desktop, workflow, and container checks in addition to the canonical Python
+  quality, dependency-audit, and Semgrep gates.
+- Set a non-root default user for the docs-capture image to resolve findings
+  from the new pre-push gate.
 - Release and release-readiness workflows now verify the policy-bound
   release-quality approval against the exact commit and both source artifacts.
   Release verifies it again immediately before publication so stale, edited,

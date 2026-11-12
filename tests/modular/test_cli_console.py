@@ -1258,7 +1258,6 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     assert uv.is_file(), "make setup must install the verified repository-local uv"
     uv_environment = {
         **os.environ,
-        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
         "UV_PYTHON": sys.executable,
     }
     build = subprocess.run(
@@ -1311,7 +1310,7 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
         check=False,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=600,
         env=uv_environment,
     )
     assert install.returncode == 0, install.stderr

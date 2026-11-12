@@ -73,6 +73,10 @@
     "title": "Continuous integration — AncestryLLM",
     "description": "CI pipeline gates, workflow structure, and how to reproduce checks locally."
   },
+  "reference/LOCAL_PUSH_GATE.md": {
+    "title": "Local push gate — AncestryLLM",
+    "description": "Installation, required tools, test-development checks, security scans, and failure recovery for the local pre-push gate."
+  },
   "reference/DEPENDENCY_MAINTENANCE.md": {
     "title": "Dependency maintenance — AncestryLLM",
     "description": "Purpose-specific dependency groups, locked environment profiles, and the reviewed dependency update procedure."
