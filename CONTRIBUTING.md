@@ -23,6 +23,11 @@ must be explicit built-ins with one-shot and console parity; follow the
 [module-authoring contract](docs/reference/MODULE_AUTHORING.md) rather than adding a
 second command registry.
 
+Run `make bootstrap` instead of `make setup` to also install the commit and
+pre-push hooks, or run `make hooks` after setup. Install Trivy before pushing;
+the [local push gate](docs/reference/LOCAL_PUSH_GATE.md) documents prerequisites,
+the test-development check, and the stack-specific checks that block a push.
+
 ## VS Code workspace
 
 Open `AncestryLLM.code-workspace` with **File > Open Workspace from File**, or run

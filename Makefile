@@ -104,11 +104,8 @@ security-static: verified-uv
 
 security: dependency-audit security-static
 
-pre-push:
-	@$(MAKE) test
-	@$(MAKE) lint
-	@$(MAKE) typecheck
-	@$(MAKE) security
+pre-push: system-python
+	@$(PYTHON) scripts/run_pre_push.py
 
 sbom: verified-uv
 	@$(UV_BIN) run --locked --group security python scripts/generate_sbom.py --python $(VENV_PYTHON) --output $(SBOM_OUTPUT) --project pyproject.toml

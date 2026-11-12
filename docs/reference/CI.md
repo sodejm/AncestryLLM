@@ -13,10 +13,12 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   Ruff check and format-check behavior and exact-commit
   `astral-sh/uv-pre-commit` for `uv lock --check`; the Ruff hooks do not apply
   fixes;
-- the pre-push hook runs `make pre-push`, which expands to the canonical test,
-  lint, type-check, dependency-audit, and Semgrep gates. It also runs
-  `make workflow-audit` when a pushed commit changes `.github/workflows/` or
-  `.github/actions/`.
+- the pre-push hook runs `make pre-push`: a committed-tree Trivy scan, a
+  branch-level test-development check, and the canonical lock, test, lint,
+  type-check, dependency-audit, and Semgrep gates. Changed desktop, workflow,
+  and container inputs select their additional stack checks. See the
+  [local push gate](LOCAL_PUSH_GATE.md) for installation, prerequisites,
+  failure recovery, and validation limits.
 
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
 0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
