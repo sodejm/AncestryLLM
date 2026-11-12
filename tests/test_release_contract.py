@@ -453,7 +453,7 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
 
     assert "Rebuild deterministic artifacts and SBOM" in release
     assert "scripts/build_release.py --output-dir dist" in release
-    assert "cyclonedx-py environment --output-file dist/sbom.json" in release
+    assert "scripts/generate_sbom.py --python .venv/bin/python --output dist/sbom.json" in release
     assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
     for duplicate_gate in duplicate_gates:
         assert duplicate_gate not in release

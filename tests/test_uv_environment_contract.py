@@ -403,15 +403,15 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
 def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     expected_commands = {
         (".github/workflows/ci.yml", "lockfile"): ("uv lock --check",),
-        (".github/workflows/ci.yml", "test"): ("uv run --locked --group test pytest --verbose",),
+        (".github/workflows/ci.yml", "test"): ("uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",),
         (".github/workflows/ci.yml", "quality"): (
             "uv run --locked --group lint ruff check src tests scripts",
             "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/ci.yml", "security"): (
-            "uv run --locked --group security pip-audit",
+            "uv run --locked --group security python scripts/run_dependency_audit.py --uv uv",
             "uv run --locked --script scripts/run_pinned_semgrep.py .",
-            "uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output sbom.json --project pyproject.toml",
         ),
         (".github/workflows/ci.yml", "package"): (
             "uv run --locked --group build python scripts/build_release.py --output-dir dist",
@@ -420,22 +420,22 @@ def test_ci_enforces_canonical_commands_independently_of_make() -> None:
             "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
         ),
         (".github/workflows/release-readiness.yml", "quality"): (
-            "uv run --locked --group test pytest --verbose",
+            "uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",
             "uv run --locked --group lint ruff check src tests scripts",
             "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/release-readiness.yml", "security"): (
-            "uv run --locked --group security pip-audit",
+            "uv run --locked --group security python scripts/run_dependency_audit.py --uv uv",
             "uv run --locked --script scripts/run_pinned_semgrep.py .",
             "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
-            "uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output sbom.json --project pyproject.toml",
         ),
         (".github/workflows/release-readiness.yml", "package"): (
             "uv run --locked --group build python scripts/build_release.py --output-dir dist",
         ),
         (".github/workflows/release.yml", "build"): (
             "uv run --locked --group build python scripts/build_release.py --output-dir dist",
-            "uv run --locked --group security cyclonedx-py environment --output-file dist/sbom.json .venv/bin/python",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output dist/sbom.json --project pyproject.toml",
         ),
     }
 
