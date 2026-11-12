@@ -6,13 +6,16 @@ Hook installation is local to the Git checkout, so each contributor must install
 it; cloning the configuration alone does not activate hooks.
 
 The hook needs Git, Make, a supported system Python, and
-[Trivy](https://trivy.dev/latest/getting-started/installation/) on `PATH`, alongside
-the tools required by `make bootstrap` (including gitleaks). On macOS, install
-Trivy with `brew install trivy`. Changed desktop files also require the
-repository's exact Node.js and pnpm versions from `desktop/package.json`.
-Missing tools, scanner/database download errors, findings, and failed commands
-block the push. Security tools need network access for reviewed Semgrep rules,
-dependency advisories, and Trivy's vulnerability database and checks.
+[Trivy](https://trivy.dev/latest/getting-started/installation/) 0.75 or newer on
+`PATH`, alongside the tools required by `make bootstrap` (including gitleaks).
+Trivy 0.75 introduced the empty `--config`/`--ignorefile` semantics the gate
+relies on to ignore branch-controlled configuration, so the gate fails closed on
+older versions. On macOS, install Trivy with `brew install trivy`. Changed
+desktop files also require the repository's exact Node.js and pnpm versions from
+`desktop/package.json`. Missing tools, scanner/database download errors,
+findings, and failed commands block the push. Security tools need network access
+for reviewed Semgrep rules, dependency advisories, and Trivy's vulnerability
+database and checks.
 
 ## What runs
 

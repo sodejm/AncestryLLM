@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 from pathlib import Path
+
+MINIMUM_TRIVY_VERSION = (0, 75)
+SEMGREP_LOCK = "scripts/run_pinned_semgrep.py.lock"
 
 
 class PushGateError(RuntimeError):
@@ -63,7 +67,7 @@ def require_test_changes(paths: set[str], *, eligible_test_paths: set[str] | Non
             )
             and not path.endswith((".md", ".lock"))
         )
-        or path in {"Makefile", ".pre-commit-config.yaml"}
+        or path in {"Makefile", ".pre-commit-config.yaml", "pyproject.toml"}
         for path in paths
     )
     python_tests = any(
@@ -113,6 +117,23 @@ def gate_commands(paths: set[str]) -> list[list[str]]:
     return commands
 
 
+def _require_trivy_version(root: Path) -> None:
+    """Fail closed unless Trivy is new enough to honor empty configuration overrides."""
+    output = _execute(["trivy", "--version"], root, capture=True).decode("utf-8", "surrogateescape")
+    match = re.search(r"Version:\s*v?(\d+)\.(\d+)", output)
+    if match is None:
+        raise PushGateError(
+            "PUSHGATE_TRIVY_VERSION: could not determine the installed Trivy version; "
+            "install Trivy 0.75 or newer (see docs/reference/LOCAL_PUSH_GATE.md)."
+        )
+    if (int(match.group(1)), int(match.group(2))) < MINIMUM_TRIVY_VERSION:
+        raise PushGateError(
+            "PUSHGATE_TRIVY_VERSION: Trivy 0.75 or newer is required so the empty --config, "
+            "--ignorefile, and --secret-config values disable branch-controlled configuration; "
+            "see docs/reference/LOCAL_PUSH_GATE.md."
+        )
+
+
 def run_gate(root: Path) -> None:
     """Validate the checked-out commit, scan its tracked snapshot, and run all selected checks."""
     root = Path(_git(root, "rev-parse", "--show-toplevel"))
@@ -124,7 +145,9 @@ def run_gate(root: Path) -> None:
         )
     _check_checkout(root, head)
     base = _git(root, "merge-base", "origin/main", head)
-    paths = set(_git(root, "diff", "--name-only", "-z", base, head).split("\0")) - {""}
+    paths = set(_git(root, "diff", "--name-only", "--no-renames", "-z", base, head).split("\0")) - {
+        ""
+    }
     eligible = set(
         _git(
             root, "diff", "--name-only", "--no-renames", "--diff-filter=AMT", "-z", base, head
@@ -132,6 +155,7 @@ def run_gate(root: Path) -> None:
     ) - {""}
     require_test_changes(paths, eligible_test_paths=eligible)
     print("Pre-push: Trivy on the committed tree (HIGH/CRITICAL findings block).", flush=True)
+    _require_trivy_version(root)
     archive = _execute(["git", "archive", "--format=tar", head], root, capture=True)
     with tempfile.TemporaryDirectory(prefix="ancestryllm-push-") as temporary:
         snapshot = Path(temporary)
@@ -152,6 +176,8 @@ def run_gate(root: Path) -> None:
                 "--disable-telemetry",
                 "--timeout",
                 "10m",
+                "--file-patterns",
+                f"uv:{re.escape(SEMGREP_LOCK)}",
                 "--config=",
                 "--ignorefile=",
                 "--secret-config=",

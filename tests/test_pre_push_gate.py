@@ -45,6 +45,7 @@ def repository(tmp_path: Path) -> Path:
         {"src/ancestryllm/example.py"},
         {"scripts/example.py", "tests/README.md"},
         {"Makefile"},
+        {"pyproject.toml"},
         {"desktop/src/main/example.ts", "tests/test_example.py"},
     ],
 )
@@ -88,13 +89,16 @@ def test_stack_specific_checks_are_selected_by_branch_changes() -> None:
     assert ["make", "container-policy"] in selected
 
 
-def _fake_tools(root: Path, *, trivy_status: int = 0) -> dict[str, str]:
+def _fake_tools(
+    root: Path, *, trivy_status: int = 0, trivy_version: str = "0.75.1"
+) -> dict[str, str]:
     tools = root.parent / "tools"
     tools.mkdir()
     for name, body in {
         "make": ('printf "%s\\n" "$*" >> "$GATE_LOG"\n[ "$*" != "$GATE_FAIL_TARGET" ] || exit 1\n'),
         "trivy": (
             'printf "%s\\n" "$*" >> "$GATE_LOG"\n'
+            'if [ "$1" = "--version" ]; then printf "Version: %s\\n" "$TRIVY_VERSION"; exit 0; fi\n'
             "for target; do :; done\n"
             'test -f "$target/README.md" || exit 90\n'
             'test ! -e "$target/private-records.ged" || exit 91\n'
@@ -111,6 +115,7 @@ def _fake_tools(root: Path, *, trivy_status: int = 0) -> dict[str, str]:
             environment.pop(name)
     environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
     environment["GATE_LOG"] = str(root.parent / "gate.log")
+    environment["TRIVY_VERSION"] = trivy_version
     return environment
 
 
@@ -135,7 +140,36 @@ def test_scan_uses_only_committed_files_and_enforces_finding_exit_code(repositor
     assert "--scanners vuln,misconfig,secret" in log
     assert "--severity HIGH,CRITICAL --exit-code 1" in log
     assert "--ignorefile=" in log
+    assert "--file-patterns uv:scripts/run_pinned_semgrep\\.py\\.lock" in log
     assert "security\n" in log
+
+
+def test_outdated_trivy_is_rejected_before_scanning(repository: Path) -> None:
+    environment = _fake_tools(repository, trivy_version="0.74.0")
+    result = _run(repository, environment)
+    assert result.returncode != 0
+    assert "PUSHGATE_TRIVY_VERSION" in result.stderr
+    log = Path(environment["GATE_LOG"]).read_text(encoding="utf-8")
+    assert "--scanners vuln,misconfig,secret" not in log
+
+
+def test_renaming_behavior_out_of_a_classified_tree_still_requires_tests(repository: Path) -> None:
+    source = repository / "src/ancestryllm"
+    source.mkdir(parents=True)
+    (source / "example.py").write_text("# Original behavior\n", encoding="utf-8")
+    tests = repository / "tests"
+    tests.mkdir()
+    (tests / "test_example.py").write_text("# Existing test\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "Existing behavior and tests")
+    _git(repository, "update-ref", "refs/remotes/origin/main", "HEAD")
+    tools = repository / "tools"
+    tools.mkdir()
+    _git(repository, "mv", "src/ancestryllm/example.py", "tools/example.py")
+    _git(repository, "commit", "-m", "Move behavior out of the classified tree")
+    result = _run(repository, _fake_tools(repository))
+    assert result.returncode != 0
+    assert "PUSHGATE_TESTS_REQUIRED" in result.stderr
 
 
 def test_trivy_failure_blocks_later_gates(repository: Path) -> None:
