@@ -403,7 +403,9 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
 def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     expected_commands = {
         (".github/workflows/ci.yml", "lockfile"): ("uv lock --check",),
-        (".github/workflows/ci.yml", "test"): ("uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",),
+        (".github/workflows/ci.yml", "test"): (
+            "uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",
+        ),
         (".github/workflows/ci.yml", "quality"): (
             "uv run --locked --group lint ruff check src tests scripts",
             "uv run --locked --group typecheck mypy src/ancestryllm",
