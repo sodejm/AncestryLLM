@@ -110,7 +110,7 @@ jobs:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-ci-lockfile
       - name: Check uv lockfile consistency
-        run: make lock-check
+        run: uv lock --check
 
   test:
     name: test (${{ matrix.python }})
@@ -140,7 +140,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Tests
-        run: make test
+        run: uv run --locked --group test pytest --verbose
 
   mutation-recovery:
     name: mutation recovery (${{ matrix.os }})
@@ -212,8 +212,13 @@ jobs:
         run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Lint, type check, and repository contracts
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
+          uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_gfm_markdown.py
+          uv run --locked --group lint python scripts/check_architecture_contracts.py
+          ./scripts/check_repository_safety.sh
+          uv run --locked --group lint python scripts/check_code_documentation.py
+          uv run --locked --group typecheck mypy src/ancestryllm
           make code-docs-check
       - name: Advisory ty evaluation
         continue-on-error: true
@@ -256,13 +261,13 @@ jobs:
           sudo apt-get install --no-install-recommends --yes \
             locales=2.39-0ubuntu8.9 \
             xauth=1:1.1.2-1build1 \
-            xvfb=2:21.1.12-1ubuntu1.8
+            xvfb=2:21.1.12-1ubuntu1.9
           sudo locale-gen en_US.UTF-8
           test "$(node --version)" = "v26.5.0"
           test "$(pnpm --version)" = "11.9.0"
           test "$(dpkg-query --showformat='${Version}' --show locales)" = "2.39-0ubuntu8.9"
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
-          test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.8"
+          test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.9"
       - name: Verify deterministic documentation screenshots
         run: ANCESTRYLLM_DOCS_SCREENSHOT_REPORT="$RUNNER_TEMP/docs-screenshot-drift-v1.json" xvfb-run --auto-servernum make docs-screenshots-check
       - name: Retain sanitized screenshot drift evidence
@@ -305,12 +310,12 @@ jobs:
         run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
         if: needs.changes.outputs.dependencies == 'true'
-        run: make dependency-audit
+        run: uv run --locked --group security pip-audit
       - name: Run pinned static security analysis
-        run: make security-static
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Generate CycloneDX SBOM
         if: needs.changes.outputs.dependencies == 'true'
-        run: make sbom
+        run: uv run --locked --group security cyclonedx-py environment --output-file sbom.json .venv/bin/python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: needs.changes.outputs.dependencies == 'true'
         with:
@@ -341,7 +346,7 @@ jobs:
       - name: Install locked environment
         run: uv sync --locked --no-default-groups --group build
       - name: Build reproducible release artifacts
-        run: make package
+        run: uv run --locked --group build python scripts/build_release.py --output-dir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions
@@ -492,7 +497,7 @@ jobs:
       - name: Audit workflow security
         run: |
           uv sync --locked --no-default-groups --group security
-          make workflow-audit
+          uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
 
   timeout-proof-exercise:
     name: timeout proof exercise (expected failure)

@@ -383,8 +383,8 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     lock = tomllib.loads(script_lock.read_text(encoding="utf-8"))
     locked_semgrep = [package for package in lock["package"] if package.get("name") == "semgrep"]
     sources = {
-        ".github/workflows/ci.yml": "make security-static",
-        ".github/workflows/release-readiness.yml": "make security-static",
+        ".github/workflows/ci.yml": "uv run --locked --script scripts/run_pinned_semgrep.py .",
+        ".github/workflows/release-readiness.yml": "uv run --locked --script scripts/run_pinned_semgrep.py .",
         "Makefile": "$(UV_BIN) run --locked --script scripts/run_pinned_semgrep.py .",
     }
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -421,11 +421,11 @@ def test_synthetic_credentialed_url_fixtures_do_not_target_live_services() -> No
         assert credentialed_public_url.search(content) is None, relative_path
 
 
-def test_workflows_invoke_the_make_owned_test_command() -> None:
-    """Keep the test flags identical between local and hosted environments."""
+def test_workflows_invoke_the_workflow_owned_test_command() -> None:
+    """Keep hosted test gates independent of candidate-controlled Make targets."""
 
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    command = "make test"
+    command = "uv run --locked --group test pytest --verbose"
     for relative_path in (
         ".github/workflows/ci.yml",
         ".github/workflows/release-readiness.yml",
@@ -452,8 +452,8 @@ def test_tag_release_reuses_approved_quality_and_security_evidence() -> None:
     )
 
     assert "Rebuild deterministic artifacts and SBOM" in release
-    assert "make package" in release
-    assert "make sbom SBOM_OUTPUT=dist/sbom.json" in release
+    assert "scripts/build_release.py --output-dir dist" in release
+    assert "cyclonedx-py environment --output-file dist/sbom.json" in release
     assert "cmp dist/SHA256SUMS approved/artifacts/SHA256SUMS" in release
     for duplicate_gate in duplicate_gates:
         assert duplicate_gate not in release

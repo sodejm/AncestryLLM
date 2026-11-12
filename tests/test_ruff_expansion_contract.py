@@ -107,7 +107,15 @@ def test_ci_uses_github_annotations_through_the_canonical_make_gate() -> None:
         ".github/workflows/release-readiness.yml",
     ):
         quality_job = _workflow_job(relative_path, "quality")
-        assert len(re.findall(r"(?m)^\s+make lint\s*$", quality_job)) == 1
+        assert (
+            len(
+                re.findall(
+                    r"(?m)^\s+uv run --locked --group lint ruff check src tests scripts\s*$",
+                    quality_job,
+                )
+            )
+            == 1
+        )
         assert len(re.findall(r"(?m)^\s+RUFF_OUTPUT_FORMAT:\s*github\s*$", quality_job)) == 1
 
 

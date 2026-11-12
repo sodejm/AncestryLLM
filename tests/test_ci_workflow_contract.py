@@ -123,15 +123,14 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     test_job = _job(workflow, "test")
     quality_job = _job(workflow, "quality")
 
-    assert test_job.count("make test") == 1
+    assert test_job.count("uv run --locked --group test pytest --verbose") == 1
     assert "ruff check" not in test_job
     assert "mypy" not in test_job
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
-    for command in ("make lint", "make typecheck", "make typecheck-ty"):
-        command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
-        assert len(command_line.findall(quality_job)) == 1
+    for command in ("ruff check src tests scripts", "mypy src/ancestryllm"):
+        assert quality_job.count(command) == 1
 
 
 def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
@@ -142,8 +141,7 @@ def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
 
     blocking_step = """      - name: Lint, type check, and repository contracts
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
 """
     advisory_step = """      - name: Advisory ty evaluation
         continue-on-error: true
@@ -176,8 +174,8 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
     assert security_job.count(dependency_condition) == 4
-    assert security_job.count("make dependency-audit") == 1
-    assert security_job.count("make security-static") == 1
+    assert security_job.count("uv run --locked --group security pip-audit") == 1
+    assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py .") == 1
     assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
 
@@ -187,7 +185,7 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
     lockfile_job = _job(workflow, "lockfile")
 
     assert "name: lockfile consistency" in lockfile_job
-    assert "make lock-check" in lockfile_job
+    assert "uv lock --check" in lockfile_job
     for job in (
         "test",
         "mutation-recovery",
@@ -250,7 +248,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     for package in (
         "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
-        "xvfb=2:21.1.12-1ubuntu1.8",
+        "xvfb=2:21.1.12-1ubuntu1.9",
     ):
         assert package in job
     assert (
@@ -430,8 +428,8 @@ def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
     assert "$(UV_BIN) sync --locked --all-extras --all-groups" in makefile
     audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
     assert f"$(UV_BIN) run --locked --group security {audit_command}" in makefile
-    assert "make workflow-audit" in _job(ci, "workflow-audit")
-    assert "make workflow-audit" in _job(readiness, "security")
+    assert audit_command in _job(ci, "workflow-audit")
+    assert audit_command in _job(readiness, "security")
 
 
 def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
@@ -535,8 +533,8 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     setup_pnpm = "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320"
 
     for quality_job in (ci_quality, readiness_quality):
-        assert quality_job.count("make lint") == 1
         assert quality_job.count("make code-docs-check") == 1
+        assert quality_job.count("scripts/check_code_documentation.py") == 1
         assert setup_node in quality_job
         assert 'node-version: "26.5.0"' in quality_job
         assert setup_pnpm in quality_job
