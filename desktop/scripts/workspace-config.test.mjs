@@ -35,7 +35,7 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
   for (const [selector, resolution] of [
     ['@puppeteer/browsers>extract-zip', 'npm:@electron-internal/extract-zip@1.0.5'],
-    ['get-uri>basic-ftp', '6.2.1'],
+    ['get-uri>basic-ftp', '6.2.4'],
     ['@wdio/mocha-framework>mocha', '11.8.0'],
     ['mocha>diff', '8.0.3'],
   ]) {
@@ -44,13 +44,13 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   }
   assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
   assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
-  assert.match(lockfile, /^ {2}basic-ftp@6\.2\.1:$/m)
+  assert.match(lockfile, /^ {2}basic-ftp@6\.2\.4:$/m)
   assert.doesNotMatch(lockfile, /^ {2}basic-ftp@5\.3\.1:$/m)
   assert.match(lockfile, /^ {2}chokidar@4\.0\.3:$/m)
   assert.doesNotMatch(lockfile, /^ {2}braces@3\.0\.3:$/m)
   assert.match(lockfile, /^ {2}diff@8\.0\.3:$/m)
   assert.doesNotMatch(lockfile, /^ {2}diff@7\.0\.0:$/m)
-  assert.match(lockfile, /^ {2}fast-uri@3\.1\.8:$/m)
+  assert.match(lockfile, /^ {2}fast-uri@3\.1\.9:$/m)
   assert.doesNotMatch(lockfile, /^ {2}fast-uri@3\.1\.[45]:$/m)
   assert.match(lockfile, /^ {2}js-yaml@4\.3\.2:$/m)
   assert.doesNotMatch(lockfile, /^ {2}js-yaml@4\.3\.[01]:$/m)
@@ -58,7 +58,7 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.doesNotMatch(lockfile, /^ {2}'@xmldom\/xmldom@0\.8\.13':$/m)
   assert.match(lockfile, /^ {2}deepmerge-ts@8\.0\.2:$/m)
   assert.doesNotMatch(lockfile, /^ {2}deepmerge-ts@8\.0\.0:$/m)
-  assert.match(lockfile, /^ {2}serialize-javascript@7\.0\.5:$/m)
+  assert.match(lockfile, /^ {2}serialize-javascript@7\.1\.3:$/m)
   assert.doesNotMatch(lockfile, /^ {2}serialize-javascript@(?:6\.0\.2|7\.0\.3):$/m)
   assert.equal(packageJson.devDependencies['expect-webdriverio'], '6.1.0')
   assert.match(

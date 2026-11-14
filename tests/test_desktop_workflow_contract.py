@@ -465,7 +465,7 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
     assert workflow.index(sandbox_preparation) < workflow.index(accessibility)
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
-    assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.11"
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.12"
     assert "test:coverage" in package["scripts"]
     coverage = policy["qa"]["desktopCoverage"]
     assert f"provider: '{coverage['provider']}'" in vitest

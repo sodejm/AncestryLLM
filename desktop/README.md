@@ -23,7 +23,7 @@ pnpm --dir desktop test:visual
 `desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
 locked Electron package, and fails with a stable error if its platform runtime
 is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 41.10.6 remains
+shared pnpm store contains stale build-script state. Electron 42.11.16 remains
 exactly pinned. The frozen lockfile scopes reviewed security replacements to
 the affected installer and test-tool dependency paths, including the
 Electron-maintained `@electron-internal/extract-zip` 1.0.5 fork; no runtime
