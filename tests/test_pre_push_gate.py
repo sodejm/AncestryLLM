@@ -188,6 +188,17 @@ def test_missing_required_tool_fails_closed(
         run_pre_push._execute(["trivy", "filesystem", str(tmp_path)], tmp_path)
 
 
+def test_gate_commands_do_not_inherit_hook_repository_context(
+    monkeypatch: pytest.MonkeyPatch, repository: Path, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "other.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path))
+    result = run_pre_push._execute(
+        ["git", "rev-parse", "--show-toplevel"], repository, capture=True
+    )
+    assert Path(result.decode().strip()).resolve() == repository.resolve()
+
+
 @pytest.mark.parametrize("failure", ["trivy", "lint"])
 def test_failed_hook_prevents_remote_branch_creation(repository: Path, failure: str) -> None:
     remote = repository.parent / "remote.git"
