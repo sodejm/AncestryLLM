@@ -19,18 +19,34 @@ import {
 
 const execFileAsync = promisify(execFile)
 
+for (const key of [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+]) {
+  delete process.env[key]
+}
+
+function gitEnv() {
+  return { ...process.env }
+}
+
 async function cleanRepositoryFixture(prefix = 'ancestryllm-receipt-repository-') {
   const root = await mkdtemp(join(tmpdir(), prefix))
   const repositoryRoot = join(root, 'repository')
+  const env = gitEnv()
   await mkdir(repositoryRoot)
-  await execFileAsync('git', ['init', '--quiet'], { cwd: repositoryRoot })
-  await execFileAsync('git', ['config', 'user.email', 'security-tests@example.invalid'], { cwd: repositoryRoot })
-  await execFileAsync('git', ['config', 'user.name', 'Security Tests'], { cwd: repositoryRoot })
-  await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repositoryRoot })
+  await execFileAsync('git', ['init', '--quiet'], { cwd: repositoryRoot, env })
+  await execFileAsync('git', ['config', 'user.email', 'security-tests@example.invalid'], { cwd: repositoryRoot, env })
+  await execFileAsync('git', ['config', 'user.name', 'Security Tests'], { cwd: repositoryRoot, env })
+  await execFileAsync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repositoryRoot, env })
   await writeFile(join(repositoryRoot, 'tracked.txt'), 'original\n')
-  await execFileAsync('git', ['add', 'tracked.txt'], { cwd: repositoryRoot })
-  await execFileAsync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: repositoryRoot })
-  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })
+  await execFileAsync('git', ['add', 'tracked.txt'], { cwd: repositoryRoot, env })
+  await execFileAsync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: repositoryRoot, env })
+  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, env })
   return { root, repositoryRoot, gitHead: stdout.trim() }
 }
 

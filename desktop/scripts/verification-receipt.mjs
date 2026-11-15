@@ -240,11 +240,23 @@ export function validateVerificationReceipt(value, requestedHead, requestedConte
   return value
 }
 
-async function captureCommand(executable, args, repositoryRoot) {
+function gitEnvironment() {
+  const env = { ...process.env }
+  delete env.GIT_DIR
+  delete env.GIT_WORK_TREE
+  delete env.GIT_INDEX_FILE
+  delete env.GIT_OBJECT_DIRECTORY
+  delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES
+  delete env.GIT_COMMON_DIR
+  return env
+}
+
+async function captureCommand(executable, args, repositoryRoot, env = process.env) {
   const chunks = []
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(executable, args, {
       cwd: repositoryRoot,
+      env,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -260,7 +272,7 @@ async function captureCommand(executable, args, repositoryRoot) {
 }
 
 async function gitOutput(repositoryRoot, args) {
-  return captureCommand('git', args, repositoryRoot)
+  return captureCommand('git', args, repositoryRoot, gitEnvironment())
 }
 
 async function gitHead(repositoryRoot) {
