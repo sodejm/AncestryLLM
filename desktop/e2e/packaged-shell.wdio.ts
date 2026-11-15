@@ -13,6 +13,7 @@ import { normalizeVerificationSelection } from './native-file-dialogs.packaged-v
 import {
   findPackagedMainProcess,
   isExpectedLastWindowCloseError,
+  parsePosixProcessSnapshot,
   recordsForProcessIds,
   type ProcessRecord,
 } from './process-records'

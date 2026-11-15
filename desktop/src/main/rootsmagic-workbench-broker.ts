@@ -72,6 +72,7 @@ interface JobEntry {
   sourceRef?: string
   readonly outputId?: string
   artifactId?: string
+  outputIdentity?: Readonly<{ dev: string; ino: string }>
   result?: Readonly<RootsMagicJobResult>
 }
 
@@ -224,6 +225,28 @@ async function inspectOutputPath(path: string): Promise<Readonly<{ dev: string; 
     if (!parent.isDirectory() || parent.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
     if (await realpath(parentPath) !== resolve(parentPath)) fail('FILE_SELECTION_INVALID')
     return { dev: parent.dev.toString(), ino: parent.ino.toString() }
+  } catch (error) {
+    if (error instanceof FileGrantBrokerError) throw error
+    fail('FILE_SELECTION_INVALID')
+  }
+}
+
+async function inspectPublishedDirectory(
+  path: string,
+  expectedParent: Readonly<{ dev: string; ino: string }>,
+): Promise<Readonly<{ dev: string; ino: string }>> {
+  try {
+    const stat = await lstat(path, { bigint: true })
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('FILE_SELECTION_INVALID')
+    if (await realpath(path) !== resolve(path)) fail('FILE_SELECTION_INVALID')
+    const parentPath = dirname(path)
+    const parent = await lstat(parentPath, { bigint: true })
+    if (!parent.isDirectory() || parent.isSymbolicLink()
+      || parent.dev.toString() !== expectedParent.dev
+      || parent.ino.toString() !== expectedParent.ino) {
+      fail('FILE_SELECTION_INVALID')
+    }
+    return Object.freeze({ dev: stat.dev.toString(), ino: stat.ino.toString() })
   } catch (error) {
     if (error instanceof FileGrantBrokerError) throw error
     fail('FILE_SELECTION_INVALID')
@@ -462,6 +485,10 @@ export class RootsMagicWorkbenchBroker {
       const output = job.outputId === undefined ? undefined : this.outputs.get(job.outputId)
       if (!output || !job.sourceRef || result.result.source_ref !== job.sourceRef
         || result.result.display_name !== output.displayName) fail('FILE_OPERATION_CANCELLED')
+      const identity = await inspectPublishedDirectory(output.path, { dev: output.parentDev, ino: output.parentIno })
+      this.requireActive(owner, job.generation, signal)
+      if (this.jobs.get(job.jobId) !== job || this.outputs.get(output.id) !== output) fail('FILE_OPERATION_CANCELLED')
+      job.outputIdentity = identity
       job.artifactId = result.result.artifact_id
       job.result = result
       for (const [id, previous] of this.jobs) {
@@ -492,7 +519,14 @@ export class RootsMagicWorkbenchBroker {
     const job = [...this.jobs.values()].find((entry) => entry.owner === owner && entry.artifactId === request.artifact_id
       && this.active(owner, entry.generation))
     const output = job?.outputId === undefined ? undefined : this.outputs.get(job.outputId)
-    if (!job || !output || output.owner !== owner) fail('FILE_GRANT_FORBIDDEN')
+    if (!job || !output || output.owner !== owner || !job.outputIdentity) fail('FILE_GRANT_FORBIDDEN')
+    const current = await inspectPublishedDirectory(output.path, { dev: output.parentDev, ino: output.parentIno })
+    if (current.dev !== job.outputIdentity.dev || current.ino !== job.outputIdentity.ino) {
+      fail('FILE_SELECTION_INVALID')
+    }
+    if (!this.active(owner, job.generation) || this.jobs.get(job.jobId) !== job || this.outputs.get(output.id) !== output) {
+      fail('FILE_OPERATION_CANCELLED')
+    }
     await this.native.reveal(output.path)
     if (!this.active(owner, job.generation)) fail('FILE_OPERATION_CANCELLED')
     return Object.freeze({ schema_version: 1 })

@@ -28,6 +28,7 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
   'rendererZeroEgressCanaryPassed',
   'normalLaunchDebugSurfaceAbsentPassed',
   'packagedFileGrantSmokePassed',
+  'packagedRootsMagicWorkbenchPassed',
   'packagedSidecarWithholdRetryPassed',
   'packagedSidecarRestartExhaustionQuitPassed',
   'packagedSidecarIntegritySubstitutionPassed',
@@ -59,10 +60,7 @@ export const SECURITY_RECEIPT_GATES = Object.freeze([
   'sbomGeneratedPassed',
 ])
 
-// The 0.7 workflow has its own receipt without changing the 0.6 core evidence contract.
-const allowedGates = new Set([
-  ...TARGET_RECEIPT_GATES, ...SECURITY_RECEIPT_GATES, 'packagedRootsMagicWorkbenchPassed',
-])
+const allowedGates = new Set([...TARGET_RECEIPT_GATES, ...SECURITY_RECEIPT_GATES])
 
 function exactHead(value, label = 'gitHead') {
   assert.match(value, SHA, `${label} must be a lowercase full Git commit SHA`)

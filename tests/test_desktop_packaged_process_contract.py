@@ -5,7 +5,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_SPEC = ROOT / "desktop" / "e2e" / "packaged-shell.wdio.ts"
-PACKAGED_WINDOW_CLOSE = ROOT / "desktop" / "e2e" / "packaged-window-close.ts"
 PROCESS_RECORDS = ROOT / "desktop" / "e2e" / "process-records.ts"
 PACKAGED_RUNNER = ROOT / "desktop" / "scripts" / "run-wdio.mjs"
 SANDBOX_PREPARER = ROOT / "desktop" / "scripts" / "prepare-electron-sandbox.mjs"
@@ -44,7 +43,7 @@ def test_packaged_renderer_evidence_uses_native_process_snapshots() -> None:
     assert "hasExactArgument(commandLine, expectedExecutable)" in process_records_source
     assert "hasExactUserDataDirectory(commandLine, expectedProfile)" in process_records_source
     assert "if (excluded.has(record.pid)) continue" in process_records_source
-    assert "!commandLine.includes('--type=')" in process_records_source
+    assert "if (commandLine.includes('--type=')) return false" in process_records_source
     assert "descendantProcessTree(await processSnapshot(), rootPid)" in source
     renderer_query = source.split("async function rendererProcessIds()", maxsplit=1)[1].split(
         "\nasync function ", maxsplit=1
@@ -85,14 +84,15 @@ def test_packaged_capability_bridge_burst_is_bounded_and_completes() -> None:
 
 def test_normal_launch_preserves_gui_visibility_for_native_windows_close() -> None:
     source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
-    launch_start = source.index("const child = spawn(executable, launchArguments, {")
-    launch_end = source.index("\n  })", launch_start)
-    launch_source = source[launch_start:launch_end]
+    options_start = source.index("export function normalLaunchSpawnOptions(")
+    options_end = source.index("\n}", options_start)
+    options_source = source[options_start:options_end]
 
     # A hidden GUI can emit readiness while CloseMainWindow cannot find its window.
-    assert "windowsHide: false" in launch_source
-    assert "windowsHide: true" not in launch_source
-    assert "stdio: 'pipe'" in launch_source
+    assert "windowsHide: platform !== 'win32'" in options_source
+    assert "windowsHide: true" not in options_source
+    assert "stdio: 'pipe'" in options_source
+    assert "normalLaunchSpawnOptions(" in source
 
 
 def test_warm_launch_measurement_excludes_native_process_query_latency() -> None:
@@ -116,7 +116,6 @@ def test_warm_launch_measurement_excludes_native_process_query_latency() -> None
 
 def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> None:
     source = PACKAGED_SPEC.read_text(encoding="utf-8")
-    window_close_source = PACKAGED_WINDOW_CLOSE.read_text(encoding="utf-8")
     normal_source = NORMAL_LAUNCH_VERIFIER.read_text(encoding="utf-8")
     main_source = MAIN_INDEX.read_text(encoding="utf-8")
     runtime_bridge_source = RUNTIME_BRIDGE.read_text(encoding="utf-8")
@@ -134,16 +133,11 @@ def test_packaged_clean_quit_uses_native_window_close_and_proves_zero_exit() -> 
 
     assert "async function closeApplicationWindow(sidecarPath: string)" in quit_source
     assert "const activeSidecarPid = await sidecarPid(pid, sidecarPath)" in quit_source
-    assert "await closeFinalWindowAndVerifyExit(" in quit_source
-    assert "() => browser.closeWindow()" in quit_source
-    assert "[pid, activeSidecarPid]" in quit_source
-    assert "expectProcessAbsent," in quit_source
-    assert "await closeWindow()" in window_close_source
-    assert (
-        "All window handles were removed, causing WebdriverIO to close the session."
-        in window_close_source
-    )
-    assert "await Promise.all(processIds.map((pid) => verifyExit(pid)))" in window_close_source
+    assert "await browser.closeWindow()" in quit_source
+    assert "if (!isExpectedLastWindowCloseError(error)) throw error" in quit_source
+    assert "await Promise.all([" in quit_source
+    assert "expectProcessAbsent(pid)" in quit_source
+    assert "expectProcessAbsent(activeSidecarPid)" in quit_source
     assert "browser.electron.execute" not in quit_source
     assert source.count("await closeApplicationWindow(copiedSidecarPath)") == 3
     assert (

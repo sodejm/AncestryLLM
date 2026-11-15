@@ -1467,4 +1467,58 @@ describe('desktop IPC handlers', () => {
     expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
     expect(fileGrants.dispose).toHaveBeenCalledTimes(1)
   })
+
+  it('delivers a committed RootsMagic export to the renderer even when the outer IPC deadline wins the race', async () => {
+    vi.useFakeTimers()
+    try {
+      const committedJob = {
+        ...runningJob,
+        state: 'completed' as const,
+        finished_at: '2026-08-12T12:00:03Z',
+        outcome_summary: 'Export committed.',
+      }
+      const rootsMagic = {
+        inspect: vi.fn(),
+        presets: vi.fn(),
+        query: vi.fn(),
+        selectOutput: vi.fn(),
+        export: vi.fn((_owner: unknown, _request: unknown, signal?: AbortSignal) => new Promise<typeof committedJob>((resolve, reject) => {
+          signal?.addEventListener('abort', () => resolve(committedJob), { once: true })
+          setTimeout(() => reject(new Error('unexpected non-aborted completion')), 50)
+        })),
+        result: vi.fn(),
+        discard: vi.fn(),
+        reveal: vi.fn(),
+        observeJob: vi.fn(),
+        revokeGrant: vi.fn(),
+        revokeOwner: vi.fn(async () => undefined),
+        revokeAll: vi.fn(async () => undefined),
+      } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+      const { event, handlers, controller } = harness(bridge(), { rootsMagic, operationTimeoutMs: 5 })
+      const exportRequest = {
+        schema_version: 1,
+        source_ref: 'b'.repeat(64),
+        output_capability: 'c'.repeat(64),
+        root_person_id: 1,
+        scope: 'connected',
+        generations: null,
+        living: 'exclude',
+      }
+
+      const pending = handlers.get(desktopChannels.exportRootsMagic)!(event(), exportRequest)
+      await vi.advanceTimersByTimeAsync(5)
+      await expect(pending).resolves.toEqual(result(committedJob))
+
+      rootsMagic.export.mockImplementationOnce((_owner: unknown, _request: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('cancelled before commit')), { once: true })
+      }))
+      const timedOutExport = handlers.get(desktopChannels.exportRootsMagic)!(event(), exportRequest)
+      await vi.advanceTimersByTimeAsync(5)
+      await expect(timedOutExport).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+
+      controller.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

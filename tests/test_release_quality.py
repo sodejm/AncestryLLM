@@ -232,11 +232,23 @@ def _inspection(sidecar_target: str) -> dict[str, Any]:
     }
 
 
+def _rootsmagic_workbench(target: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "kind": "ancestryllm-packaged-rootsmagic-workbench",
+        "status": "passed",
+        "target": target,
+        "verificationOnlyDialogAdapter": True,
+        "observations": dict(quality.ROOTSMAGIC_WORKBENCH_OBSERVATIONS),
+    }
+
+
 def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     artifacts = {
         "metrics": _digest(sha256="1" * 64),
         "fuseInspection": _digest(sha256="2" * 64),
         "fileGrantEvidence": _digest(sha256="3" * 64),
+        "rootsMagicEvidence": _digest(sha256="9" * 64),
         "withholdEvidence": _digest(sha256="4" * 64),
         "restartEvidence": _digest(sha256="5" * 64),
         "integrityEvidence": _digest(sha256="6" * 64),
@@ -279,6 +291,10 @@ def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
             ["packagedFileGrantSmokePassed"],
             receipt_artifacts={"fileGrantEvidence": artifacts["fileGrantEvidence"]},
         ),
+        "packagedRootsMagicWorkbenchPassed": target_receipt(
+            ["packagedRootsMagicWorkbenchPassed"],
+            receipt_artifacts={"rootsMagicEvidence": artifacts["rootsMagicEvidence"]},
+        ),
         "packagedSidecarWithholdRetryPassed": target_receipt(
             ["packagedSidecarWithholdRetryPassed"],
             receipt_artifacts={"faultEvidence": artifacts["withholdEvidence"]},
@@ -316,11 +332,13 @@ def _target(row: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         "rendererZeroEgressCanary": True,
         "normalLaunchDebugSurfaceAbsent": True,
         "packagedFileGrantSmoke": True,
+        "packagedRootsMagicWorkbench": True,
         "performancePassed": True,
         "gates": dict.fromkeys(quality.TARGET_RECEIPT_GATES, True),
         "receipts": receipts,
         "artifacts": artifacts,
         "fileGrantMediation": _file_grant_mediation(),
+        "rootsMagicWorkbench": _rootsmagic_workbench(row["sidecarTarget"]),
         "faultScenarios": _fault_scenarios(),
         "performance": _performance(row, policy),
         "inspection": _inspection(row["sidecarTarget"]),
@@ -943,6 +961,7 @@ def test_target_evidence_uses_the_complete_closed_schema() -> None:
         ("packageRuntimePassed", "metrics", "metrics"),
         ("fusesInspectedPassed", "fuseInspection", "fuseInspection"),
         ("packagedFileGrantSmokePassed", "fileGrantEvidence", "fileGrantEvidence"),
+        ("packagedRootsMagicWorkbenchPassed", "rootsMagicEvidence", "rootsMagicEvidence"),
         ("packagedSidecarWithholdRetryPassed", "faultEvidence", "withholdEvidence"),
         (
             "packagedSidecarRestartExhaustionQuitPassed",
@@ -1078,3 +1097,37 @@ def test_inputs_are_not_mutated() -> None:
     _build(policy, readiness=readiness, desktop=desktop)
 
     assert (policy, readiness, desktop) == before
+
+
+def test_rootsmagic_workbench_evidence_rejects_missing_mismatched_wrong_target_and_wrong_head() -> (
+    None
+):
+    policy = _policy()
+
+    # Missing receipt
+    desktop = _desktop(policy)
+    del desktop["targets"][0]["receipts"]["packagedRootsMagicWorkbenchPassed"]
+    with pytest.raises(
+        quality.ReleaseQualityError, match=r"RQ006.*receipt inventory is incomplete"
+    ):
+        _build(policy, desktop=desktop)
+
+    # Mismatched / failing observation
+    desktop = _desktop(policy)
+    desktop["targets"][0]["rootsMagicWorkbench"]["observations"]["sourceUnchanged"] = False
+    with pytest.raises(
+        quality.ReleaseQualityError, match=r"RQ006.*RootsMagic workbench observations"
+    ):
+        _build(policy, desktop=desktop)
+
+    # Wrong target
+    desktop = _desktop(policy)
+    desktop["targets"][0]["rootsMagicWorkbench"]["target"] = "win32-arm64"
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006.*target differs"):
+        _build(policy, desktop=desktop)
+
+    # Wrong head on RootsMagic receipt
+    desktop = _desktop(policy)
+    desktop["targets"][0]["receipts"]["packagedRootsMagicWorkbenchPassed"]["gitHead"] = "f" * 40
+    with pytest.raises(quality.ReleaseQualityError, match=r"RQ006"):
+        _build(policy, desktop=desktop)

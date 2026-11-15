@@ -738,6 +738,55 @@ jobs:
             --artifact fileGrantEvidence="$ANCESTRYLLM_FILE_GRANT_EVIDENCE" \
             -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
               --grep "mediates opaque packaged open and save file grants"
+      - name: Exercise packaged RootsMagic workbench
+        shell: bash
+        env:
+          ROW_ROOT: desktop/verification/${{ matrix.runner }}
+          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
+        run: |
+          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
+          mkdir -p "$ROW_ROOT/rootsmagic-fixtures"
+          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
+          export ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1
+          export ANCESTRYLLM_ROOTSMAGIC_VERIFICATION=1
+          export ANCESTRYLLM_FILE_GRANT_OPEN_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree"
+          export ANCESTRYLLM_ROOTSMAGIC_OUTPUT_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/export"
+          export ANCESTRYLLM_ROOTSMAGIC_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-workbench.json"
+          package_launcher=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
+          fi
+          node desktop/scripts/verification-receipt.mjs \
+            --git-head "$EXPECTED_HEAD" \
+            --runner "$VERIFICATION_RUNNER" \
+            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
+            --output "$RECEIPTS_DIR/packaged-rootsmagic-workbench.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
+            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
+            --allow-output "$RECEIPTS_DIR/fuse-inspection.json" \
+            --allow-output "$RECEIPTS_DIR/packaged-file-grants.json" \
+            --allow-output "$ROW_ROOT/packaged-metrics.json" \
+            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
+            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
+            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
+            --allow-output "$ROW_ROOT/fuse-inspection.json" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/input.ged" \
+            --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
+            --allow-output "$ROW_ROOT/file-grant-mediation.json" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/tree.ged" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/report.md" \
+            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/manifest.json" \
+            --gate packagedRootsMagicWorkbenchPassed \
+            --artifact rootsMagicEvidence="$ANCESTRYLLM_ROOTSMAGIC_EVIDENCE" \
+            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
+              --grep "queries and exports an immutable RootsMagic source through the native workbench"
       - name: Record target evidence
         shell: bash
         env:
@@ -766,58 +815,9 @@ jobs:
             --restart-evidence "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
             --integrity-evidence "$ROW_ROOT/sidecar-integrity-substitution.json" \
             --file-grant-evidence "$ROW_ROOT/file-grant-mediation.json" \
+            --rootsmagic-evidence "$ROW_ROOT/rootsmagic-workbench.json" \
             --receipts "$RECEIPTS_DIR" \
             --output "$ROW_ROOT/target.json"
-      - name: Exercise packaged RootsMagic workbench
-        shell: bash
-        env:
-          ROW_ROOT: desktop/verification/${{ matrix.runner }}
-          RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts
-        run: |
-          packaged_app="$(node desktop/scripts/find-packaged-app.mjs desktop/release-file-grant-verification)"
-          mkdir -p "$ROW_ROOT/rootsmagic-fixtures"
-          export ANCESTRYLLM_PACKAGED_APP="$packaged_app"
-          export ANCESTRYLLM_PACKAGED_FILE_GRANT_VERIFICATION=1
-          export ANCESTRYLLM_ROOTSMAGIC_VERIFICATION=1
-          export ANCESTRYLLM_FILE_GRANT_OPEN_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree"
-          export ANCESTRYLLM_ROOTSMAGIC_OUTPUT_PATH="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-fixtures/export"
-          export ANCESTRYLLM_ROOTSMAGIC_EVIDENCE="$GITHUB_WORKSPACE/$ROW_ROOT/rootsmagic-workbench.json"
-          package_launcher=()
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            package_launcher=(desktop/scripts/run-with-linux-keyring.sh xvfb-run --auto-servernum)
-          fi
-          node desktop/scripts/verification-receipt.mjs \
-            --git-head "$EXPECTED_HEAD" \
-            --runner "$VERIFICATION_RUNNER" \
-            --sidecar-target "$VERIFICATION_SIDECAR_TARGET" \
-            --output "$ROW_ROOT/rootsmagic-receipt.json" \
-            --allow-output "$RECEIPTS_DIR/sidecar-process-tree-guard.json" \
-            --allow-output "$RECEIPTS_DIR/sidecar-smoke.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-runtime.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-normal-launch.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-sidecar-withhold-retry.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-sidecar-restart-exhaustion-quit.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-sidecar-integrity-substitution.json" \
-            --allow-output "$RECEIPTS_DIR/fuse-inspection.json" \
-            --allow-output "$RECEIPTS_DIR/packaged-file-grants.json" \
-            --allow-output "$ROW_ROOT/packaged-metrics.json" \
-            --allow-output "$ROW_ROOT/sidecar-withhold-retry.json" \
-            --allow-output "$ROW_ROOT/sidecar-restart-exhaustion-quit.json" \
-            --allow-output "$ROW_ROOT/sidecar-integrity-substitution.json" \
-            --allow-output "$ROW_ROOT/sidecar-integrity-substitution-diagnostics.json" \
-            --allow-output "$ROW_ROOT/fuse-inspection.json" \
-            --allow-output "$ROW_ROOT/file-grant-fixtures/input.ged" \
-            --allow-output "$ROW_ROOT/file-grant-fixtures/existing-output.ged" \
-            --allow-output "$ROW_ROOT/file-grant-mediation.json" \
-            --allow-output "$ROW_ROOT/target.json" \
-            --allow-output "$ROW_ROOT/rootsmagic-fixtures/fictional.rmtree" \
-            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/tree.ged" \
-            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/report.md" \
-            --allow-output "$ROW_ROOT/rootsmagic-fixtures/export/manifest.json" \
-            --gate packagedRootsMagicWorkbenchPassed \
-            --artifact rootsMagicEvidence="$ANCESTRYLLM_ROOTSMAGIC_EVIDENCE" \
-            -- "${package_launcher[@]}" node desktop/scripts/run-wdio.mjs packaged \
-              --grep "queries and exports an immutable RootsMagic source through the native workbench"
       - name: Upload partial native-package diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

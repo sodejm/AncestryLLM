@@ -43,6 +43,7 @@ test('target receipts require each packaged sidecar fault scenario explicitly', 
     'rendererZeroEgressCanaryPassed',
     'normalLaunchDebugSurfaceAbsentPassed',
     'packagedFileGrantSmokePassed',
+    'packagedRootsMagicWorkbenchPassed',
     'packagedSidecarWithholdRetryPassed',
     'packagedSidecarRestartExhaustionQuitPassed',
     'packagedSidecarIntegritySubstitutionPassed',
@@ -179,7 +180,7 @@ test('RootsMagic workflow receipt binds fresh validated evidence separately from
     repositoryRoot, forwardOutput: false,
   })
   assert.deepEqual(receipt.gates, ['packagedRootsMagicWorkbenchPassed'])
-  assert.equal(TARGET_RECEIPT_GATES.includes('packagedRootsMagicWorkbenchPassed'), false)
+  assert.equal(TARGET_RECEIPT_GATES.includes('packagedRootsMagicWorkbenchPassed'), true)
   assert.equal(receipt.artifacts.rootsMagicEvidence.sha256, sha256(artifact))
   validateVerificationReceipt(receipt, gitHead)
   const missing = structuredClone(receipt)

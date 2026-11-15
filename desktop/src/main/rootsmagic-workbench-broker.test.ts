@@ -48,7 +48,14 @@ async function fixture() {
   let jobId = 0
   const client = {
     inspect: vi.fn<(capability: string) => Promise<JobSnapshot>>(async () => snapshot(++jobId)), presets: vi.fn(),
-    query: vi.fn(async () => snapshot(++jobId)), export: vi.fn(async () => snapshot(++jobId)),
+    query: vi.fn(async () => snapshot(++jobId)),
+    export: vi.fn(async (exportRequest: { output_capability: string }) => {
+      const manifest = JSON.parse(
+        await readFile(join(directory, `${exportRequest.output_capability}.rootsmagic-output.json`), 'utf8'),
+      ) as { path: string }
+      await mkdir(manifest.path)
+      return snapshot(++jobId)
+    }),
     result: vi.fn(async (): Promise<RootsMagicJobResult> => inspection),
     discard: vi.fn(async () => ({ schema_version: 1 as const })), cancel: vi.fn(async () => snapshot(99)),
   }
@@ -388,7 +395,7 @@ describe('native RootsMagic workbench broker', () => {
   })
 
   it('retains a completed export when cancellation races with submission', async () => {
-    const { broker, client, owner, inspect } = await fixture()
+    const { broker, client, owner, directory, inspect } = await fixture()
     await inspect()
     const output = await broker.selectOutput(owner, 'Export')
     const late = deferred<JobSnapshot>()
@@ -401,6 +408,7 @@ describe('native RootsMagic workbench broker', () => {
     controller.abort()
     const completed = terminalSnapshot(snapshot(9), 'completed')
     client.cancel.mockResolvedValueOnce(completed)
+    await mkdir(join(directory, 'Chosen export'))
     late.resolve(snapshot(9))
     await expect(pending).resolves.toEqual(completed)
     client.result.mockResolvedValueOnce(exportResult)
@@ -578,5 +586,41 @@ describe('native RootsMagic workbench broker', () => {
       native.selectNewOutputDirectory.mockResolvedValueOnce(join(directory, `Retry ${index}`))
     }
     await expect(Promise.all(Array.from({ length: 16 }, () => broker.selectOutput(owner, 'Retry')))).resolves.toHaveLength(16)
+  })
+
+  it('rejects revealing a deleted, renamed, or replaced export directory and owner revocation', async () => {
+    async function publish() {
+      const state = await fixture()
+      await state.inspect()
+      const output = await state.broker.selectOutput(state.owner, 'Export')
+      const job = await state.broker.export(state.owner, { schema_version: 1, source_ref: sourceRef,
+        output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+        generations: null, living: 'exclude' })
+      state.client.result.mockResolvedValueOnce(exportResult)
+      await state.broker.result(state.owner, request(job))
+      const artifact = (exportResult.result as { artifact_id: string }).artifact_id
+      return { ...state, target: join(state.directory, 'Chosen export'), artifact }
+    }
+
+    const deleted = await publish()
+    await rm(deleted.target, { recursive: true })
+    await expect(deleted.broker.reveal(deleted.owner, { schema_version: 1, artifact_id: deleted.artifact })).rejects.toThrow('FILE_SELECTION_INVALID')
+    expect(deleted.native.reveal).not.toHaveBeenCalled()
+
+    const renamed = await publish()
+    await rename(renamed.target, join(renamed.directory, 'Renamed export'))
+    await expect(renamed.broker.reveal(renamed.owner, { schema_version: 1, artifact_id: renamed.artifact })).rejects.toThrow('FILE_SELECTION_INVALID')
+    expect(renamed.native.reveal).not.toHaveBeenCalled()
+
+    const replaced = await publish()
+    await rm(replaced.target, { recursive: true })
+    await mkdir(replaced.target)
+    await expect(replaced.broker.reveal(replaced.owner, { schema_version: 1, artifact_id: replaced.artifact })).rejects.toThrow('FILE_SELECTION_INVALID')
+    expect(replaced.native.reveal).not.toHaveBeenCalled()
+
+    const revoked = await publish()
+    await revoked.broker.revokeOwner(revoked.owner)
+    await expect(revoked.broker.reveal(revoked.owner, { schema_version: 1, artifact_id: revoked.artifact })).rejects.toThrow('FILE_GRANT_FORBIDDEN')
+    expect(revoked.native.reveal).not.toHaveBeenCalled()
   })
 })

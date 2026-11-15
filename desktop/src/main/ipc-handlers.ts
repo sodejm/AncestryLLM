@@ -555,13 +555,25 @@ function runOperation<T>(
   timeoutMs: number,
   operation: (signal: AbortSignal) => Promise<unknown>,
   parse: (value: unknown) => BridgeResult<T>,
+  awaitRecoveryOnAbort = false,
 ): OperationRun<T> {
   const controller = new AbortController()
   state.controllers.add(controller)
   const timeout = setTimeout(() => controller.abort(TIMED_OUT), timeoutMs)
+  const abortResult = (): BridgeResult<T> => (
+    controller.signal.reason === TIMED_OUT ? timedOut<T>() : cancelled<T>()
+  )
   const stopped = new Promise<BridgeResult<T>>((resolve) => {
     controller.signal.addEventListener('abort', () => {
-      resolve(controller.signal.reason === TIMED_OUT ? timedOut<T>() : cancelled<T>())
+      if (!awaitRecoveryOnAbort) {
+        resolve(abortResult())
+        return
+      }
+      const grace = setTimeout(() => resolve(abortResult()), timeoutMs)
+      void completed.then((result) => {
+        clearTimeout(grace)
+        resolve(result.ok ? result : abortResult())
+      })
     }, { once: true })
   })
   let pending: Promise<unknown>
@@ -578,8 +590,13 @@ function runOperation<T>(
     clearTimeout(timeout)
     state.controllers.delete(controller)
   })
+  const raceCompleted = awaitRecoveryOnAbort
+    ? completed.then((result) => (
+        controller.signal.aborted && !result.ok ? abortResult() : result
+      ))
+    : completed
   return {
-    response: Promise.race([completed, stopped]),
+    response: Promise.race([raceCompleted, stopped]),
     settled,
   }
 }
@@ -602,6 +619,7 @@ function schedule<T>(
   timeoutMs: number,
   operation: (signal: AbortSignal) => Promise<unknown>,
   parse: (value: unknown) => BridgeResult<T>,
+  awaitRecoveryOnAbort = false,
 ): Promise<BridgeResult<T>> {
   if (state.active >= MAX_ACTIVE_REQUESTS && state.queue.length >= MAX_QUEUED_REQUESTS) {
     return Promise.resolve(overloaded<T>())
@@ -628,6 +646,7 @@ function schedule<T>(
           Math.max(1, deadline - Date.now()),
           operation,
           parse,
+          awaitRecoveryOnAbort,
         )
         void run.response.then(finish)
         void run.settled
@@ -1191,6 +1210,7 @@ export function registerDesktopIpcHandlers(
     operation: (broker: NonNullable<RegistrationOptions['rootsMagic']>, owner: BridgeWebContents, request: Request, signal: AbortSignal) => Promise<Result>,
     parseResponse: (value: unknown) => BridgeResult<Result>,
     deadline = timeoutMs,
+    awaitRecoveryOnAbort = false,
   ): void => {
     ipc.handle(channel, async (event, ...args) => {
       const state = authorize(event)
@@ -1206,7 +1226,8 @@ export function registerDesktopIpcHandlers(
       const broker = options.rootsMagic
       if (!broker) return error('SIDECAR_UNAVAILABLE', 'RootsMagic workbench is unavailable.', 'Start the packaged local service and try again.')
       return schedule(state, deadline,
-        (signal) => fileGrantOperation(() => operation(broker, state.contents, request, signal)), parseResponse)
+        (signal) => fileGrantOperation(() => operation(broker, state.contents, request, signal)),
+        parseResponse, awaitRecoveryOnAbort)
     })
   }
   registerRootsMagic(desktopChannels.inspectRootsMagicSource, parseFileGrantId,
@@ -1225,7 +1246,7 @@ export function registerDesktopIpcHandlers(
   registerRootsMagic(desktopChannels.requestRootsMagicOutput, parseRootsMagicOutputDisplayName,
     (broker, owner, request, signal) => broker.selectOutput(owner, request, signal), parseRootsMagicOutputSelectionResult, fileDialogTimeoutMs)
   registerRootsMagic(desktopChannels.exportRootsMagic, parseRootsMagicExportRequest,
-    (broker, owner, request, signal) => broker.export(owner, request, signal), parseJobSnapshotResult)
+    (broker, owner, request, signal) => broker.export(owner, request, signal), parseJobSnapshotResult, timeoutMs, true)
   registerRootsMagic(desktopChannels.getRootsMagicJobResult, parseJobRequest,
     (broker, owner, request, signal) => broker.result(owner, request, signal), parseRootsMagicJobResultResult)
   registerRootsMagic(desktopChannels.discardRootsMagicSource, parseRootsMagicSourceReferenceRequest,

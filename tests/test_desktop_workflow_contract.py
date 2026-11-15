@@ -253,12 +253,15 @@ def test_rootsmagic_packaged_receipt_allows_only_prior_row_evidence() -> None:
     assert "RECEIPTS_DIR: desktop/verification/${{ matrix.runner }}/receipts" in step
     for path in (
         "$RECEIPTS_DIR/packaged-file-grants.json",
-        "$ROW_ROOT/target.json",
         "$ROW_ROOT/file-grant-mediation.json",
         "$ROW_ROOT/packaged-metrics.json",
     ):
         assert f'--allow-output "{path}"' in step
+    assert '--allow-output "$ROW_ROOT/target.json"' not in step
     assert '--allow-output "$ROW_ROOT"' not in step
+    assert "--gate packagedRootsMagicWorkbenchPassed" in step
+    assert '--artifact rootsMagicEvidence="$ANCESTRYLLM_ROOTSMAGIC_EVIDENCE"' in step
+    assert '--rootsmagic-evidence "$ROW_ROOT/rootsmagic-workbench.json"' in step
 
 
 def test_workflow_receipts_bind_black_box_packaged_sidecar_faults() -> None:
