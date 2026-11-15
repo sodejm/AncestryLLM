@@ -438,7 +438,8 @@ export class RootsMagicWorkbenchBroker {
       if (signal?.aborted || !stillOwned) {
         current = await this.client.cancel(snapshot.job_id).catch(() => snapshot)
       }
-      if (!stillOwned || (signal?.aborted && current.state !== 'completed')) {
+      if (!stillOwned || !this.active(owner, source.generation)
+        || this.sources.get(source.sourceRef) !== source || this.outputs.get(output.id) !== output) {
         fail('FILE_OPERATION_CANCELLED')
       }
       this.jobs.set(snapshot.job_id, { owner, jobId: snapshot.job_id, kind: 'export', generation: source.generation,

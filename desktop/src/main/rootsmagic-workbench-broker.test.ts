@@ -415,6 +415,31 @@ describe('native RootsMagic workbench broker', () => {
     await expect(broker.result(owner, request(completed))).resolves.toEqual(exportResult)
   })
 
+  it('retains a running export until protected publication completes after cancellation', async () => {
+    const { broker, client, native, owner, directory, inspect } = await fixture()
+    await inspect()
+    const output = await broker.selectOutput(owner, 'Export')
+    const late = deferred<JobSnapshot>()
+    client.export.mockReturnValueOnce(late.promise)
+    const controller = new AbortController()
+    const pending = broker.export(owner, { schema_version: 1, source_ref: sourceRef,
+      output_capability: output!.output_capability, root_person_id: 1, scope: 'connected',
+      generations: null, living: 'exclude' }, controller.signal)
+    await vi.waitFor(() => expect(client.export).toHaveBeenCalled())
+    controller.abort()
+    const running = { ...snapshot(9), state: 'running' as const }
+    client.cancel.mockResolvedValueOnce(running)
+    late.resolve(running)
+    await expect(pending).resolves.toEqual(running)
+    await mkdir(join(directory, 'Chosen export'))
+    broker.observeJob(terminalSnapshot(running, 'completed'))
+    client.result.mockResolvedValueOnce(exportResult)
+    await expect(broker.result(owner, request(running))).resolves.toEqual(exportResult)
+    await expect(broker.reveal(owner, { schema_version: 1,
+      artifact_id: exportResult.result.artifact_id })).resolves.toEqual({ schema_version: 1 })
+    expect(native.reveal).toHaveBeenCalledWith(join(directory, 'Chosen export'))
+  })
+
   it('reserves a directory grant before awaiting export submission', async () => {
     const { broker, client, owner, inspect } = await fixture()
     await inspect()
