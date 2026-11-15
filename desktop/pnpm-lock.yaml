@@ -17,6 +17,9 @@ overrides:
   nanoid@<3.3.18: 3.3.18
   serialize-javascript: 7.0.5
   tsx: 4.23.15
+  zod@<4.6.6: 4.6.7
+  undici@>=4.0.0 <6.29.1: 6.29.1
+  undici@>=7.0.0 <7.30.1: 7.30.2
 
 packageExtensionsChecksum: sha256-YnNv931ib1lRlKP9rlIdknot68iDf75w9XKIhHNygMA=
 
@@ -102,7 +105,7 @@ importers:
         version: 9.32.0(@types/node@26.0.0)(expect-webdriverio@6.1.0)
       '@wdio/electron-service':
         specifier: 10.3.0
-        version: 10.3.0(electron@41.10.6(supports-color@8.1.1))(supports-color@8.1.1)(tsx@4.23.15)(webdriverio@9.32.0)
+        version: 10.3.0(electron@42.11.18)(supports-color@8.1.1)(tsx@4.23.15)(webdriverio@9.32.0)
       '@wdio/globals':
         specifier: 9.31.3
         version: 9.31.3(expect-webdriverio@6.1.0)(webdriverio@9.32.0)
@@ -128,8 +131,8 @@ importers:
         specifier: 0.34.0
         version: 0.34.0
       electron:
-        specifier: 41.10.6
-        version: 41.10.6(supports-color@8.1.1)
+        specifier: 42.11.18
+        version: 42.11.18
       electron-builder:
         specifier: 26.15.7
         version: 26.15.7(electron-builder-squirrel-windows@26.15.7)
@@ -2332,8 +2335,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@41.10.6:
-    resolution: {integrity: sha512-NEB7QnVpT2p8S9U5jOCPAtCyhl1WjRT/ODvJP6ec1/dZRUmf/EjYVOBb/dthCmJh4bISqpAroGJ/xRRxX7VwJw==}
+  electron@42.11.18:
+    resolution: {integrity: sha512-hbzodG06x/l7uq+oeyob5ugv6qZBmJRWC7Uto5QEE99xSHUARz6d+++Rz+79T/ssTYTQkONW4ciTTcJuAbXKIQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -4330,12 +4333,12 @@ packages:
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
-  undici@6.29.0:
-    resolution: {integrity: sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==}
+  undici@6.29.1:
+    resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
     engines: {node: '>=18.17'}
 
-  undici@7.30.0:
-    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+  undici@7.30.2:
+    resolution: {integrity: sha512-mLyPQnHwUxaM/rideoK/+KL8DaAJLRl4aBCfmX444aCSLnIaomqPLtNRe2jdCYcsk5wZzXrDIQC8ZeYNRAYyIA==}
     engines: {node: '>=20.18.1'}
 
   unicorn-magic@0.3.0:
@@ -4662,8 +4665,8 @@ packages:
     resolution: {integrity: sha512-dSvYKdvLsAHCDqPOhIwk/q5CvuWtTB3Dgpoe0uVEFjTzIOAmsQpprX25InCvrvJsirEbu1OHyy67n/kAj1Sw/w==}
     engines: {node: '>=18'}
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -4865,20 +4868,20 @@ snapshots:
       got: 11.8.6
       progress: 2.0.3
       semver: 6.3.1
-      sumchecker: 3.0.1(supports-color@8.1.1)
+      sumchecker: 3.0.1
     transitivePeerDependencies:
       - supports-color
 
-  '@electron/get@5.1.0(supports-color@8.1.1)':
+  '@electron/get@5.1.0':
     dependencies:
       debug: 4.4.3(supports-color@8.1.1)
       env-paths: 3.0.0
       graceful-fs: 4.2.11
       progress: 2.0.3
       semver: 7.8.5
-      sumchecker: 3.0.1(supports-color@8.1.1)
+      sumchecker: 3.0.1
     optionalDependencies:
-      undici: 7.30.0
+      undici: 7.30.2
     transitivePeerDependencies:
       - supports-color
 
@@ -4921,7 +4924,7 @@ snapshots:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/asar': 4.3.1
-      '@electron/get': 5.1.0(supports-color@8.1.1)
+      '@electron/get': 5.1.0
       '@electron/notarize': 3.1.2(supports-color@8.1.1)
       '@electron/osx-sign': 2.7.1(supports-color@8.1.1)
       '@electron/universal': 3.0.6(supports-color@8.1.1)
@@ -6046,7 +6049,7 @@ snapshots:
       '@wdio/types': 9.32.0
       chalk: 5.6.2
 
-  '@wdio/electron-service@10.3.0(electron@41.10.6(supports-color@8.1.1))(supports-color@8.1.1)(tsx@4.23.15)(webdriverio@9.32.0)':
+  '@wdio/electron-service@10.3.0(electron@42.11.18)(supports-color@8.1.1)(tsx@4.23.15)(webdriverio@9.32.0)':
     dependencies:
       '@babel/parser': 8.0.7
       '@electron/fuses': 2.1.3
@@ -6070,7 +6073,7 @@ snapshots:
       webdriverio: 9.32.0
       yaml: 2.9.1
     optionalDependencies:
-      electron: 41.10.6(supports-color@8.1.1)
+      electron: 42.11.18
     transitivePeerDependencies:
       - bufferutil
       - proxy-agent
@@ -6574,7 +6577,7 @@ snapshots:
       parse5: 7.3.0
       parse5-htmlparser2-tree-adapter: 7.1.0
       parse5-parser-stream: 7.1.2
-      undici: 7.30.0
+      undici: 7.30.2
       whatwg-mimetype: 4.0.0
 
   chokidar@4.0.3:
@@ -6587,7 +6590,7 @@ snapshots:
     dependencies:
       devtools-protocol: 0.0.1696802
       mitt: 3.0.1
-      zod: 4.6.5
+      zod: 4.6.7
 
   chromium-pickle-js@0.2.0: {}
 
@@ -6932,10 +6935,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@41.10.6(supports-color@8.1.1):
+  electron@42.11.18:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
-      '@electron/get': 5.1.0(supports-color@8.1.1)
+      '@electron/get': 5.1.0
       '@types/node': 24.19.1
     transitivePeerDependencies:
       - supports-color
@@ -8424,7 +8427,7 @@ snapshots:
       semver: 7.8.5
       tar: 7.5.22
       tinyglobby: 0.2.17
-      undici: 6.29.0
+      undici: 6.29.1
       which: 6.0.1
 
   node-int64@0.4.0: {}
@@ -9120,7 +9123,7 @@ snapshots:
     dependencies:
       inline-style-parser: 0.2.7
 
-  sumchecker@3.0.1(supports-color@8.1.1):
+  sumchecker@3.0.1:
     dependencies:
       debug: 4.4.3(supports-color@8.1.1)
     transitivePeerDependencies:
@@ -9301,9 +9304,9 @@ snapshots:
 
   undici-types@8.3.0: {}
 
-  undici@6.29.0: {}
+  undici@6.29.1: {}
 
-  undici@7.30.0: {}
+  undici@7.30.2: {}
 
   unicorn-magic@0.3.0: {}
 
@@ -9470,7 +9473,7 @@ snapshots:
       '@wdio/utils': 9.32.0
       deepmerge-ts: 8.0.2
       https-proxy-agent: 7.0.6
-      undici: 6.29.0
+      undici: 6.29.1
       ws: 8.22.0
     transitivePeerDependencies:
       - bare-abort-controller
@@ -9637,6 +9640,6 @@ snapshots:
       normalize-path: 3.0.0
       readable-stream: 4.8.0
 
-  zod@4.6.5: {}
+  zod@4.6.7: {}
 
   zwitch@2.0.4: {}
