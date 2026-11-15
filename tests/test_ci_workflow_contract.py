@@ -123,15 +123,14 @@ def test_ci_separates_tests_from_single_run_quality_checks() -> None:
     test_job = _job(workflow, "test")
     quality_job = _job(workflow, "quality")
 
-    assert test_job.count("make test") == 1
+    assert test_job.count("uv run --locked --group test pytest --verbose") == 1
     assert "ruff check" not in test_job
     assert "mypy" not in test_job
     assert "check_architecture_contracts.py" not in test_job
     assert "check_repository_safety.sh" not in test_job
 
-    for command in ("make lint", "make typecheck", "make typecheck-ty"):
-        command_line = re.compile(rf"(?m)^\s*(?:run:\s*)?{re.escape(command)}\s*$")
-        assert len(command_line.findall(quality_job)) == 1
+    for command in ("ruff check src tests scripts", "mypy src/ancestryllm"):
+        assert quality_job.count(command) == 1
 
 
 def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
@@ -142,8 +141,7 @@ def test_ci_runs_ty_as_a_separate_nonblocking_advisory_check() -> None:
 
     blocking_step = """      - name: Lint, type check, and repository contracts
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
 """
     advisory_step = """      - name: Advisory ty evaluation
         continue-on-error: true
@@ -176,8 +174,13 @@ def test_ci_scopes_dependency_and_workflow_checks_without_skipping_required_work
 
     dependency_condition = "if: needs.changes.outputs.dependencies == 'true'"
     assert security_job.count(dependency_condition) == 4
-    assert security_job.count("make dependency-audit") == 1
-    assert security_job.count("make security-static") == 1
+    assert (
+        security_job.count(
+            "uv run --locked --group security python scripts/run_dependency_audit.py --uv uv"
+        )
+        == 1
+    )
+    assert security_job.count("uv run --locked --script scripts/run_pinned_semgrep.py .") == 1
     assert "needs: [changes, lockfile]" in workflow_audit_job
     assert "if: needs.changes.outputs.workflows == 'true'" in workflow_audit_job
 
@@ -187,7 +190,7 @@ def test_ci_checks_lockfile_consistency_before_install_heavy_jobs() -> None:
     lockfile_job = _job(workflow, "lockfile")
 
     assert "name: lockfile consistency" in lockfile_job
-    assert "make lock-check" in lockfile_job
+    assert "uv lock --check" in lockfile_job
     for job in (
         "test",
         "mutation-recovery",
@@ -243,14 +246,14 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "LC_ALL: en_US.UTF-8" in job
     assert "TZ: UTC" in job
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
-    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0" in job
+    assert "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0" in job
     assert 'node-version: "26.5.0"' in job
     assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
     assert 'version: "11.11.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.9",
         "xauth=1:1.1.2-1build1",
-        "xvfb=2:21.1.12-1ubuntu1.8",
+        "xvfb=2:21.1.12-1ubuntu1.9",
     ):
         assert package in job
     assert (
@@ -258,20 +261,35 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
         "xvfb-run --auto-servernum make docs-screenshots-check"
     ) in job
 
-    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.11.0"}
-    assert desktop_package["packageManager"] == "pnpm@11.11.0"
+    assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
+    assert desktop_package["packageManager"] == "pnpm@11.9.0"
     assert desktop_package["devDependencies"]["electron"] == "41.10.6"
     assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
 
-    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1" in job
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2" in job
     assert "if: failure()" in job
     assert "path: ${{ runner.temp }}/docs-screenshot-drift-v1.json" in job
     assert "if-no-files-found: error" in job
     assert "retention-days: 7" in job
     assert "docs/assets" not in job
     assert ".png" not in job
+
+
+def test_all_workflows_use_the_cross_platform_pnpm_setup_action() -> None:
+    workflow_paths = (
+        ROOT / ".github/workflows/ci.yml",
+        ROOT / ".github/workflows/desktop-sidecar.yml",
+        ROOT / ".github/workflows/release-readiness.yml",
+        ROOT / ".github/workflows/release.yml",
+    )
+    workflows = "\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
+
+    assert (
+        workflows.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0") == 7
+    )
+    assert "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320" not in workflows
 
 
 def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> None:
@@ -281,8 +299,8 @@ def test_ci_limits_pull_request_install_smoke_without_reducing_full_runs() -> No
     assert install_job.count("github.event_name == 'pull_request'") == 3
     assert "'[\"ubuntu-latest\"]'" in install_job
     assert '\'["ubuntu-latest","macos-latest","windows-latest"]\'' in install_job
-    assert "'[\"3.12\"]'" in install_job
-    assert '\'["3.12","3.13","3.14"]\'' in install_job
+    assert '\'["3.12","3.15"]\'' in install_job
+    assert '\'["3.12","3.13","3.14","3.15"]\'' in install_job
     assert "runs-on: ${{ matrix.os }}" in install_job
 
 
@@ -296,7 +314,7 @@ def test_ci_limits_pull_request_test_matrix_and_runner_parallelism() -> None:
     )
     assert (
         "python: ${{ fromJSON(github.event_name == 'pull_request' "
-        '&& \'["3.12"]\' || \'["3.12","3.13","3.14"]\') }}'
+        '&& \'["3.12","3.15"]\' || \'["3.12","3.13","3.14","3.15"]\') }}'
     ) in test_job
     assert "max-parallel: ${{ fromJSON(github.event_name == 'pull_request' && '1' || '3') }}" in (
         install_job
@@ -415,8 +433,8 @@ def test_uv_environment_and_workflow_audit_targets_are_explicit() -> None:
     assert "$(UV_BIN) sync --locked --all-extras --all-groups" in makefile
     audit_command = "zizmor --persona=pedantic .github/workflows .github/actions"
     assert f"$(UV_BIN) run --locked --group security {audit_command}" in makefile
-    assert "make workflow-audit" in _job(ci, "workflow-audit")
-    assert "make workflow-audit" in _job(readiness, "security")
+    assert audit_command in _job(ci, "workflow-audit")
+    assert audit_command in _job(readiness, "security")
 
 
 def test_setup_uv_cache_supersedes_the_three_manual_uv_caches() -> None:
@@ -452,7 +470,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
 
     assert "default_stages: [pre-commit]" in hooks
     assert "entry: make pre-push" in hooks
-    assert "entry: make workflow-audit" in hooks
+    assert "entry: make workflow-audit" not in hooks
     assert "id: gitleaks" in hooks
     assert "repo: https://github.com/pre-commit/pre-commit-hooks" in hooks
 
@@ -486,17 +504,11 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert bootstrap_policy["uv"]["version"] == "0.12.1"
     assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
 
-    workflow_filter = r"^\.github/(actions|workflows)/"
-    assert f"files: {workflow_filter}" in hooks
-    assert re.match(workflow_filter, ".github/actions/setup-verified-uv/action.yml")
-    assert re.match(workflow_filter, ".github/workflows/ci.yml")
-    assert not re.match(workflow_filter, "docs/reference/CI.md")
-    assert hooks.count("stages: [pre-push]") == 2
+    assert hooks.count("stages: [pre-push]") == 1
     assert "bootstrap: setup hooks" in makefile
     assert "lock-check:" in makefile
     assert "$(UV_BIN) lock --check" in makefile
-    for target in ("test", "lint", "typecheck", "security"):
-        assert f"$(MAKE) {target}" in makefile
+    assert "pre-push: system-python\n\t@$(PYTHON) scripts/run_pre_push.py" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
 
 
@@ -516,12 +528,12 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
 
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
-    setup_node = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    setup_node = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
     setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
 
     for quality_job in (ci_quality, readiness_quality):
-        assert quality_job.count("make lint") == 1
         assert quality_job.count("make code-docs-check") == 1
+        assert quality_job.count("scripts/check_code_documentation.py") == 1
         assert setup_node in quality_job
         assert 'node-version: "26.5.0"' in quality_job
         assert setup_pnpm in quality_job

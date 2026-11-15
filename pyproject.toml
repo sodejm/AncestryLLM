@@ -8,7 +8,7 @@ name = "ancestryllm"
 version = "0.6.0"
 description = "Local-first, privacy-preserving genealogy CLI with modular LLM providers."
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.16"
 license = "MIT"
 authors = [{name = "Justin Soderberg"}]
 keywords = ["cli", "gedcom", "genealogy", "rootsmagic", "privacy", "llm"]
@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Sociology :: Genealogy",
 ]
 dependencies = [

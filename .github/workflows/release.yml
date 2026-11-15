@@ -336,7 +336,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Set up verified uv
@@ -347,8 +347,8 @@ jobs:
       - name: Rebuild deterministic artifacts and SBOM
         run: |
           uv sync --locked --no-default-groups --group build --group security
-          make package
-          make sbom SBOM_OUTPUT=dist/sbom.json
+          uv run --locked --group build python scripts/build_release.py --output-dir dist
+          uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output dist/sbom.json --project pyproject.toml
       - name: Compare approved readiness artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -405,7 +405,7 @@ jobs:
             --bootstrap-receipt .tools/receipts/uv-bootstrap.json \
             --security-dependency-report dist/version-1-security-gate-report.json \
             --output dist/release-evidence.md
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-release-distributions
           path: dist/
@@ -466,7 +466,7 @@ jobs:
       - name: Verify exact installer head
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           architecture: ${{ matrix.arch }}
@@ -475,7 +475,7 @@ jobs:
         with:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-release-desktop-${{ matrix.runner }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26.5.0"
           architecture: ${{ matrix.arch }}
@@ -566,7 +566,7 @@ jobs:
             )
           fi
           read -r -a package_args <<< "$PACKAGE_ARGS"
-          pnpm --dir desktop exec electron-builder \
+          node desktop/scripts/run-electron-builder.mjs \
             --config electron-builder.release.yml \
             "${package_args[@]}" --publish never \
             "${signing_args[@]}" \
@@ -611,7 +611,7 @@ jobs:
             )
           }
           $packageArgs = $env:PACKAGE_ARGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-          pnpm --dir desktop exec electron-builder --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
+          node desktop/scripts/run-electron-builder.mjs --config electron-builder.release.yml @packageArgs --publish never @signingArgs "--config.extraMetadata.version=$env:VERSION"
           if ($LASTEXITCODE -ne 0) { throw "electron-builder exited $LASTEXITCODE" }
       - name: Remove temporary Windows signing credentials
         if: always() && runner.os == 'Windows'
@@ -624,7 +624,7 @@ jobs:
           PACKAGE_ARGS: ${{ matrix.package_args }}
         run: |
           read -r -a package_args <<< "$PACKAGE_ARGS"
-          pnpm --dir desktop exec electron-builder \
+          node desktop/scripts/run-electron-builder.mjs \
             --config electron-builder.release.yml \
             "${package_args[@]}" --publish never \
             --config.extraMetadata.version="$VERSION"
@@ -1001,7 +1001,7 @@ jobs:
             --sbom "$sbom" \
             "${gate_args[@]}" \
             --output "$row_dir/desktop-target-evidence.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-installer-${{ matrix.sidecar_target }}
           path: desktop-release-row/
@@ -1075,11 +1075,11 @@ jobs:
       - name: Verify exact validation head
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           architecture: ${{ matrix.runtime_arch }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26.5.0"
           architecture: ${{ matrix.runtime_arch }}
@@ -1525,7 +1525,7 @@ jobs:
             --gate runtimeIsolationPassed \
             --gate sidecarHandshakePassed \
             --output "$row_dir/desktop-validation-receipt.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-validation-${{ matrix.runner }}
           path: desktop-validation-row/
@@ -1545,14 +1545,14 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: desktop-installer-*
           path: desktop-installer-evidence
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: desktop-validation-*
           path: desktop-validation-evidence
@@ -1643,7 +1643,7 @@ jobs:
           test -f dist/desktop-exact-head-evidence.json
           python scripts/generate_release_checksums.py --directory dist
       - id: desktop_release
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-distributions-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.commit }}
           path: dist/
@@ -1689,7 +1689,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Download the exact approved artifact without name fallback
@@ -1877,7 +1877,7 @@ jobs:
               json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: imported-desktop-release-distributions
           path: imported/
@@ -1897,18 +1897,18 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: python-release-distributions
           path: python-release
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: uv-bootstrap-release-build
           path: bootstrap-receipt
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: imported-desktop-release-distributions
           path: desktop-release
@@ -1972,7 +1972,7 @@ jobs:
             --output dist/release-evidence.md
           python scripts/generate_release_checksums.py --directory dist
           python scripts/verify_release_assets.py --expected dist --actual dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-distributions
           path: dist/
@@ -1989,7 +1989,7 @@ jobs:
       contents: read # required to associate attestations with the repository
       id-token: write # required to sign build provenance
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: dist
@@ -2007,7 +2007,7 @@ jobs:
       attestations: read # required to retrieve build provenance
       contents: read # required to identify the repository and signer workflow
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: dist
@@ -2040,7 +2040,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: dist
@@ -2083,7 +2083,7 @@ jobs:
     permissions:
       id-token: write # required for TestPyPI trusted publishing
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: release
@@ -2091,7 +2091,7 @@ jobs:
         run: |
           mkdir dist
           cp release/*.whl release/*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           attestations: false # TestPyPI lacks PyPI's PEP 740 Integrity API
           repository-url: https://test.pypi.org/legacy/
@@ -2107,10 +2107,10 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: release
@@ -2142,7 +2142,7 @@ jobs:
     permissions:
       id-token: write # required for PyPI trusted publishing
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: release
@@ -2150,7 +2150,7 @@ jobs:
         run: |
           mkdir dist
           cp release/*.whl release/*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           attestations: true
 
@@ -2168,7 +2168,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Set up verified uv
@@ -2176,7 +2176,7 @@ jobs:
         with:
           python-version: "3.12"
           receipt-artifact-name: uv-bootstrap-release-pypi-attestations
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: release
@@ -2207,12 +2207,12 @@ jobs:
             --checksums downloaded/SHA256SUMS \
             --artifacts downloaded \
             --evidence attestation-evidence
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified-pypi-distributions
           path: downloaded/
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified-pypi-attestations
           path: attestation-evidence/
@@ -2226,7 +2226,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.12", "3.13", "3.14"]
+        python: ["3.12", "3.13", "3.14", "3.15"]
         artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -2235,10 +2235,10 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-pypi-distributions
           path: downloaded
@@ -2340,7 +2340,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: expected

@@ -38,7 +38,7 @@ def _workflow_job(relative_path: str, job_name: str) -> str:
 def test_uv_requires_the_reviewed_version_and_never_downloads_python() -> None:
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert configuration["project"]["requires-python"] == ">=3.12,<3.15"
+    assert configuration["project"]["requires-python"] == ">=3.12,<3.16"
     assert configuration["tool"]["uv"] == {
         "required-version": "==0.12.1",
         "python-preference": "only-system",
@@ -392,47 +392,52 @@ def test_system_python_preflight_has_stable_fail_closed_errors() -> None:
     assert completed.returncode != 0
     assert "UVENV_PYTHON_NOT_FOUND" in completed.stderr
 
-    for supported in ((3, 12, 0), (3, 13, 9), (3, 14, 0)):
+    for supported in ((3, 12, 0), (3, 13, 9), (3, 14, 0), (3, 15, 0)):
         validate_python_version(supported)
 
-    for unsupported in ((3, 11, 9), (3, 15, 0), (4, 0, 0)):
+    for unsupported in ((3, 11, 9), (3, 16, 0), (4, 0, 0)):
         with pytest.raises(SystemPythonError, match="UVENV_PYTHON_VERSION_UNSUPPORTED"):
             validate_python_version(unsupported)
 
 
-def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
+def test_ci_enforces_canonical_commands_independently_of_make() -> None:
     expected_commands = {
-        (".github/workflows/ci.yml", "lockfile"): ("make lock-check",),
-        (".github/workflows/ci.yml", "test"): ("make test",),
+        (".github/workflows/ci.yml", "lockfile"): ("uv lock --check",),
+        (".github/workflows/ci.yml", "test"): (
+            "uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",
+        ),
         (".github/workflows/ci.yml", "quality"): (
-            "make lint",
-            "make typecheck",
-            "make typecheck-ty",
-            "make code-docs-check",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/ci.yml", "security"): (
-            "make dependency-audit",
-            "make security-static",
-            "make sbom",
+            "uv run --locked --group security python scripts/run_dependency_audit.py --uv uv",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output sbom.json --project pyproject.toml",
         ),
-        (".github/workflows/ci.yml", "package"): ("make package",),
-        (".github/workflows/ci.yml", "workflow-audit"): ("make workflow-audit",),
+        (".github/workflows/ci.yml", "package"): (
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+        ),
+        (".github/workflows/ci.yml", "workflow-audit"): (
+            "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
+        ),
         (".github/workflows/release-readiness.yml", "quality"): (
-            "make test",
-            "make lint",
-            "make typecheck",
-            "make code-docs-check",
+            "uv run --locked --group test pytest --verbose --cov --cov-report=term-missing",
+            "uv run --locked --group lint ruff check src tests scripts",
+            "uv run --locked --group typecheck mypy src/ancestryllm",
         ),
         (".github/workflows/release-readiness.yml", "security"): (
-            "make dependency-audit",
-            "make security-static",
-            "make workflow-audit",
-            "make sbom",
+            "uv run --locked --group security python scripts/run_dependency_audit.py --uv uv",
+            "uv run --locked --script scripts/run_pinned_semgrep.py .",
+            "uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output sbom.json --project pyproject.toml",
         ),
-        (".github/workflows/release-readiness.yml", "package"): ("make package",),
+        (".github/workflows/release-readiness.yml", "package"): (
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+        ),
         (".github/workflows/release.yml", "build"): (
-            "make package",
-            "make sbom SBOM_OUTPUT=dist/sbom.json",
+            "uv run --locked --group build python scripts/build_release.py --output-dir dist",
+            "uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output dist/sbom.json --project pyproject.toml",
         ),
     }
 
@@ -451,14 +456,18 @@ def test_ci_calls_make_owned_commands_after_narrow_group_syncs() -> None:
     for workflow_path in canonical_workflows:
         workflow = workflow_path.read_text(encoding="utf-8")
         assert all(command not in workflow for command in forbidden), workflow_path
+        assert not re.search(
+            r"(?m)^\s+make (?:lock-check|test|lint|typecheck|dependency-audit|security-static|sbom|package|workflow-audit)(?:\s|$)",
+            workflow,
+        )
 
 
 def test_python_matrix_remains_system_supplied_and_supported() -> None:
-    setup_python = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+    setup_python = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0"
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     readiness = (ROOT / ".github/workflows/release-readiness.yml").read_text(encoding="utf-8")
 
     assert setup_python in ci
     assert setup_python in readiness
-    assert '["3.12","3.13","3.14"]' in ci
-    assert 'python: ["3.12", "3.13", "3.14"]' in readiness
+    assert '["3.12","3.13","3.14","3.15"]' in ci
+    assert 'python: ["3.12", "3.13", "3.14", "3.15"]' in readiness

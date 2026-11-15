@@ -35,6 +35,7 @@ MIGRATED_READER_DOCS = {
 CREATED_READER_DOCS = {
     "reference/DESKTOP.md": "Create in #262; retain basename",
     "reference/DESKTOP_DIAGNOSTICS.md": "Create in #461; retain basename",
+    "reference/LOCAL_PUSH_GATE.md": "Create; retain basename",
     "reference/MUTATION_RECOVERY.md": "Create in #200; retain basename",
 }
 
@@ -143,15 +144,18 @@ def test_navigation_separates_reader_modes_from_supporting_material() -> None:
     assert "The CLI and REPL use the same command specification" in home
     assert "All surfaces use the same command specification" not in home
     assert "Desktop-domain capabilities" in home_text
-    assert "presentation-only **Tasks** adapters" in home_text
-    assert "source-level synchronous transient-chat API" in home_text
-    assert "transient **Chat** destination over a Main-owned private stream" in home_text
-    assert "renders model Markdown through a closed allowlist" in home_text
-    assert "external-link confirmation in Electron Main" in home_text
+    desktop_text = " ".join(
+        (DOCS_DIRECTORY / "explanation/DESKTOP_SHELL.md").read_text(encoding="utf-8").split()
+    )
+    assert "presentation-only **Tasks** adapters" in desktop_text
+    assert "source-level synchronous transient-chat API" in desktop_text
+    assert "transient **Chat** destination over a Main-owned private stream" in desktop_text
+    assert "renders model Markdown through a closed allowlist" in desktop_text
+    assert "external-link confirmation in Electron Main" in desktop_text
     assert (
         "target-matched packaged and adversarial chat evidence, genealogy/domain task "
         "admission or execution, direct artifact access, cloud accounts, and updater flows"
-        in home_text
+        in desktop_text
     )
     for page in ("Home.md", "_Sidebar.md"):
         navigation = (DOCS_DIRECTORY / page).read_text(encoding="utf-8")

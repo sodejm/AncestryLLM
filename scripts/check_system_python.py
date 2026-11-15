@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 MINIMUM_PYTHON = (3, 12)
-MAXIMUM_PYTHON = (3, 15)
+MAXIMUM_PYTHON = (3, 16)
 
 
 class SystemPythonError(RuntimeError):
@@ -29,7 +29,7 @@ def validate_python_version(version: Sequence[int]) -> None:
     if not MINIMUM_PYTHON <= current < MAXIMUM_PYTHON:
         current_text = ".".join(str(part) for part in version[:3])
         raise SystemPythonError(
-            "UVENV_PYTHON_VERSION_UNSUPPORTED: expected system Python 3.12-3.14; "
+            "UVENV_PYTHON_VERSION_UNSUPPORTED: expected system Python 3.12-3.15; "
             f"found {current_text}"
         )
 

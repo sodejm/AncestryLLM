@@ -198,7 +198,14 @@ listing.
 
 Interactive history is stored with owner-only permissions. Secret entry and
 secret-like commands are excluded from history, and persisted history is
-redacted defensively. Do not paste credentials, private genealogy records, or
+redacted defensively. History retains at most 1,000 entries and 1 MiB of serialized
+data; a single serialized entry must fit within 16 KiB. Startup reads only the
+newest 1 MiB of an existing history file and compacts valid retained entries by
+atomic replacement. Older entries, malformed records, and oversized entries are
+discarded. If private persistence fails, history remains available in memory for
+the current session within the same limits.
+
+Do not paste credentials, private genealogy records, or
 other sensitive values into ordinary commands. Provider selection and consent
 remain explicit: `provider=none` is network-free even when keys or SDKs are
 installed.

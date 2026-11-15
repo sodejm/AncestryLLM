@@ -73,6 +73,10 @@
     "title": "Continuous integration — AncestryLLM",
     "description": "CI pipeline gates, workflow structure, and how to reproduce checks locally."
   },
+  "reference/LOCAL_PUSH_GATE.md": {
+    "title": "Local push gate — AncestryLLM",
+    "description": "Installation, required tools, test-development checks, security scans, and failure recovery for the local pre-push gate."
+  },
   "reference/DEPENDENCY_MAINTENANCE.md": {
     "title": "Dependency maintenance — AncestryLLM",
     "description": "Purpose-specific dependency groups, locked environment profiles, and the reviewed dependency update procedure."
@@ -123,7 +127,7 @@
   },
   "tutorials/desktop-first-run.md": {
     "title": "Desktop first run — AncestryLLM",
-    "description": "A safe first journey through the v0.6 desktop source using fictional local state, provider none, and bounded recovery."
+    "description": "Reach the supported 0.6.0 desktop Home with provider none and bounded recovery. Fictional development previews have a separate procedure."
   },
   "how-to/desktop-diagnostics.md": {
     "title": "Recover with desktop diagnostics — AncestryLLM",
@@ -216,6 +220,10 @@
   "release-evidence/README.md": {
     "title": "Release evidence index — AncestryLLM",
     "description": "Index of machine-readable and human-reviewed evidence retained for AncestryLLM release decisions."
+  },
+  "release-evidence/0.7.0-local-batch-1.md": {
+    "title": "v0.7.0 local batch acceptance — AncestryLLM",
+    "description": "Acceptance criteria, local regression evidence, and remaining release blockers for issues 504, 505, 489, 490, and 491."
   },
   "release-evidence/issue-10-import-smoke-tests.md": {
     "title": "GEDCOM import smoke-test evidence — AncestryLLM",

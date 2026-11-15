@@ -127,7 +127,7 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "version=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: version-1-security-gate
           path: ${{ runner.temp }}/version-1-security-gate/report.json
@@ -140,7 +140,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.12", "3.13", "3.14"]
+        python: ["3.12", "3.13", "3.14", "3.15"]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -153,10 +153,10 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: matrix.python == '3.12'
         with:
           node-version: "26.5.0"
@@ -173,15 +173,20 @@ jobs:
       - name: Install locked test environment
         run: uv sync --locked --no-default-groups --extra all-llm --group test
       - name: Test with coverage
-        run: make test
+        run: uv run --locked --group test pytest --verbose --cov --cov-report=term-missing
       - name: Install locked static-quality environment
         if: matrix.python == '3.12'
         run: uv sync --locked --no-default-groups --group lint --group typecheck
       - name: Static quality gates
         if: matrix.python == '3.12'
         run: |
-          make lint
-          make typecheck
+          uv run --locked --group lint ruff check src tests scripts
+          uv run --locked --group lint ruff format --check src tests scripts
+          uv run --locked --group lint python scripts/check_gfm_markdown.py
+          uv run --locked --group lint python scripts/check_architecture_contracts.py
+          ./scripts/check_repository_safety.sh
+          uv run --locked --group lint python scripts/check_code_documentation.py
+          uv run --locked --group typecheck mypy src/ancestryllm
           make code-docs-check
 
   security:
@@ -199,11 +204,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Scan frozen candidate tree for secrets
-        uses: trufflesecurity/trufflehog@f714bf454f350590f4a24c3ddb1aef02c35bf5b6 # v3.97.5
+        uses: trufflesecurity/trufflehog@c85580b712841eda4c53bc28fc6ace6100e8c16c # v3.99.4
         with:
           version: 3.95.9
           extra_args: --results=verified,unknown --fail-on-scan-errors
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Set up verified uv
@@ -214,14 +219,14 @@ jobs:
       - name: Install locked security environment
         run: uv sync --locked --no-default-groups --group security
       - name: Audit locked dependencies
-        run: make dependency-audit
+        run: uv run --locked --group security python scripts/run_dependency_audit.py --uv uv
       - name: Run pinned static security analysis
-        run: make security-static
+        run: uv run --locked --script scripts/run_pinned_semgrep.py .
       - name: Audit workflow security
-        run: make workflow-audit
+        run: uv run --locked --group security zizmor --persona=pedantic .github/workflows .github/actions
       - name: Generate CycloneDX SBOM
-        run: make sbom
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        run: uv run --locked --group security python scripts/generate_sbom.py --python .venv/bin/python --output sbom.json --project pyproject.toml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-sbom
           path: sbom.json
@@ -241,18 +246,18 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: python
           queries: security-extended
-      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           output: codeql-sarif
           upload: never
           upload-database: false
       - name: Require zero-result CodeQL evidence
         run: python scripts/verify_codeql_sarif.py --directory codeql-sarif
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
           name: release-codeql-sarif
@@ -273,7 +278,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Set up verified uv
@@ -284,8 +289,8 @@ jobs:
       - name: Build deterministic distributions
         run: |
           uv sync --locked --no-default-groups --group build
-          make package
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          uv run --locked --group build python scripts/build_release.py --output-dir dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-distributions
           path: dist/
@@ -298,15 +303,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.12", "3.13", "3.14"]
+        python: ["3.12", "3.13", "3.14", "3.15"]
         artifact: [wheel, sdist]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: dist
@@ -340,23 +345,23 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-distributions
           path: evidence/artifacts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-sbom
           path: evidence
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: uv-bootstrap-readiness-package
           path: evidence/bootstrap
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: version-1-security-gate
           path: evidence/version-1-security-gate
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-codeql-sarif
           path: evidence/codeql-sarif
@@ -431,7 +436,7 @@ jobs:
             --bootstrap-receipt evidence/bootstrap/uv-bootstrap.json \
             --security-dependency-report evidence/version-1-security-gate/report.json \
             --output evidence/release-evidence.md
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-evidence
           path: evidence/

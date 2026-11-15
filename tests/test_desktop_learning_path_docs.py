@@ -52,7 +52,7 @@ def test_desktop_learning_path_pages_are_published_and_discoverable() -> None:
 
 
 def test_first_run_tutorial_reaches_a_safe_meaningful_result() -> None:
-    """The tutorial uses fictional local state and offers supported next steps."""
+    """The tutorial reaches local Home and distinguishes fictional illustrations."""
     tutorial = _normalized("tutorials/desktop-first-run.md")
 
     for contract in (

@@ -2,7 +2,7 @@
 
 ## Repository environment setup
 
-A source checkout requires a system-supplied Python 3.12 through 3.14. When
+A source checkout requires a system-supplied Python 3.12 through 3.15. When
 `uv` is invoked directly, the checked-in `.python-version` requests 3.12 by
 default. Canonical Make targets instead resolve their selected `PYTHON` command
 to its exact native executable path before invoking `uv`. Repository policy
@@ -32,7 +32,7 @@ after confirming its ownership and contents.
 | Failure | Meaning | Required action |
 |---|---|---|
 | `UVENV_PYTHON_NOT_FOUND` | The selected system Python executable is absent. | Install a supported system Python or set `PYTHON` to an existing supported executable, then retry. |
-| `UVENV_PYTHON_VERSION_UNSUPPORTED` | The selected interpreter is outside Python 3.12-3.14 or its version cannot be read. | Select a supported system interpreter; do not let `uv` download one. |
+| `UVENV_PYTHON_VERSION_UNSUPPORTED` | The selected interpreter is outside Python 3.12-3.15 or its version cannot be read. | Select a supported system interpreter; do not let `uv` download one. |
 | `UVENV_VENV_RECREATED` | The regular ignored `.venv` could not start, usually because its base interpreter disappeared. | No manual deletion is required. Setup recreates only that generated environment with the selected supported system interpreter and continues. |
 | `UVENV_VENV_REPAIR_REFUSED` | `.venv` is a symlink, is not a directory, or lacks uv virtual-environment metadata. | Inspect the exact path. Move it aside manually only after confirming its ownership and contents, then rerun setup; do not make setup delete an ambiguous target. |
 | Bootstrap receipt reports a stable failure category | The cached or downloaded `uv`, verifier, policy, identity, or provenance failed closed. | Follow the [verified uv bootstrap recovery procedure](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md); never bypass verification or substitute another `uv`. |

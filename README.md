@@ -45,7 +45,7 @@ Choose the path that matches how you want to use AncestryLLM.
 
 ### Use the CLI or interactive prompt
 
-You will need Python 3.12 through 3.14 and a working OS credential store.
+You will need Python 3.12 through 3.15 and a working OS credential store.
 
 1. Install AncestryLLM as an isolated command with either
    [uv](https://docs.astral.sh/uv/guides/tools/) or
@@ -86,14 +86,19 @@ and [interactive-console guide](https://github.com/sodejm/AncestryLLM/blob/main/
 
 ### Work from source
 
-A source checkout requires a system-supplied Python 3.12 through 3.14. After
-following the
-[verified uv bootstrap guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md),
-run:
+A source checkout requires a system-supplied Python 3.12 through 3.15. First,
+clone the repository and enter its root:
 
 ```console
 git clone https://github.com/sodejm/AncestryLLM.git
 cd AncestryLLM
+```
+
+From that directory, follow the authentication and verification prerequisites in
+the [verified uv bootstrap guide](https://github.com/sodejm/AncestryLLM/blob/main/docs/security/verified-uv-bootstrap.md),
+then create and test the environment:
+
+```console
 make setup
 make test
 ```

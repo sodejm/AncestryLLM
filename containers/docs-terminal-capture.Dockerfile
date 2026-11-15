@@ -24,5 +24,6 @@ RUN /usr/local/bin/uv sync --locked --no-default-groups && \
     install -d -m 0555 /usr/local/lib/ancestryllm-docs-terminal && \
     install -m 0555 scripts/docs_terminal_shell.sh /usr/local/lib/ancestryllm-docs-terminal/bash
 
+USER 65532:65532
 ENTRYPOINT []
 CMD ["/usr/bin/vhs"]

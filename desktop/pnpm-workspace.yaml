@@ -8,19 +8,22 @@ ignoreScripts: false
 saveExact: true
 sharedWorkspaceLockfile: false
 overrides:
-  extract-zip: npm:@electron-internal/extract-zip@1.0.5
+  '@puppeteer/browsers>extract-zip': npm:@electron-internal/extract-zip@1.0.5
+  'get-uri>basic-ftp': 6.2.1
+  '@wdio/mocha-framework>mocha': 11.8.0
+  'mocha>diff': 8.0.3
+  '@electron/get@3>global-agent': '-'
   fast-uri: 3.1.8
-  deepmerge-ts: 8.0.0
+  deepmerge-ts: 8.0.2
   js-yaml@4.3.0: 4.3.2
   '@xmldom/xmldom@0.8.13': 0.8.15
   nanoid@<3.3.18: 3.3.18
-  serialize-javascript: 7.0.3
-  tsx: 4.21.1
-  undici@6.28.0: 6.28.1
-  undici@7.29.0: 7.29.1
-  brace-expansion@1.1.18: 1.1.21
-  brace-expansion@2.1.4: 2.1.7
-  brace-expansion@5.0.9: 5.0.12
+  serialize-javascript: 7.0.5
+  tsx: 4.23.15
+packageExtensions:
+  '@wdio/electron-service@10.3.0':
+    dependencies:
+      expect-webdriverio: 5.6.5
 onlyBuiltDependencies:
   - electron
   - esbuild

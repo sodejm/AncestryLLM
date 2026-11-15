@@ -1359,50 +1359,72 @@ describe('desktop IPC handlers', () => {
     })
   })
 
-  it('allows sidecar recovery beyond the ordinary request deadline', async () => {
+  it('allows sidecar recovery to exceed the ordinary IPC deadline', async () => {
     vi.useFakeTimers()
     try {
       const control = bridge()
       const recovered = await control.retrySidecar()
-      vi.mocked(control.retrySidecar).mockImplementation(() => new Promise((resolve) => {
-        setTimeout(() => resolve(recovered), 6_000)
-      }))
-      vi.mocked(control.getAppInfo).mockImplementation(() => new Promise(() => undefined))
-      const { event, handlers } = harness(control)
-      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
-      const ordinary = handlers.get(desktopChannels.getAppInfo)?.(event())
-      const ordinaryAssertion = expect(ordinary).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
-      await vi.advanceTimersByTimeAsync(5_000)
-      await ordinaryAssertion
-      await vi.advanceTimersByTimeAsync(1_000)
-      await expect(retry).resolves.toEqual(recovered)
+      const recovery = deferred<typeof recovered>()
+      let retrySignal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((signal?: AbortSignal) => {
+        retrySignal = signal
+        return recovery.promise
+      })
+      const { event, handlers, controller } = harness(control)
+      const request = handlers.get(desktopChannels.retrySidecar)?.(event())
+
+      await vi.advanceTimersByTimeAsync(7_000)
+
+      expect(retrySignal?.aborted).toBe(false)
+      recovery.resolve(recovered)
+      await expect(request).resolves.toMatchObject({ ok: true, data: { state: 'ready' } })
+      controller.dispose()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('bounds stalled sidecar recovery and aborts it at its dedicated deadline', async () => {
+  it('bounds sidecar retry independently of ordinary requests', async () => {
     vi.useFakeTimers()
     try {
       const control = bridge()
-      let signal: AbortSignal | undefined
-      vi.mocked(control.retrySidecar).mockImplementation((received) => {
-        signal = received
-        return new Promise(() => undefined)
+      const recovered = await control.retrySidecar()
+      const recovery = deferred<typeof recovered>()
+      let retrySignal: AbortSignal | undefined
+      vi.mocked(control.retrySidecar).mockImplementation((signal?: AbortSignal) => {
+        retrySignal = signal
+        return recovery.promise
       })
-      const { event, handlers } = harness(control)
-      const retry = handlers.get(desktopChannels.retrySidecar)?.(event())
-      const assertion = expect(retry).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
-      await vi.advanceTimersByTimeAsync(29_999)
-      expect(signal?.aborted).toBe(false)
+      const { event, handlers, controller } = harness(control, {
+        operationTimeoutMs: 5,
+        sidecarRetryTimeoutMs: 10,
+      })
+      const request = handlers.get(desktopChannels.retrySidecar)?.(event())
+
+      await vi.advanceTimersByTimeAsync(9)
+      expect(retrySignal?.aborted).toBe(false)
       await vi.advanceTimersByTimeAsync(1)
-      await assertion
-      expect(signal?.aborted).toBe(true)
+      await expect(request).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'REQUEST_TIMEOUT' },
+      })
+      expect(retrySignal?.aborted).toBe(true)
+      recovery.resolve(recovered)
+      await vi.advanceTimersByTimeAsync(0)
+      controller.dispose()
     } finally {
       vi.useRealTimers()
     }
   })
 
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid sidecar retry timeout %s',
+    (sidecarRetryTimeoutMs) => {
+      expect(() => harness(bridge(), { sidecarRetryTimeoutMs })).toThrow(
+        'Desktop IPC sidecar retry timeout must be positive.',
+      )
+    },
+  )
   it('returns a stable timeout while the underlying operation remains stalled', async () => {
     const control = bridge()
     const signals: AbortSignal[] = []

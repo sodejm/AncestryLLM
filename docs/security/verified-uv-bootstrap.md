@@ -12,7 +12,7 @@ storage, FastAPI contracts, or desktop boundaries.
 
 ## Developer setup
 
-Use a supported system Python 3.12-3.14. The checked-in `.python-version`
+Use a supported system Python 3.12-3.15. The checked-in `.python-version`
 requests 3.12 when `uv` performs direct fallback discovery. Canonical Make
 targets instead resolve the selected `PYTHON` command to its exact native
 executable path and provide that path to `uv`; `[tool.uv]` permits only a system

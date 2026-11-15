@@ -81,20 +81,19 @@ test('packaging pins Electron at the minimum audited security remediation', () =
 test('dependency overrides preserve the audited transitive remediation floors', () => {
   assert.match(
     pnpmWorkspace,
-    /^ {2}extract-zip: npm:@electron-internal\/extract-zip@1\.0\.5$/m,
+    /^ {2}'@puppeteer\/browsers>extract-zip': npm:@electron-internal\/extract-zip@1\.0\.5$/m,
   )
-  assert.match(pnpmWorkspace, /^ {2}deepmerge-ts: 8\.0\.0$/m)
+  assert.match(pnpmWorkspace, /^ {2}'get-uri>basic-ftp': 6\.2\.1$/m)
+  assert.match(pnpmWorkspace, /^ {2}'@wdio\/mocha-framework>mocha': 11\.8\.0$/m)
+  assert.match(pnpmWorkspace, /^ {2}'mocha>diff': 8\.0\.3$/m)
+  assert.match(pnpmWorkspace, /^ {2}'@electron\/get@3>global-agent': '-'$/m)
+  assert.match(pnpmWorkspace, /^ {2}deepmerge-ts: 8\.0\.2$/m)
   assert.match(pnpmWorkspace, /^ {2}fast-uri: 3\.1\.8$/m)
   assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.2$/m)
   assert.match(pnpmWorkspace, /^ {2}'@xmldom\/xmldom@0\.8\.13': 0\.8\.15$/m)
   assert.match(pnpmWorkspace, /^ {2}nanoid@<3\.3\.18: 3\.3\.18$/m)
-  assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.0\.3$/m)
-  assert.match(pnpmWorkspace, /^ {2}undici@6\.28\.0: 6\.28\.1$/m)
-  assert.match(pnpmWorkspace, /^ {2}undici@7\.29\.0: 7\.29\.1$/m)
-  assert.match(pnpmWorkspace, /^ {2}brace-expansion@1\.1\.18: 1\.1\.21$/m)
-  assert.match(pnpmWorkspace, /^ {2}brace-expansion@2\.1\.4: 2\.1\.7$/m)
-  assert.match(pnpmWorkspace, /^ {2}brace-expansion@5\.0\.9: 5\.0\.12$/m)
-  assert.doesNotMatch(pnpmWorkspace, /electron@.*patch/)
+  assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.0\.5$/m)
+  assert.doesNotMatch(pnpmWorkspace, /^patchedDependencies:/m)
 })
 
 test('production main entry contains no fixture bridge or test hook', () => {

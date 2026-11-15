@@ -1,7 +1,77 @@
 # AncestryLLM desktop shell
 
 This directory contains the UI-only Electron adapter and the packaged
-control-sidecar supervisor. It intentionally implements no genealogy domain
+control-sidecar supervisor.
+
+The supported 0.6.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
+
+## Reproducible setup and gates
+
+From the repository root, use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
+
+```sh
+corepack enable
+corepack prepare pnpm@11.9.0 --activate
+make desktop-install
+make desktop-check
+make desktop-e2e
+make desktop-security
+pnpm --dir desktop test:accessibility
+pnpm --dir desktop test:visual
+```
+
+`desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
+locked Electron package, and fails with a stable error if its platform runtime
+is still absent. The explicit rebuild makes setup fail closed even when a
+shared pnpm store contains stale build-script state. Electron 41.10.6 remains
+exactly pinned. The frozen lockfile scopes reviewed security replacements to
+the affected installer and test-tool dependency paths, including the
+Electron-maintained `@electron-internal/extract-zip` 1.0.5 fork; no runtime
+patch is required for the current Electron installer. WebdriverIO uses Mocha
+11.8.0 so its Chokidar 4 watcher retains Mocha's supported glob handling. The
+unused optional `@electron/get` legacy proxy agent is removed because it has
+no patched release. Installation and packaging fail explicitly when
+`ELECTRON_GET_USE_PROXY` is nonempty instead of silently ignoring that requested
+legacy behavior.
+
+`desktop-check` runs lint, separated main/preload/renderer type checks, unit
+tests, the presentation-boundary contract, and a source-map-free build
+inspection. `desktop-e2e` builds the production renderer and launches it in
+Electron with a deterministic fictional mock bridge; it is not an installer
+or literal packaged-executable test. `test:accessibility` scans every shell
+route in light, dark, and high-contrast modes with the exact locked `axe-core`
+version in real Chromium. Linux CI launches this source scan through
+`xvfb-run --auto-servernum` after verifying the installed Chromium SUID sandbox
+is a regular root-owned file with mode `4755`; WebdriverIO retains its automatic
+Xvfb fallback, and the Electron sandbox stays enabled. `test:visual` checks the minimum
+720-by-560 window at 200% zoom for horizontal clipping. Neither command
+replaces the manual screen-reader review in the
+[desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
+`desktop-security` runs the high-severity dependency audit, source secret scan,
+produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
+package after verifying the native sidecar resource, and inspects the resulting
+`app.asar`, eight packaged Electron fuses, and supported ASAR-integrity
+metadata. Local and ordinary CI builds remain unsigned verification inputs.
+Full production/trusted signing is deferred until v1.0.0: project-produced
+`0.x` release installers and annotated release tags must be unsigned. The tag
+release uses `electron-builder.release.yml` only after exact-head gates pass;
+it builds the four manual-installer rows documented in the
+[release runbook](../docs/RELEASING.md), then binds their declared signing mode,
+checksums, SBOMs, evidence, and provenance before publication. No updater feed,
+background update, staged rollout, or automatic rollback is configured.
+
+For a fictional development-only component review, run:
+
+```sh
+pnpm --dir desktop dev:gallery
+```
+
+The production build verifier rejects gallery copy and fixtures, embedded
+remote assets, and remote network endpoints.
+
+## Source-level contracts
+
+This adapter intentionally implements no genealogy domain
 behavior and does not access files, databases, provider credentials, the
 network, or operating-system services from the renderer. The versioned
 `window.ancestry` bridge retains the six 0.5 control methods for application
@@ -27,7 +97,7 @@ renderer **Chat** destination over those fixed contracts. The combined surface
 adds no generic request channel, renderer network access, tool surface, file or
 database authority, genealogy operation, or persistent conversation store.
 
-The supported 0.6.0 product surface is a one-time local welcome on Home, a temporary Home-based welcome review, Diagnostics, a sanitized capability summary, and local visual Settings only. It has no genealogy, files, jobs, chat, providers, cloud accounts, or updater controls. See the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md) for first-run behavior, supported targets, manual installation, unsigned-artifact limits, and recovery guidance.
+
 
 Source-level gated Issue #106 adds the reusable, responsive presentation shell for the
 0.6 desktop work. Its `AppRoute`, `NavigationItem`, `CapabilityGate`,
@@ -109,69 +179,6 @@ tracks inspection, queries, and exports, and Main mediates artifact reveal. See 
 
 The persisted schema contains only color scheme, reduced-motion choice, onboarding completion, schema version, and optimistic revision. `onboardingCompleted` is internal workflow state, not a Settings control. Continue persists that flag through the existing bridge, and a new application process skips the welcome only after a fresh valid snapshot reports completion. Conflicts, unavailable or malformed responses, and corrupt or unsupported storage fail closed and do not silently unlock or overwrite the file. Writes are validated, serialized, and atomically replace the file. Missing or supported legacy data receives safe defaults. Provider configuration, accounts, file grants, genealogy data, prompts, payloads, and secrets are never preference fields.
 
-## Reproducible setup and gates
-
-Use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.11.0`:
-
-```sh
-corepack enable
-corepack prepare pnpm@11.11.0 --activate
-make desktop-install
-make desktop-check
-make desktop-e2e
-make desktop-security
-pnpm --dir desktop test:accessibility
-pnpm --dir desktop test:visual
-```
-
-`desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
-locked Electron package, and fails with a stable error if its platform runtime
-is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 41.10.6 is exactly
-pinned for the audited runtime security fixes. Its installer uses the maintained
-`@electron-internal/extract-zip` directly, so the former installer compatibility
-patch is no longer needed. Other `extract-zip` consumers retain the locked
-Electron-maintained 1.0.5 override. The URI parser and both Undici major lines
-also retain explicit patched dependency versions.
-
-`desktop-check` runs lint, separated main/preload/renderer type checks, unit
-tests, the presentation-boundary contract, and a source-map-free build
-inspection. `desktop-e2e` builds the production renderer and launches it in
-Electron with a deterministic fictional mock bridge; it is not an installer
-or literal packaged-executable test. `test:accessibility` scans every shell
-route in light, dark, and high-contrast modes with the exact locked `axe-core`
-version in real Chromium. `test:visual` checks the minimum 720-by-560 window at
-200% zoom for horizontal clipping. Neither command replaces the manual
-screen-reader review in the [desktop shell guide](../docs/explanation/DESKTOP_SHELL.md).
-The native package matrix also runs a fictional RootsMagic workflow that checks
-paging, family links, events, rooted export contents, digests, unchanged source
-bytes, keyboard operation, automated accessibility, and artifact reveal. Its
-`packagedRootsMagicWorkbenchPassed` receipt binds the target-specific evidence
-separately from the existing 0.6 core receipts. Local execution proves only the
-target on which it ran; manual screen-reader review and the other supported
-target rows remain separate acceptance requirements.
-`desktop-security` runs the high-severity dependency audit, source secret scan,
-produces `desktop/sbom.cdx.json` (ignored by Git), builds an unpacked directory
-package after verifying the native sidecar resource, and inspects the resulting
-`app.asar`, eight packaged Electron fuses, and supported ASAR-integrity
-metadata. Local and ordinary CI builds remain unsigned verification inputs.
-Full production/trusted signing is deferred until v1.0.0: project-produced
-`0.x` release installers and annotated release tags must be unsigned. The tag
-release uses `electron-builder.release.yml` only after exact-head gates pass;
-it builds the four manual-installer rows documented in the
-[release runbook](../docs/RELEASING.md), then binds their declared signing mode,
-checksums, SBOMs, evidence, and provenance before publication. No updater feed,
-background update, staged rollout, or automatic rollback is configured.
-
-For a fictional development-only component review, run:
-
-```sh
-pnpm --dir desktop dev:gallery
-```
-
-The production build verifier rejects gallery copy and fixtures, embedded
-remote assets, and remote network endpoints.
-
 ## Architecture
 
 The renderer has browser-only TypeScript types and imports. Its design-system
@@ -190,7 +197,10 @@ same-document application routes retain the existing renderer identity. In
 packaged builds, main privately starts and verifies the fixed-route native
 sidecar. Startup failure crosses the bridge only as sanitized diagnostics;
 retry is bounded by the main-owned supervisor, and authenticated session
-details never enter IPC or the preload bridge. The source-level gated Issue #104
+details never enter IPC or the preload bridge. Its IPC deadline is 30 seconds,
+covering both ten-second startup phases and the final diagnostics request;
+ordinary control requests retain their five-second deadline. Renderer lifecycle
+cancellation and the single manual retry limit still apply. The source-level gated Issue #104
 shutdown preflight is likewise main-process-only: it asks the sidecar whether
 active jobs are safe to drain, wait for, or cancel before the IPC boundary is
 disposed. See

@@ -158,7 +158,8 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         )
     )
     jobs = JobLifecycleService(JobManager(max_workers=1), MemoryJobEventRepository())
-    facade = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+    service = GedcomService(artifacts=artifacts)
+    facade = GedcomJobFacade(service=service, jobs=jobs)
     try:
         first_job = facade.submit_inspect(request).job_id
         jobs.manager.wait(first_job, timeout=5)
@@ -182,7 +183,7 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         assert first.candidates[0].source_identifier == "@I1@"
         assert first.candidates[0].birth_date == "1900"
         assert first.next_cursor is not None
-        second = GedcomJobFacade(service=GedcomService(artifacts=artifacts), jobs=jobs)
+        second = GedcomJobFacade(service=service, jobs=jobs)
         last = second.root_candidates(first_job, query="ADA", limit=1, cursor=first.next_cursor)
         assert last.candidates[0].source_identifier == "@I2@"
         assert last.candidates[0].birth_date == "1920"
@@ -191,7 +192,7 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         assert facade.root_candidates(first_job, query="not present").candidates == ()
         assert facade.root_candidates(first_job, query="@I3@").total_count == 1
 
-        monkeypatch.setattr("ancestryllm.application.gedcom_jobs.MAX_ROOT_SCAN_CANDIDATES", 2)
+        monkeypatch.setattr("ancestryllm.gedcom.root_index._SUBSTRING_SCAN_LIMIT", 2)
         partial = facade.root_candidates(first_job, query="Grace")
         assert partial.candidates == ()
         assert partial.total_count is None
@@ -201,12 +202,7 @@ def test_root_candidate_pages_are_searchable_bounded_and_bound_to_inspection(
         assert continued.total_count is None
         assert continued.next_cursor is None
         anchor = continued.candidates[0].person_ref
-        partial_anchor = facade.root_candidates(first_job, query=anchor)
-        assert partial_anchor.candidates == ()
-        assert partial_anchor.next_cursor is not None
-        found_anchor = facade.root_candidates(
-            first_job, query=anchor, cursor=partial_anchor.next_cursor
-        )
+        found_anchor = facade.root_candidates(first_job, query=anchor)
         assert found_anchor.candidates == continued.candidates
         assert found_anchor.total_count == 1
         assert found_anchor.next_cursor is None

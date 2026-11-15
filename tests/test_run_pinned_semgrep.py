@@ -312,93 +312,39 @@ def test_resolves_semgrep_beside_the_script_interpreter(
     assert runner._semgrep_executable() == semgrep
 
 
-def test_configures_reviewed_python_registry_bundle() -> None:
+@pytest.mark.parametrize(
+    ("name", "semantic_sha256", "sha256", "size"),
+    [
+        (
+            "python",
+            "058375e039e6ddf738c23faa469d195dacc3751851dc02464311a22652c2e271",
+            "de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5",
+            502_198,
+        ),
+        (
+            "secrets",
+            "87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b",
+            "d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a",
+            94_643,
+        ),
+        (
+            "trailofbits",
+            "94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
+            "3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
+            195_569,
+        ),
+    ],
+)
+def test_configures_reviewed_registry_snapshot(
+    name: str, semantic_sha256: str, sha256: str, size: int
+) -> None:
     runner = _load_runner()
-
     bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
-    python = bundles["python"]
+    bundle = bundles[name]
 
-    assert python.url == "https://semgrep.dev/c/p/python"
-    assert (
-        python.semantic_sha256 == "80eeb6e5e772926c4fb1e0c6dd49def6d197305127e002a6bdb24b35bf3e6b80"
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="c030c27616041435f0c1f7bfc6d18b9241401c3c1936ad7380229b692c8473d6",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="449934d9be1f6f2ea91ff5175a8629cc93c38f8f52ca3da44e43089bcca44260",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="0b7d2717d79da2ce99bffa329d954833e2ecc034b7ff86f0932a38ce416b5946",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="e9f042a0c53c33e67ad43288b548a52a20b23dc3f0feea7bfffaba17cc63949a",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="2fd889488c318acc98cdf84fc3736ed5b9b20c68ca5ea619af35cac716f961e7",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="5bf4a3a5080baa129b0080d2deb1edbe140464a48bced044901c69fdf581d71d",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="babf8c5994a3074d041077174ae3f5d14a88e807084ece1a53a29c7cbbdf5851",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="18d4f94e9cbd3944c752dcad2d9b643b562d37abe12705c61176fd9a7cc1f0c1",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="a8a155d58dc346b4358e9f9e347d93c0869a542304a216b9f63701ea1d737b12",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="c8a84a1877ad8c93e189377b80c798ed27aec80ee85a977409af05a526c54b4b",
-            size=487_962,
-        )
-        in python.revisions
-    )
-    assert (
-        runner.RuleRevision(
-            sha256="7476830701b31be1c4a76432e23950b86ec76635888103877ca24708e7c01c76",
-            size=487_962,
-        )
-        in python.revisions
-    )
+    assert bundle.url == f"https://semgrep.dev/c/p/{name}"
+    assert bundle.semantic_sha256 == semantic_sha256
+    assert bundle.revisions == (runner.RuleRevision(sha256=sha256, size=size),)
 
 
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:
@@ -408,16 +354,6 @@ def test_configures_reviewed_trailofbits_registry_bundle() -> None:
     trailofbits = bundles["trailofbits"]
 
     assert trailofbits.url == "https://semgrep.dev/c/p/trailofbits"
-    assert (
-        trailofbits.semantic_sha256
-        == "8b1a7d47796f1d002fa6ca1a960efefaf775b2d0cd864a413aa23a5210ed59ea"
-    )
-    assert trailofbits.revisions == (
-        runner.RuleRevision(
-            sha256="d734464c3a746401a5293d44bec10a2be2bf718814b52ef3bd0f284f52863343",
-            size=185_537,
-        ),
-    )
     assert len(trailofbits.include_rule_ids) == 10
     assert all(
         rule_id.startswith("trailofbits.generic.") for rule_id in trailofbits.include_rule_ids

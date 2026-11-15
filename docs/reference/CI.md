@@ -13,10 +13,12 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   Ruff check and format-check behavior and exact-commit
   `astral-sh/uv-pre-commit` for `uv lock --check`; the Ruff hooks do not apply
   fixes;
-- the pre-push hook runs `make pre-push`, which expands to the canonical test,
-  lint, type-check, dependency-audit, and Semgrep gates. It also runs
-  `make workflow-audit` when a pushed commit changes `.github/workflows/` or
-  `.github/actions/`.
+- the pre-push hook runs `make pre-push`: a committed-tree Trivy scan, a
+  branch-level test-development check, and the canonical lock, test, lint,
+  type-check, dependency-audit, and Semgrep gates. Changed desktop, workflow,
+  and container inputs select their additional stack checks. See the
+  [local push gate](LOCAL_PUSH_GATE.md) for installation, prerequisites,
+  failure recovery, and validation limits.
 
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
 0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
@@ -28,7 +30,7 @@ desktop TypeScript/JavaScript tree.
 `make setup` first runs the
 [verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
 repository-local `.tools/uv/uv` binary to install the locked environment
-without changing Git hooks. It requires a system-supplied Python 3.12-3.14;
+without changing Git hooks. It requires a system-supplied Python 3.12-3.15;
 `.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
 downloads. Setup runs the exact full-profile command
 `uv sync --locked --all-extras --all-groups`. The bootstrap refuses an
@@ -54,8 +56,10 @@ The complete `uv.lock` covers every application extra and repository tool
 group. Full local setup installs that complete graph, including the release
 verifier. Purpose-specific workflow jobs pass `--no-default-groups` and
 synchronize only the profile they execute. The lock consistency job installs no
-group and calls `make lock-check`, whose canonical command is
-`uv lock --check`.
+group and invokes `uv lock --check` directly. Hosted quality, security, and
+packaging gates likewise spell out their canonical commands in the workflow,
+so a candidate change to the Makefile cannot replace a required check with a
+no-op. The Make targets remain the supported local developer interfaces.
 
 | Work | Locked environment |
 |---|---|
@@ -139,8 +143,8 @@ have the same command semantics regardless of the caller's interactive shell.
 
 | Event | Required work |
 |---|---|
-| Pull request | An early `make lock-check` gate; tests on Python 3.12; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 wheel and source-distribution smoke tests; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
-| Push to `main` | The pull-request coverage plus all nine Ubuntu/macOS/Windows and Python 3.12-3.14 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
+| Pull request | An early `uv lock --check` gate; tests on Python 3.12 and 3.15; one Python 3.12 quality job including `make code-docs-check`; Semgrep; a commit-range secret scan; deterministic documentation-screenshot drift; package build; Ubuntu/Python 3.12 and 3.15 wheel smoke tests; a Python 3.12 source-distribution smoke test; and native Linux amd64/arm64 container-policy and lifecycle rows when container-owned paths change. Dependency audit and SBOM generation run only when `pyproject.toml` or `uv.lock` changes. Workflow auditing runs when a workflow or local composite action changes. |
+| Push to `main` | The pull-request coverage plus all twelve Ubuntu/macOS/Windows and Python 3.12-3.15 wheel-install combinations, dependency audit, SBOM generation, and workflow auditing. |
 | Weekly schedule or manual dispatch | The complete `main` gate set. The secret scanner checks the current `main` candidate tree from a shallow checkout. |
 | Release readiness | The exhaustive release-candidate gate, including declaration documentation on the Python 3.12 quality row. Its secret scanner checks the exact frozen candidate tree, and its evidence binds the complete quality, security, compatibility, and artifact results to one exact commit. |
 | Release tag | Verifies the exact approved readiness evidence, then deterministically rebuilds the distributions and SBOM and compares distribution hashes. It does not rerun unchanged pytest, lint, type, dependency-audit, or Semgrep work. |
@@ -305,6 +309,13 @@ Every upstream input is pinned by exact bytes and semantic content, and rules
 with identical IDs or matching logic are deduplicated before Semgrep runs. A
 changed archive, missing reviewed rule, conflicting rule ID, or unreviewed
 redirect fails closed.
+
+The registry snapshots contain 151 Python rules and 52 secrets rules, plus the
+ten selected Trail of Bits rules below. When registry content changes, review
+the downloaded rules and selected IDs, update both the byte and semantic pins
+in `scripts/run_pinned_semgrep.py` and its contract tests, and run the security
+gate before committing. Remove obsolete byte encodings when the semantic digest
+changes; a previous encoding cannot satisfy the new semantic contract.
 
 The reviewed third-party additions deliberately cover only current repository
 surfaces:

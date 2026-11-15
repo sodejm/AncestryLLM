@@ -107,6 +107,55 @@ const chatClosure = {
   session_id: chatSessionId,
   closed: true as const,
 }
+const providerRevision = '0'.repeat(64)
+const settings = { schema_version: 1 as const, revision: 0, fields: [] }
+const updatedSettings = { ...settings, revision: 1 }
+const providerConfiguration = {
+  schema_version: 1 as const,
+  revision: providerRevision,
+  profiles: [],
+  consents: [],
+}
+const consentPreview = {
+  schema_version: 1 as const,
+  provider_profile_name: 'local-ollama',
+  provider_id: 'ollama' as const,
+  modules: ['search'],
+  purposes: ['genealogy'],
+  data_classes: ['deceased_person'] as const,
+  models: ['llama3.2'],
+  max_cost_usd: null,
+  retain_payloads: false,
+  warning_codes: [],
+}
+const settingsUpdate = { schema_version: 1 as const, expected_revision: 0, changes: { 'providers.default': 'none' } }
+const secretReference = { reference: 'openai.api_key' as const }
+const secretUpdate = { ...secretReference, value: 'test-only-secret' }
+const providerProfile = {
+  schema_version: 1 as const,
+  expected_revision: providerRevision,
+  name: 'local-ollama',
+  provider_id: 'ollama' as const,
+  model: 'llama3.2',
+  endpoint: 'http://127.0.0.1:11434',
+  endpoint_identity_sha256: 'a'.repeat(64),
+}
+const consentCreate = { schema_version: 1 as const, expected_revision: providerRevision, name: 'local-analysis', preview: consentPreview }
+const chatRunId = `run_${'d'.repeat(32)}`
+const activeChatRun = {
+  schema_version: 1 as const,
+  session_id: chatSessionId,
+  run_id: chatRunId,
+  state: 'active' as const,
+  latest_sequence: 1,
+  terminal: false,
+}
+const interruptedChatRun = {
+  ...activeChatRun,
+  state: 'interrupted' as const,
+  latest_sequence: 2,
+  terminal: true,
+}
 
 const sidecarClient = (
   overrides: Partial<SidecarClient> = {},
@@ -175,6 +224,39 @@ describe('desktop control bridge', () => {
 
     await expect(bridge.retrySidecar()).resolves.toEqual({ ok: true, protocolVersion: '1', data: { state: 'degraded', failure: 'crash_loop', automaticRestartsRemaining: 0, manualRetriesRemaining: 0, report: null } })
     expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it('keeps lifecycle diagnostics local until ready and sanitizes a failed startup report fetch', async () => {
+    const getStartupDiagnostics = vi.fn().mockRejectedValue(new Error('Bearer private-secret failed at port 54321'))
+    const diagnostics = vi.fn()
+      .mockReturnValueOnce({ state: 'starting' as const, failure: null, automaticRestartsRemaining: 2, manualRetriesRemaining: 1 })
+      .mockReturnValue({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 2, manualRetriesRemaining: 1 })
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics, retry: vi.fn() },
+      sidecarClient: sidecarClient({ getStartupDiagnostics }),
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.getStartupDiagnostics()).resolves.toMatchObject({
+      ok: true,
+      data: { state: 'starting', failure: null, report: null },
+    })
+    expect(getStartupDiagnostics).not.toHaveBeenCalled()
+
+    const degraded = await bridge.getStartupDiagnostics()
+    expect(degraded).toEqual({
+      ok: true,
+      protocolVersion: '1',
+      data: {
+        state: 'degraded',
+        failure: 'startup_failed',
+        automaticRestartsRemaining: 2,
+        manualRetriesRemaining: 1,
+        report: null,
+      },
+    })
+    expect(JSON.stringify(degraded)).not.toMatch(/private-secret|54321|Bearer/i)
   })
 
   it('maps an unavailable sidecar to a stable serializable error', async () => {
@@ -284,6 +366,117 @@ describe('desktop control bridge', () => {
     expect(client.getChatCapability).toHaveBeenCalledWith(signal)
     expect(client.createChatSession).toHaveBeenCalledWith(chatCreateRequest, signal)
     expect(client.closeChatSession).toHaveBeenCalledWith(chatCloseRequest, signal)
+  })
+
+  it('routes reviewed settings, secrets, provider profiles, and consent operations without reshaping them', async () => {
+    const endpointRequest = { schema_version: 1 as const, provider_id: 'ollama' as const, endpoint: providerProfile.endpoint }
+    const endpointValidation = { schema_version: 1 as const, status: 'reachable' as const, endpoint_kind: 'loopback' as const, http_status: 200, destination_digest: 'b'.repeat(64) }
+    const consentRequest = {
+      schema_version: 1 as const,
+      provider_profile_name: providerProfile.name,
+      modules: consentPreview.modules,
+      purposes: consentPreview.purposes,
+      data_classes: consentPreview.data_classes,
+      models: consentPreview.models,
+      max_cost_usd: null,
+      retain_payloads: false,
+    }
+    const consentRevoke = { schema_version: 1 as const, expected_revision: providerRevision, name: consentCreate.name }
+    const client = sidecarClient({
+      getSettings: vi.fn().mockResolvedValue(settings),
+      updateSettings: vi.fn().mockResolvedValue(updatedSettings),
+      getSecretStatus: vi.fn().mockResolvedValue({ ...secretReference, status: 'missing' }),
+      setSecret: vi.fn().mockResolvedValue({ ...secretReference, status: 'present' }),
+      deleteSecret: vi.fn().mockResolvedValue({ ...secretReference, status: 'missing' }),
+      getProviderConfiguration: vi.fn().mockResolvedValue(providerConfiguration),
+      createProviderProfile: vi.fn().mockResolvedValue(providerConfiguration),
+      validateProviderEndpoint: vi.fn().mockResolvedValue(endpointValidation),
+      previewConsent: vi.fn().mockResolvedValue(consentPreview),
+      createConsent: vi.fn().mockResolvedValue(providerConfiguration),
+      revokeConsent: vi.fn().mockResolvedValue(providerConfiguration),
+    })
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+    const signal = new AbortController().signal
+
+    await expect(bridge.getSettings(signal)).resolves.toMatchObject({ ok: true, data: settings })
+    await expect(bridge.updateSettings(settingsUpdate, signal)).resolves.toMatchObject({ ok: true, data: updatedSettings })
+    await expect(bridge.getSecretStatus(secretReference, signal)).resolves.toMatchObject({ ok: true, data: { status: 'missing' } })
+    await expect(bridge.setSecret(secretUpdate, signal)).resolves.toMatchObject({ ok: true, data: { status: 'present' } })
+    await expect(bridge.deleteSecret(secretReference, signal)).resolves.toMatchObject({ ok: true, data: { status: 'missing' } })
+    await expect(bridge.getProviderConfiguration(signal)).resolves.toMatchObject({ ok: true, data: providerConfiguration })
+    await expect(bridge.createProviderProfile(providerProfile, signal)).resolves.toMatchObject({ ok: true, data: providerConfiguration })
+    await expect(bridge.validateProviderEndpoint(endpointRequest, signal)).resolves.toMatchObject({ ok: true, data: endpointValidation })
+    await expect(bridge.previewConsent(consentRequest, signal)).resolves.toMatchObject({ ok: true, data: consentPreview })
+    await expect(bridge.createConsent(consentCreate, signal)).resolves.toMatchObject({ ok: true, data: providerConfiguration })
+    await expect(bridge.revokeConsent(consentRevoke, signal)).resolves.toMatchObject({ ok: true, data: providerConfiguration })
+
+    expect(client.updateSettings).toHaveBeenCalledWith(settingsUpdate, signal)
+    expect(client.setSecret).toHaveBeenCalledWith(secretUpdate, signal)
+    expect(client.createProviderProfile).toHaveBeenCalledWith(providerProfile, signal)
+    expect(client.validateProviderEndpoint).toHaveBeenCalledWith(endpointRequest, signal)
+    expect(client.createConsent).toHaveBeenCalledWith(consentCreate, signal)
+    expect(client.revokeConsent).toHaveBeenCalledWith(consentRevoke, signal)
+  })
+
+  it('maps rejected settings, environment secrets, endpoints, and stale consent previews to stable renderer codes', async () => {
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: sidecarClient({
+        getSettings: vi.fn().mockRejectedValue(new SidecarClientError('settings_invalid')),
+        updateSettings: vi.fn().mockRejectedValue(new SidecarClientError('settings_conflict')),
+        getSecretStatus: vi.fn().mockRejectedValue(new SidecarClientError('secret_invalid')),
+        setSecret: vi.fn().mockRejectedValue(new SidecarClientError('secret_environment_managed')),
+        createProviderProfile: vi.fn().mockRejectedValue(new SidecarClientError('endpoint_rejected')),
+        createConsent: vi.fn().mockRejectedValue(new SidecarClientError('consent_preview_stale')),
+      }),
+      preferences: new MemoryPreferencesStore(),
+    })
+
+    await expect(bridge.getSettings()).resolves.toMatchObject({ ok: false, error: { code: 'SETTINGS_INVALID' } })
+    await expect(bridge.updateSettings(settingsUpdate)).resolves.toMatchObject({ ok: false, error: { code: 'SETTINGS_CONFLICT' } })
+    await expect(bridge.getSecretStatus(secretReference)).resolves.toMatchObject({ ok: false, error: { code: 'SECRET_INVALID' } })
+    await expect(bridge.setSecret(secretUpdate)).resolves.toMatchObject({ ok: false, error: { code: 'SECRET_ENVIRONMENT_MANAGED' } })
+    await expect(bridge.createProviderProfile(providerProfile)).resolves.toMatchObject({ ok: false, error: { code: 'ENDPOINT_REJECTED' } })
+    await expect(bridge.createConsent(consentCreate)).resolves.toMatchObject({ ok: false, error: { code: 'CONSENT_PREVIEW_STALE' } })
+  })
+
+  it('routes transient chat stream start, cancellation, and event delivery through the sidecar client', async () => {
+    const startRequest = {
+      schema_version: 1 as const,
+      session_id: chatSessionId,
+      message: 'Summarize the fictional family.',
+      max_output_tokens: 256,
+      temperature: 0.2,
+      timeout_seconds: 30,
+      max_safe_retries: 1,
+    }
+    const cancelRequest = { schema_version: 1 as const, session_id: chatSessionId, run_id: chatRunId }
+    const eventRequest = { schema_version: 1 as const, session_id: chatSessionId, run_id: chatRunId, after: 1 }
+    const listener = vi.fn()
+    const client = sidecarClient({
+      startChatStream: vi.fn().mockResolvedValue(activeChatRun),
+      cancelChatStream: vi.fn().mockResolvedValue(interruptedChatRun),
+    })
+    const bridge = createDesktopControlBridge({
+      appInfo: { applicationName: 'AncestryLLM', appVersion: '0.5.0-dev', buildChannel: 'development' },
+      supervisor: { diagnostics: () => ({ state: 'ready' as const, failure: null, automaticRestartsRemaining: 0, manualRetriesRemaining: 0 }), retry: vi.fn() },
+      sidecarClient: client,
+      preferences: new MemoryPreferencesStore(),
+    })
+    const signal = new AbortController().signal
+
+    await expect(bridge.startChatStream(startRequest, signal)).resolves.toMatchObject({ ok: true, data: activeChatRun })
+    await expect(bridge.cancelChatStream(cancelRequest, signal)).resolves.toMatchObject({ ok: true, data: interruptedChatRun })
+    await expect(bridge.streamChatEvents(eventRequest, listener, signal)).resolves.toBeUndefined()
+    expect(client.startChatStream).toHaveBeenCalledWith(startRequest, signal)
+    expect(client.cancelChatStream).toHaveBeenCalledWith(cancelRequest, signal)
+    expect(client.streamChatEvents).toHaveBeenCalledWith(eventRequest, listener, signal)
   })
 
   it.each([
