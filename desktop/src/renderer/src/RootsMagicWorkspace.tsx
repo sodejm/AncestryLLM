@@ -71,6 +71,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   const [generations, setGenerations] = useState('4')
   const [living, setLiving] = useState<RootsMagicLivingPolicy>('exclude')
   const [confirmed, setConfirmed] = useState(false)
+  const [pendingExport, setPendingExport] = useState<{ job: JobSnapshot; rootLabel: string } | null>(null)
   const [receipt, setReceipt] = useState<(RootsMagicExportReceipt & { rootLabel: string }) | null>(null)
   const [status, setStatus] = useState('Choose a RootsMagic source to begin.')
   const [failure, setFailure] = useState<string | null>(null)
@@ -174,6 +175,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     snapshot: JobSnapshot,
     expected: RootsMagicJobResult['kind'],
     isCurrent: () => boolean = () => true,
+    onJobTerminalFailure?: () => void,
   ): Promise<RootsMagicJobResult | null> {
     let current = snapshot
     while (mounted.current && isCurrent()) {
@@ -189,6 +191,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
         return result.data
       }
       if (current.state === 'failed' || current.state === 'cancelled') {
+        onJobTerminalFailure?.()
         fail(current.error_code ?? 'ROOTSMAGIC_RESULT_UNAVAILABLE')
         return null
       }
@@ -220,6 +223,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
     setQuery(null)
     setSelectedPerson(null)
     setOutput(null)
+    setPendingExport(null)
     setReceipt(null)
     setConfirmed(false)
     setStatus('Choose a RootsMagic source to begin.')
@@ -347,7 +351,7 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   }
 
   async function chooseOutput() {
-    if (!source || !selectedPerson || outputPending || exportPending || discarding) return
+    if (!source || !selectedPerson || outputPending || exportPending || pendingExport !== null || discarding) return
     const operationSourceGeneration = sourceGeneration.current
     const operationQueryGeneration = queryGeneration.current
     setOutputPending(true)
@@ -375,13 +379,14 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
   }
 
   async function exportGedcom() {
-    if (!source || !selectedPerson || !output || !confirmed || exportPending || discarding) return
+    if (!source || !selectedPerson || !output || !confirmed || exportPending || pendingExport !== null || discarding) return
     const operationSourceGeneration = sourceGeneration.current
     const count = Number(generations)
     const generationsValue = scope === 'connected' ? null : Number.isSafeInteger(count) && count >= 1 && count <= MAX_GENERATIONS ? count : null
     if (scope !== 'connected' && generationsValue === null) { fail('ROOTSMAGIC_EXPORT_INVALID'); return }
     setExportPending(true)
     setConfirmed(false)
+    setPendingExport(null)
     setFailure(null)
     const destination = output
     setOutput(null)
@@ -394,9 +399,42 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
         if (sourceGeneration.current === operationSourceGeneration) fail(submitted.error.code)
         return
       }
-      const complete = await awaitResult(submitted.data, 'export', () => sourceGeneration.current === operationSourceGeneration)
+      if (!mounted.current || sourceGeneration.current !== operationSourceGeneration) return
+      setReceipt(null)
+      setPendingExport({ job: submitted.data, rootLabel: selectedPerson.label })
+      const complete = await awaitResult(
+        submitted.data,
+        'export',
+        () => sourceGeneration.current === operationSourceGeneration,
+        () => { if (mounted.current) setPendingExport(null) },
+      )
       if (!complete || complete.kind !== 'export' || !mounted.current || sourceGeneration.current !== operationSourceGeneration) return
+      setPendingExport(null)
       setReceipt({ ...complete.result, rootLabel: selectedPerson.label })
+      setStatus('Export complete. The new export folder is ready to reveal.')
+    } catch {
+      if (sourceGeneration.current === operationSourceGeneration) fail('ROOTSMAGIC_EXPORT_UNAVAILABLE')
+    } finally {
+      if (mounted.current && sourceGeneration.current === operationSourceGeneration) setExportPending(false)
+    }
+  }
+
+  async function retryPendingExport() {
+    if (!pendingExport || exportPending || discarding) return
+    const operationSourceGeneration = sourceGeneration.current
+    const targetExport = pendingExport
+    setExportPending(true)
+    setFailure(null)
+    try {
+      const complete = await awaitResult(
+        targetExport.job,
+        'export',
+        () => sourceGeneration.current === operationSourceGeneration,
+        () => { if (mounted.current) setPendingExport(null) },
+      )
+      if (!complete || complete.kind !== 'export' || !mounted.current || sourceGeneration.current !== operationSourceGeneration) return
+      setPendingExport(null)
+      setReceipt({ ...complete.result, rootLabel: targetExport.rootLabel })
       setStatus('Export complete. The new export folder is ready to reveal.')
     } catch {
       if (sourceGeneration.current === operationSourceGeneration) fail('ROOTSMAGIC_EXPORT_UNAVAILABLE')
@@ -507,13 +545,17 @@ export function RootsMagicWorkspace({ bridge = bridgeFromWindow() }: { bridge?: 
         <label><input type="radio" name="rootsmagic-living" checked={living === 'anonymize'}
           onChange={() => { setLiving('anonymize'); setConfirmed(false) }} />Anonymize living people</label>
       </fieldset>
-      <Button type="button" variant="quiet" disabled={!selectedPerson || outputPending || exportPending || discarding}
+      <Button type="button" variant="quiet" disabled={!selectedPerson || outputPending || exportPending || pendingExport !== null || discarding}
         onClick={() => { void chooseOutput() }}>{outputPending ? 'Choosing export folder…' : 'Choose new export folder'}</Button>
       {output && <p>New export folder: {output.display_name}</p>}
       <label><input type="checkbox" checked={confirmed} disabled={!selectedPerson || !output || exportPending || discarding}
         onChange={(event) => setConfirmed(event.currentTarget.checked)} />I confirm this export is limited to {scopeLabel(scope)}.</label>
-      <Button type="button" disabled={!selectedPerson || !output || !confirmed || exportPending || discarding}
+      <Button type="button" disabled={!selectedPerson || !output || !confirmed || exportPending || pendingExport !== null || discarding}
         onClick={() => { void exportGedcom() }}>{exportPending ? 'Exporting…' : 'Export portable GEDCOM'}</Button>
+      {pendingExport && !receipt && !exportPending && <section aria-label="Pending export receipt">
+        <p>The export was submitted, but its receipt could not be retrieved yet.</p>
+        <Button type="button" variant="quiet" disabled={discarding} onClick={() => { void retryPendingExport() }}>Retry export receipt</Button>
+      </section>}
       {receipt && <section aria-label="Export receipt"><p>Export complete using the portable GEDCOM {receipt.gedcom_version} profile.</p>
         <p>Root: {receipt.rootLabel}</p>
         <Button type="button" variant="quiet" disabled={discarding} onClick={() => { void revealArtifact() }}>Reveal export folder</Button></section>}

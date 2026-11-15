@@ -62,6 +62,11 @@ location through Main; the renderer does not receive a host path.
 If an export submission response is interrupted, the desktop attempts bounded
 recovery in the original sidecar session and preserves an accepted job's receipt,
 including one that has already published its folder.
+If receipt retrieval fails, choose **Retry export receipt** to retrieve the
+original export result without submitting another export. The pending receipt
+survives root selection changes and names the root originally exported. Choosing
+another destination stays disabled until the receipt is recovered or the source
+is discarded.
 After a failed or cancelled export, choose a new destination before retrying;
 the previous destination grant has been consumed.
 

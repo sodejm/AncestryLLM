@@ -652,4 +652,52 @@ describe('RootsMagic workspace', () => {
     expect(bridge.revokeFileGrant).toHaveBeenCalledWith(grant.grantId)
     expect(screen.queryByRole('heading', { name: 'Active source' })).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['coded failure', false], ['exception', false], ['coded failure', true], ['exception', true],
+  ] as const)('retains a submitted export job after a receipt lookup %s (previous export: %s)', async (mode, previousExport) => {
+    const exportReceipt: RootsMagicExportReceipt = {
+      schema_version: 1, artifact_id: 'art_fixture_export_0001', display_name: 'fictional-family export',
+      source_ref: sourceRef, source_fingerprint: fingerprint, profile_code: 'portable', gedcom_version: '5.5.5',
+    }
+    const bridge = bridgeFor([inspection, queryResult(people), { schema_version: 1, kind: 'export', result: exportReceipt }])
+    vi.mocked(bridge.getRootsMagicJobResult)
+      .mockReset()
+      .mockResolvedValueOnce(success(inspection))
+      .mockResolvedValueOnce(success(queryResult(people)))
+    if (previousExport) vi.mocked(bridge.getRootsMagicJobResult)
+      .mockResolvedValueOnce(success({ schema_version: 1, kind: 'export', result: exportReceipt }))
+    vi.mocked(bridge.getRootsMagicJobResult)
+      .mockImplementationOnce(async () => {
+        if (mode === 'exception') throw new Error('Transient receipt lookup failure')
+        return failure('SIDECAR_UNAVAILABLE')
+      })
+      .mockResolvedValueOnce(success({ schema_version: 1, kind: 'export', result: exportReceipt }))
+    render(<RootsMagicWorkspace bridge={bridge} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Choose RootsMagic source' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'People' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Alex Example' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export is limited to connected people/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Export portable GEDCOM' }))
+
+    if (previousExport) {
+      expect(await screen.findByRole('region', { name: 'Export receipt' })).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Choose new export folder' }))
+      await userEvent.click(screen.getByRole('checkbox', { name: /I confirm this export is limited to connected people/i }))
+      await userEvent.click(screen.getByRole('button', { name: 'Export portable GEDCOM' }))
+    }
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(`Code: ${mode === 'exception' ? 'ROOTSMAGIC_EXPORT_UNAVAILABLE' : 'SIDECAR_UNAVAILABLE'}`)
+    expect(await screen.findByRole('button', { name: 'Retry export receipt' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Select Jordan Example' }))
+    expect(screen.getByRole('button', { name: 'Choose new export folder' })).toBeDisabled()
+    const retry = await screen.findByRole('button', { name: 'Retry export receipt' })
+    await userEvent.click(retry)
+
+    expect(await screen.findByRole('region', { name: 'Export receipt' })).toHaveTextContent('Root: Alex Example')
+    expect(screen.queryByRole('button', { name: 'Retry export receipt' })).not.toBeInTheDocument()
+    expect(bridge.exportRootsMagic).toHaveBeenCalledTimes(previousExport ? 2 : 1)
+  })
 })
