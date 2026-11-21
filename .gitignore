@@ -103,3 +103,8 @@ desktop/test-results/
 desktop/playwright-report/
 desktop/sbom.cdx.json
 *.tsbuildinfo
+
+# CodeQL regression databases and generated query output
+.testproj/
+*.actual
+*.qlx

@@ -1,0 +1,12 @@
+| desktop/src/main/external-links.ts:7:9:7:33 | shell.o ... (value) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:12:9:12:44 | operati ... nation) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:17:9:17:38 | operati ... (other) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:22:9:22:44 | operati ... nation) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:27:9:27:44 | operati ... nation) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:31:9:31:38 | operati ... (value) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:54:11:54:54 | shell.o ... .test') | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:60:11:60:40 | shell.o ... alized) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:66:9:66:59 | operati ...  other) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:71:9:71:44 | operati ... nation) | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/external-links.ts:79:11:79:70 | shell.o ... .test') | Validate and affirmatively confirm this same normalized destination before opening it. |
+| desktop/src/main/index.ts:23:11:23:40 | shell.o ... alized) | Validate and affirmatively confirm this same normalized destination before opening it. |

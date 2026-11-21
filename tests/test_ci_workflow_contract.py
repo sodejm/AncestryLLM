@@ -38,7 +38,12 @@ GOVERNED_JOB_TIMEOUTS = {
         "timeout-proof-evidence": 5,
         "pr-gate": 5,
     },
-    ".github/workflows/codeql.yml": {"analyze": 30},
+    ".github/workflows/codeql.yml": {
+        "analyze": 30,
+        "analyze-desktop": 30,
+        "analyze-actions": 30,
+        "analyze-swift": 30,
+    },
     ".github/workflows/dependency-review.yml": {"dependency-review": 15},
     ".github/workflows/release-readiness.yml": {
         "validate": 10,
@@ -89,6 +94,38 @@ def _job(workflow: str, job: str) -> str:
 def _job_names(workflow: str) -> set[str]:
     jobs = workflow.split("\njobs:\n", maxsplit=1)[1]
     return set(re.findall(r"(?m)^  ([a-z][a-z0-9-]*):\n", jobs))
+
+
+def test_codeql_preserves_python_and_runs_desktop_guards_and_actions() -> None:
+    workflow = CODEQL_PATH.read_text(encoding="utf-8")
+    python = _job(workflow, "analyze")
+    assert "name: analyze Python" in python
+    assert "languages: python" in python
+    assert "queries: security-extended" in python
+    assert "category:" not in python  # Preserve the established Python upload identity.
+
+    desktop = _job(workflow, "analyze-desktop")
+    assert "languages: javascript-typescript" in desktop
+    assert "config-file: .github/codeql/javascript.yml" in desktop
+    assert "steps.init.outputs.codeql-path" in desktop
+    assert '"$CODEQL" test run .github/codeql/tests' in desktop
+    assert "category: /language:javascript-typescript" in desktop
+    actions = _job(workflow, "analyze-actions")
+    assert "languages: actions" in actions
+    assert "queries: security-extended" in actions
+    assert "category: /language:actions" in actions
+    swift = _job(workflow, "analyze-swift")
+    assert "languages: swift" in swift
+    assert "build-mode: manual" in swift
+    assert "xcrun swiftc -c scripts/export-apple-signing-identity.swift" in swift
+    assert "category: /language:swift" in swift
+    for job in (python, desktop, actions, swift):
+        assert "upload: always" in job
+
+    config = (ROOT / ".github/codeql/javascript.yml").read_text(encoding="utf-8")
+    assert "- .github/codeql/tests" in config
+    assert "- uses: security-extended" in config
+    assert "- uses: ./.github/codeql/queries" in config
 
 
 def test_pull_request_labeler_has_the_config_file_it_loads() -> None:

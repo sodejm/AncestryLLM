@@ -1,0 +1,7 @@
+# Defines the JavaScript query pack and its desktop trust-boundary regression tests.
+name: ancestryllm/desktop-guards
+version: 0.0.1
+dependencies:
+  codeql/javascript-all: "*"
+extractor: javascript
+tests: tests

@@ -1,0 +1,3 @@
+# Selects the repository's desktop IPC and external-opening security queries.
+- description: AncestryLLM desktop trust-boundary guards
+- queries: queries

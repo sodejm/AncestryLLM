@@ -1,0 +1,7 @@
+# Runs extended JavaScript analysis and desktop guards without unsafe test fixtures.
+name: JavaScript and desktop guards
+paths-ignore:
+  - .github/codeql/tests
+queries:
+  - uses: security-extended
+  - uses: ./.github/codeql/queries
