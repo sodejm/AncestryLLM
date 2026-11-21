@@ -352,6 +352,13 @@ def test_configures_reviewed_registry_snapshot(
                 size=94_643,
             ),
         )
+    if name == "trailofbits":
+        expected += (
+            runner.RuleRevision(
+                sha256="66f427bfdf1aaa1b853d3d9f941d79384ebed7c0aa4ab428bbe7326c0de4f217",
+                size=195_569,
+            ),
+        )
     assert bundle.revisions == expected
 
 

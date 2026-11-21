@@ -319,7 +319,9 @@ the downloaded rules and selected IDs, update both the byte and semantic pins
 in `scripts/run_pinned_semgrep.py` and its contract tests, and run the security
 gate before committing. For a new byte encoding of an existing ruleset,
 verify that the decoded rules produce the reviewed semantic digest before
-adding the byte digest. Remove obsolete byte encodings when the rules change.
+adding the byte digest. The secrets and Trail of Bits bundles each have two
+reviewed byte encodings with identical decoded rules. Remove obsolete byte
+encodings when the rules change.
 
 The reviewed third-party additions deliberately cover only current repository
 surfaces:

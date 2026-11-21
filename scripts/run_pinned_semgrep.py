@@ -96,6 +96,10 @@ RULE_BUNDLES = (
                 sha256="3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
                 size=195_569,
             ),
+            RuleRevision(
+                sha256="66f427bfdf1aaa1b853d3d9f941d79384ebed7c0aa4ab428bbe7326c0de4f217",
+                size=195_569,
+            ),
         ),
         include_rule_ids=(
             "trailofbits.generic.curl-insecure.curl-insecure",
