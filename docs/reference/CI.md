@@ -285,7 +285,7 @@ The main CodeQL workflow preserves its Python job and upload identity and adds
 `security-extended` JavaScript/TypeScript, Actions, and Swift analysis. The Swift
 job manually compiles `scripts/export-apple-signing-identity.swift` on macOS for
 extraction with the pinned Xcode toolchain. The JavaScript job
-also tests and runs the [desktop trust-boundary queries](../../.github/codeql/README.md)
+also tests and runs the [desktop trust-boundary queries](https://github.com/sodejm/AncestryLLM/blob/main/.github/codeql/README.md)
 for IPC authorization and destination-bound external-link confirmation. Unsafe
 query fixtures are excluded from the production database and tested separately.
 The release-readiness workflow retains its separate Python CodeQL evidence gate.
