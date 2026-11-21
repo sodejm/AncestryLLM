@@ -344,7 +344,15 @@ def test_configures_reviewed_registry_snapshot(
 
     assert bundle.url == f"https://semgrep.dev/c/p/{name}"
     assert bundle.semantic_sha256 == semantic_sha256
-    assert bundle.revisions == (runner.RuleRevision(sha256=sha256, size=size),)
+    expected = (runner.RuleRevision(sha256=sha256, size=size),)
+    if name == "secrets":
+        expected += (
+            runner.RuleRevision(
+                sha256="64bc763d47a751a9950705cad60c4d840e598409700b2f01ab0fb249f51a880c",
+                size=94_643,
+            ),
+        )
+    assert bundle.revisions == expected
 
 
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:

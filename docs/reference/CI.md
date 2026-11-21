@@ -75,7 +75,10 @@ no-op. The Make targets remain the supported local developer interfaces.
 
 The dedicated documentation-screenshot job installs the exact repository
 toolchain, then runs the canonical `make docs-screenshots-check` target under a
-pinned virtual display with fixed locale and timezone. It recaptures all
+pinned virtual display with fixed locale and timezone. The job verifies the
+installed Ubuntu package versions before capturing screenshots. When Ubuntu
+replaces a package, update the install pin, version check, and workflow contract
+test together. It recaptures all
 Electron and terminal scenarios and performs exact-byte comparison without
 changing the checkout. On failure it retains only the bounded schema-v1
 hash-drift report for seven days; screenshots, DOM text, transcripts, fixtures,
@@ -314,8 +317,9 @@ The registry snapshots contain 151 Python rules and 52 secrets rules, plus the
 ten selected Trail of Bits rules below. When registry content changes, review
 the downloaded rules and selected IDs, update both the byte and semantic pins
 in `scripts/run_pinned_semgrep.py` and its contract tests, and run the security
-gate before committing. Remove obsolete byte encodings when the semantic digest
-changes; a previous encoding cannot satisfy the new semantic contract.
+gate before committing. For a new byte encoding of an existing ruleset,
+verify that the decoded rules produce the reviewed semantic digest before
+adding the byte digest. Remove obsolete byte encodings when the rules change.
 
 The reviewed third-party additions deliberately cover only current repository
 surfaces:
