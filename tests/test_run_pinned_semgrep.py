@@ -313,30 +313,30 @@ def test_resolves_semgrep_beside_the_script_interpreter(
 
 
 @pytest.mark.parametrize(
-    ("name", "semantic_sha256", "sha256", "size"),
+    ("name", "semantic_sha256", "revisions"),
     [
         (
             "python",
             "058375e039e6ddf738c23faa469d195dacc3751851dc02464311a22652c2e271",
-            "de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5",
-            502_198,
+            (("de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5", 502_198),),
         ),
         (
             "secrets",
             "87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b",
-            "d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a",
-            94_643,
+            (
+                ("d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a", 94_643),
+                ("64bc763d47a751a9950705cad60c4d840e598409700b2f01ab0fb249f51a880c", 94_643),
+            ),
         ),
         (
             "trailofbits",
             "94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
-            "3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
-            195_569,
+            (("3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab", 195_569),),
         ),
     ],
 )
 def test_configures_reviewed_registry_snapshot(
-    name: str, semantic_sha256: str, sha256: str, size: int
+    name: str, semantic_sha256: str, revisions: tuple[tuple[str, int], ...]
 ) -> None:
     runner = _load_runner()
     bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
@@ -344,7 +344,9 @@ def test_configures_reviewed_registry_snapshot(
 
     assert bundle.url == f"https://semgrep.dev/c/p/{name}"
     assert bundle.semantic_sha256 == semantic_sha256
-    assert bundle.revisions == (runner.RuleRevision(sha256=sha256, size=size),)
+    assert bundle.revisions == tuple(
+        runner.RuleRevision(sha256=sha256, size=size) for sha256, size in revisions
+    )
 
 
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:
