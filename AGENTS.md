@@ -45,6 +45,31 @@
 - Use the OS keyring for secrets; environment injection is for headless/CI use. Do not auto-load `.env`.
 - Cloud calls require explicit provider selection and user consent.
 
+## Tracking work and capability gaps
+
+- At task start, check the current checkout for a configured Squad team. When
+  present, use its documented entry point and routing automatically for work
+  within its scope and permissions. If the client cannot invoke Squad, report
+  the limitation and follow any documented fallback.
+- Commit each substantial, coherent increment after its relevant checks. At each
+  checkpoint, update the linked issue with the commit SHA, checks run and their
+  results, and remaining work. Apply the same practice to repository-local tickets.
+- Update affected docs and examples in the same commit as the feature change.
+  Limit capability claims to the versions, environments and behavior supported
+  by evidence. Identify planned work, simulated results and unverified behavior.
+- When evidence shows a promised capability is missing or a published claim is
+  inaccurate, correct the claim and search for an existing bug. Update the match
+  or file a bug in this repository when GitHub Issues is enabled. If Issues is
+  disabled or the project has no remote, create a tracked Markdown ticket in the
+  existing ticket directory, or `docs/issues/` if none exists. Record expected
+  and observed behavior, affected revision, sanitized evidence and a verifiable
+  closure condition. Use the project's private channel for sensitive evidence.
+- When you repeat a check with stable inputs and an objective result, look for
+  an existing command to reuse or extend. If none fits, add a small deterministic
+  helper in the repository, exercise its success and failure paths, and document
+  its invocation in the relevant skill or contributor guide. Use the helper on
+  subsequent runs and retain human judgment for interpretive or approval steps.
+
 ## Meaningful change standard
 
 Do not make churn-only edits.
