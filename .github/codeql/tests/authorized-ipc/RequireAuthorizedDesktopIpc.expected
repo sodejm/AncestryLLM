@@ -1,0 +1,7 @@
+| desktop/src/main/ipc-handlers.ts:5:10:5:24 | schedule(event) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:9:10:9:24 | schedule(event) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:14:10:14:24 | schedule(state) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:19:10:19:24 | schedule(state) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:22:3:22:40 | fileGra ... (event) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:49:10:49:24 | schedule(state) | Authorize this IPC event and require a successful result before privileged work. |
+| desktop/src/main/ipc-handlers.ts:54:10:54:24 | schedule(state) | Authorize this IPC event and require a successful result before privileged work. |

@@ -1,0 +1,6 @@
+name: JavaScript and desktop guards
+paths-ignore:
+  - .github/codeql/tests
+queries:
+  - uses: security-extended
+  - uses: ./.github/codeql/queries

@@ -11,6 +11,10 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,10 +32,83 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: python
           queries: security-extended
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
+          upload: always
+
+  analyze-desktop:
+    name: analyze JavaScript and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read # required by CodeQL for workflow metadata
+      contents: read # required to analyze repository contents
+      security-events: write # required to upload CodeQL results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        id: init
+        with:
+          languages: javascript-typescript
+          config-file: .github/codeql/javascript.yml
+      - name: Test desktop security guard queries
+        env:
+          CODEQL: ${{ steps.init.outputs.codeql-path }}
+        run: '"$CODEQL" test run .github/codeql/tests --threads=2 --ram=4096'
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:javascript-typescript
+          upload: always
+
+  analyze-actions:
+    name: analyze Actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read # required by CodeQL for workflow metadata
+      contents: read # required to analyze repository contents
+      security-events: write # required to upload CodeQL results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: actions
+          queries: security-extended
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:actions
+          upload: always
+
+  analyze-swift:
+    name: analyze Swift signing helper
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      actions: read # required by CodeQL for workflow metadata
+      contents: read # required to analyze repository contents
+      security-events: write # required to upload CodeQL results
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: swift
+          build-mode: manual
+          queries: security-extended
+      - name: Compile the signing helper for extraction
+        run: xcrun swiftc -c scripts/export-apple-signing-identity.swift -o "$RUNNER_TEMP/signing-helper.o"
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:swift
           upload: always
