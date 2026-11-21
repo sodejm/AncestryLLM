@@ -251,7 +251,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
     assert 'version: "11.9.0"' in job
     for package in (
-        "locales=2.39-0ubuntu8.9",
+        "locales=2.39-0ubuntu8.12",
         "xauth=1:1.1.2-1build1",
         "xvfb=2:21.1.12-1ubuntu1.9",
     ):
@@ -263,7 +263,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
 
     assert desktop_package["engines"] == {"node": "26.5.0", "pnpm": "11.9.0"}
     assert desktop_package["packageManager"] == "pnpm@11.9.0"
-    assert desktop_package["devDependencies"]["electron"] == "41.10.6"
+    assert desktop_package["devDependencies"]["electron"] == "42.11.16"
     assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
     assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"

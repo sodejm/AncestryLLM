@@ -23,12 +23,13 @@ pnpm --dir desktop test:visual
 `desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
 locked Electron package, and fails with a stable error if its platform runtime
 is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 41.10.6 remains
+shared pnpm store contains stale build-script state. Electron 42.11.16 remains
 exactly pinned. The frozen lockfile scopes reviewed security replacements to
 the affected installer and test-tool dependency paths, including the
 Electron-maintained `@electron-internal/extract-zip` 1.0.5 fork; no runtime
 patch is required for the current Electron installer. WebdriverIO uses Mocha
-11.8.0 so its Chokidar 4 watcher retains Mocha's supported glob handling. The
+11.8.0 with Chokidar 4. The lockfile selects glob 14.0.6 and minimatch
+11.0.9 for affected ranges used by packaging and test discovery. The
 unused optional `@electron/get` legacy proxy agent is removed because it has
 no patched release. Installation and packaging fail explicitly when
 `ELECTRON_GET_USE_PROXY` is nonempty instead of silently ignoring that requested
