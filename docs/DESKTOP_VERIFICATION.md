@@ -35,7 +35,7 @@ evidence before a packaged application can claim this Chat destination.
 The desktop portion of `config/release-quality-policy-v1.json` is the only
 release-quality authority for tool versions, coverage, receipt gates,
 performance budgets, and diagnostics policy. Hosted verification uses Python
-3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 4.1.11, and WebdriverIO 9.32.0;
+3.12, Node.js 26.5.0, pnpm 11.9.0, Vitest 4.1.12, and WebdriverIO 9.32.0;
 `desktop/scripts/verify-release-toolchain.mjs` rejects drift before evidence is
 accepted.
 
