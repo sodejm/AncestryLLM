@@ -623,7 +623,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.deepEqual(aggregate.toolVersions, {
     python: '3.12',
     node: '26.5.0',
-    pnpm: '11.9.0',
+    pnpm: '11.11.0',
     vitest: '4.1.11',
     webdriverio: '9.32.0',
   })

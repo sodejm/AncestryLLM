@@ -7,11 +7,11 @@ The supported 0.6.0 product surface is a one-time local welcome on Home, a tempo
 
 ## Reproducible setup and gates
 
-From the repository root, use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
+From the repository root, use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.11.0`:
 
 ```sh
 corepack enable
-corepack prepare pnpm@11.9.0 --activate
+corepack prepare pnpm@11.11.0 --activate
 make desktop-install
 make desktop-check
 make desktop-e2e
