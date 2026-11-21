@@ -209,7 +209,7 @@ describe('accessible desktop shell', () => {
     expect(await screen.findByRole('heading', { name: 'Home' })).toHaveFocus()
     expect(updatePreferences).not.toHaveBeenCalled()
   })
-  it('supports keyboard navigation across Home, Chat, Tasks, GEDCOM, Diagnostics, and Settings', async () => {
+  it('supports keyboard navigation across Home, Chat, Tasks, GEDCOM, RootsMagic, Diagnostics, and Settings', async () => {
     const bridge = await createCompletedBridge()
     Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
     render(<App />)
@@ -227,12 +227,77 @@ describe('accessible desktop shell', () => {
     await userEvent.keyboard('{Enter}')
     expect(await screen.findByRole('heading', { level: 1, name: 'GEDCOM' })).toHaveFocus()
     expect(screen.getByRole('button', { name: 'Add GEDCOM source' })).toBeVisible()
+    const rootsMagic = screen.getByRole('link', { name: 'RootsMagic' })
+    rootsMagic.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByRole('heading', { level: 1, name: 'RootsMagic' })).toHaveFocus()
+    expect(screen.getByRole('heading', { level: 2, name: 'RootsMagic workspace' })).toBeVisible()
     const diagnostics = screen.getByRole('link', { name: 'Diagnostics' })
     diagnostics.focus()
     await userEvent.keyboard('{Enter}')
     expect(await screen.findByRole('heading', { name: 'Diagnostics' })).toHaveFocus()
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByRole('heading', { name: 'Settings' })).toHaveFocus()
+  })
+
+  it('keeps an active RootsMagic source and query state while visiting Tasks', async () => {
+    const base = await createCompletedBridge()
+    const sourceRef = 'a'.repeat(64)
+    const inspected = {
+      schema_version: 1, kind: 'inspection', result: {
+        schema_version: 1, source_ref: sourceRef, friendly_name: 'Fictional Family',
+        fingerprint: 'b'.repeat(64), detected_version: 'unknown', grant_status_code: 'active', immutable: true,
+      },
+    }
+    const bridge: AncestryBridge = {
+      ...base,
+      requestOpenFileGrant: vi.fn().mockResolvedValue({ ok: true, protocolVersion: '1', data: {
+        grantId: `grt_${'c'.repeat(64)}`, purpose: 'rootsmagic-read', access: 'read',
+        scope: { originatingWindow: 'requesting-window', lifetime: 'app-session', redemption: 'single-use' },
+        metadata: { displayName: 'fictional.rmtree', format: 'rootsmagic', sizeBytes: 256,
+          validation: 'validated-input' },
+      } }),
+      inspectRootsMagicSource: vi.fn().mockResolvedValue({ ok: true, protocolVersion: '1', data: {
+        schema_version: 1, sequence: 1, job_id: 'job_fixture_0001', name: 'Inspect RootsMagic',
+        state: 'completed', submitted_at: '2026-09-21T12:00:00+00:00', started_at: null,
+        finished_at: '2026-09-21T12:00:01+00:00', resource_refs: [], artifact: null,
+        outcome_summary: null, next_action: null, error_code: null, error_message: null,
+        error_remediation: null, progress: null, cancellation_requested_at: null,
+        cancellation_deferred_by: null,
+      } }),
+      getRootsMagicJobResult: vi.fn().mockResolvedValue({ ok: true, protocolVersion: '1', data: inspected }),
+      discardRootsMagicSource: vi.fn(base.discardRootsMagicSource),
+    }
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'RootsMagic' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Choose RootsMagic source' }))
+    await screen.findByText('Fictional Family')
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find people by name' }), 'Alex')
+    await userEvent.click(screen.getByRole('link', { name: 'Tasks' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible()
+    await userEvent.click(screen.getByRole('link', { name: 'RootsMagic' }))
+    expect(screen.getByRole('searchbox', { name: 'Find people by name' })).toHaveValue('Alex')
+    expect(bridge.discardRootsMagicSource).not.toHaveBeenCalled()
+  })
+
+  it('opens RootsMagic through the native preset endpoint when the command manifest is empty', async () => {
+    const base = await createCompletedBridge()
+    const capabilities = await base.getCapabilities()
+    if (!capabilities.ok) throw new Error('The successful bridge fixture must provide capabilities.')
+    const getCapabilities = vi.fn().mockResolvedValue({
+      ...capabilities,
+      data: { ...capabilities.data, modules: [] },
+    })
+    const getRootsMagicPresets = vi.fn(base.getRootsMagicPresets)
+    const bridge: AncestryBridge = { ...base, getCapabilities, getRootsMagicPresets }
+    window.location.hash = '#/rootsmagic'
+    Object.defineProperty(window, 'ancestry', { configurable: true, value: bridge })
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'RootsMagic workspace' })).toBeVisible()
+    expect(getRootsMagicPresets).toHaveBeenCalledTimes(1)
   })
 
   it('skips directly to the workspace without changing the current route', async () => {
@@ -769,6 +834,7 @@ describe('accessible desktop shell', () => {
   it('keeps a degraded first run read-only and renders only sanitized component remediation', async () => {
     const base = createMockAncestryBridge('success')
     const getCapabilities = vi.fn(base.getCapabilities)
+    const getRootsMagicPresets = vi.fn(base.getRootsMagicPresets)
     const updatePreferences = vi.fn(base.updatePreferences)
     const previewLocalRuntime = vi.fn(base.previewLocalRuntime)
     const applyLocalRuntime = vi.fn(base.applyLocalRuntime)
@@ -801,6 +867,7 @@ describe('accessible desktop shell', () => {
     const bridge: AncestryBridge = {
       ...base,
       getCapabilities,
+      getRootsMagicPresets,
       getStartupDiagnostics: vi.fn().mockResolvedValue(degraded),
       updatePreferences,
       previewLocalRuntime,
@@ -817,6 +884,7 @@ describe('accessible desktop shell', () => {
     expect(screen.getByText('Repair or restore config.toml, then retry startup diagnostics.')).toBeVisible()
     expect(updatePreferences).not.toHaveBeenCalled()
     expect(getCapabilities).not.toHaveBeenCalled()
+    expect(getRootsMagicPresets).not.toHaveBeenCalled()
 
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByText('Settings are read-only while startup diagnostics are degraded.')).toBeVisible()

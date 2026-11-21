@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 import errno
 import hashlib
+import logging
 import math
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -87,6 +89,20 @@ _ARCHIVE_SIGNATURES = (
 _READ_CHUNK_BYTES = 1024 * 1024
 _SQLITE_MAX_COLUMNS = 32_767
 _SQLITE_VARINT_MAX_BYTES = 9
+_SCHEMA_FAILURE_TYPES = frozenset(
+    {
+        "AttributeError",
+        "ImportError",
+        "ModuleNotFoundError",
+        "TypeError",
+        "ValueError",
+        "KeyError",
+        "IndexError",
+        "RuntimeError",
+        "RecursionError",
+        "OSError",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -955,7 +971,9 @@ class RootsMagicReader:
                 uri=True,
                 timeout=min(self.timeout_seconds, 30.0),
             )
-            connection.enable_load_extension(False)
+            disable_extensions = getattr(connection, "enable_load_extension", None)
+            if callable(disable_extensions):
+                disable_extensions(False)
             connection.execute("PRAGMA trusted_schema = OFF")
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
             if journal_mode is None or str(journal_mode[0]).casefold() != "wal":
@@ -1260,7 +1278,9 @@ class RootsMagicReader:
                 connection.execute("PRAGMA query_only = ON")
                 connection.execute("PRAGMA trusted_schema = OFF")
                 connection.execute("BEGIN")
-                connection.enable_load_extension(False)
+                disable_extensions = getattr(connection, "enable_load_extension", None)
+                if callable(disable_extensions):
+                    disable_extensions(False)
                 connection.set_authorizer(self._authorizer)
                 deadline = time.monotonic() + self.timeout_seconds
                 token = current_cancellation_token()
@@ -1432,7 +1452,23 @@ class RootsMagicReader:
                     )
                     for column in definitions
                 )
-            except Exception:  # noqa: BLE001 - vendor schemas can be unusual
+            except Exception as exc:  # noqa: BLE001 - vendor schemas can be unusual
+                # Keep failures diagnosable in frozen runtimes without recording
+                # vendor SQL, table names, exception messages, or source paths.
+                failure_type = type(exc).__name__
+                if failure_type not in _SCHEMA_FAILURE_TYPES:
+                    failure_type = "Exception"
+                module = getattr(exc, "name", None)
+                missing_module = (
+                    f" module={module}"
+                    if isinstance(exc, ModuleNotFoundError)
+                    and isinstance(module, str)
+                    and re.fullmatch(r"sqlglot(?:\.[a-z_]+)+", module)
+                    else ""
+                )
+                logging.getLogger(__name__).warning(
+                    "ROOTSMAGIC_SCHEMA_PARSE_FAILED: %s%s", failure_type, missing_module
+                )
                 columns = ()
                 column_types = ()
             self.ingress.validate_record(
@@ -1535,7 +1571,13 @@ class RootsMagicReader:
             collection_items=len(values),
         )
 
-    def validate_sql(self, sql: str, allowed_schema: dict[str, tuple[str, ...]]) -> str:
+    def validate_sql(
+        self,
+        sql: str,
+        allowed_schema: dict[str, tuple[str, ...]],
+        *,
+        row_limit: int | None = None,
+    ) -> str:
         """Validate generated SQL against the read-only RootsMagic query policy."""
         cancellation_checkpoint()
         if not sql.strip() or "\x00" in sql:
@@ -1563,7 +1605,10 @@ class RootsMagicReader:
                 "The query references a table outside the inspected RootsMagic schema.",
                 details={"denied": sorted(referenced - allowed_tables)},
             )
-        statement = statement.limit(self.max_rows + 1)
+        limit = self.max_rows if row_limit is None else row_limit
+        if type(limit) is not int or not 1 <= limit <= self.max_rows:
+            raise ValueError("The query row limit is outside the configured bound.")
+        statement = statement.limit(limit + 1)
         return statement.sql(dialect="sqlite")
 
     def validate_row_limits(
@@ -1583,6 +1628,9 @@ class RootsMagicReader:
         except AncestryError:
             raise
         except sqlite3.Error as exc:
+            if "interrupted" in str(exc).casefold():
+                # The owning snapshot connection maps its timeout or cancellation.
+                raise
             raise AncestryError(
                 "ROOTSMAGIC_ROW_LIMIT_UNVERIFIED",
                 "The RootsMagic row limit could not be verified safely.",
@@ -1629,8 +1677,13 @@ class RootsMagicReader:
         *,
         expected: SourceFingerprint | None = None,
         schema: dict[str, tuple[str, ...]] | None = None,
+        parameters: tuple[JsonScalar, ...] = (),
+        row_limit: int | None = None,
     ) -> QueryResult:
         """Execute a validated read-only query against the RootsMagic source."""
+        limit = self.max_rows if row_limit is None else row_limit
+        if type(limit) is not int or not 1 <= limit <= self.max_rows:
+            raise ValueError("The query row limit is outside the configured bound.")
         selected = self.ingress.normalize_path(path, FileKind.ROOTSMAGIC, absolute=True)
         active = self._operation_connection.get()
         if active is None or not self._same_path(self._operation_path.get(), selected):
@@ -1641,6 +1694,8 @@ class RootsMagicReader:
                     sql,
                     expected=fingerprint,
                     schema=schema or bound_schema,
+                    parameters=parameters,
+                    row_limit=limit,
                 )
         operation_fingerprint = expected or self._operation_fingerprint.get()
         if operation_fingerprint is None:
@@ -1654,13 +1709,13 @@ class RootsMagicReader:
                 "ROOTSMAGIC_SCHEMA_UNAVAILABLE",
                 "The RootsMagic schema snapshot is unavailable.",
             )
-        validated = self.validate_sql(sql, query_schema)
+        validated = self.validate_sql(sql, query_schema, row_limit=limit)
         rows: list[tuple[JsonValue, ...]] = []
         truncated = False
         try:
-            cursor = active.execute(validated)
+            cursor = active.execute(validated, parameters)
             columns = tuple(description[0] for description in cursor.description or ())
-            while len(rows) <= self.max_rows:
+            while len(rows) <= limit:
                 cancellation_checkpoint()
                 row = cursor.fetchone()
                 if row is None:
@@ -1671,7 +1726,7 @@ class RootsMagicReader:
                     count=len(rows) + 1,
                     columns=columns,
                 )
-                if len(rows) == self.max_rows:
+                if len(rows) == limit:
                     truncated = True
                     break
                 rows.append(tuple(_json_safe_value(value) for value in values))
@@ -1696,7 +1751,7 @@ class RootsMagicReader:
             sql=validated,
             truncated=truncated,
             truncation=TruncationMetadata(
-                row_limit=self.max_rows,
+                row_limit=limit,
                 returned_rows=len(rows),
                 has_more=truncated,
             ),

@@ -74,6 +74,7 @@ from ancestryllm.api.contracts import (
 )
 from ancestryllm.api.errors import error_response, request_error
 from ancestryllm.api.middleware import InternalApiMiddleware
+from ancestryllm.api.rootsmagic_routes import rootsmagic_router
 from ancestryllm.core.errors import AncestryError, StorageError
 from ancestryllm.llm.contracts import DataClass
 from ancestryllm.llm.provider_configuration import ConsentPreview
@@ -89,6 +90,7 @@ if TYPE_CHECKING:
     from fastapi.responses import JSONResponse
 
     from ancestryllm.api.gedcom_intake import GedcomIntake
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
     from ancestryllm.api.settings import ApiSettings
     from ancestryllm.application.executor import CommandExecutor
     from ancestryllm.application.gedcom_jobs import GedcomJobFacade
@@ -533,6 +535,7 @@ def create_app(
     job_service: Callable[[], JobLifecycleService] | None = None,
     gedcom_job_service: Callable[[], GedcomJobFacade] | None = None,
     gedcom_intake: Callable[[], GedcomIntake] | None = None,
+    rootsmagic_workbench: Callable[[], NativeRootsMagicWorkbench] | None = None,
     job_shutdown: Callable[[str, float], ShutdownAssessment] | None = None,
     runtime_shutdown: Callable[[], None] | None = None,
     lifecycle: ApiLifecycle | None = None,
@@ -910,6 +913,18 @@ def create_app(
 
     if gedcom_job_service is not None:
         app.include_router(gedcom_router)
+
+    if rootsmagic_workbench is not None:
+        workbench_router = rootsmagic_router(
+            rootsmagic_workbench, _job_snapshot_response, assert_mutations_allowed
+        )
+        for route in workbench_router.routes:
+            if isinstance(route, APIRoute):
+                route.openapi_extra = {
+                    "parameters": _HANDSHAKE_PARAMETERS,
+                    "security": [{"PrivateBearer": []}],
+                }
+        app.include_router(workbench_router, responses=_ERROR_RESPONSES)
 
     if gedcom_intake is not None:
         intake_router = APIRouter(

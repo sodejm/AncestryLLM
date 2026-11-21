@@ -11,6 +11,7 @@ import {
   SECURITY_RECEIPT_GATES,
   TARGET_RECEIPT_GATES,
   loadVerificationReceipts,
+  validateRootsMagicEvidence,
   validateVerificationReceipt,
 } from './verification-receipt.mjs'
 
@@ -503,6 +504,8 @@ export function createTargetEvidence(input) {
   const fuseInspectionArtifact = artifactDigest(input.fuseInspectionBytes)
   const fileGrantEvidenceArtifact = artifactDigest(input.fileGrantEvidenceBytes)
   const fileGrantMediation = validatedFileGrantEvidence(input.fileGrantMediation)
+  const rootsMagicEvidenceArtifact = artifactDigest(input.rootsMagicEvidenceBytes)
+  const rootsMagicWorkbench = validateRootsMagicEvidence(input.rootsMagicWorkbench, input.sidecarTarget)
   const faultArtifacts = Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([gate, scenario]) => {
     const bytes = input[`${scenario.artifact}Bytes`]
     const document = input[scenario.artifact]
@@ -522,6 +525,12 @@ export function createTargetEvidence(input) {
     'fileGrantEvidence',
     fileGrantEvidenceArtifact,
     'packaged file-grant mediation',
+  )
+  assertArtifactBound(
+    derived.receipts.packagedRootsMagicWorkbenchPassed,
+    'rootsMagicEvidence',
+    rootsMagicEvidenceArtifact,
+    'packaged RootsMagic workbench',
   )
   const performance = performanceEvidence(input.runner, input.metrics)
   const inspection = validatedFuseInspection(input.fuseInspection, expected)
@@ -546,6 +555,7 @@ export function createTargetEvidence(input) {
     rendererZeroEgressCanary: derived.gates.rendererZeroEgressCanaryPassed,
     normalLaunchDebugSurfaceAbsent: derived.gates.normalLaunchDebugSurfaceAbsentPassed,
     packagedFileGrantSmoke: derived.gates.packagedFileGrantSmokePassed,
+    packagedRootsMagicWorkbench: derived.gates.packagedRootsMagicWorkbenchPassed,
     performancePassed: performance.passed,
     gates: derived.gates,
     receipts: derived.receipts,
@@ -553,9 +563,11 @@ export function createTargetEvidence(input) {
       metrics: metricsArtifact,
       fuseInspection: fuseInspectionArtifact,
       fileGrantEvidence: fileGrantEvidenceArtifact,
+      rootsMagicEvidence: rootsMagicEvidenceArtifact,
       ...faultArtifacts,
     }),
     fileGrantMediation,
+    rootsMagicWorkbench,
     faultScenarios: Object.freeze(Object.fromEntries(Object.entries(FAULT_SCENARIOS).map(([, scenario]) => [
       scenario.name,
       validatedFaultEvidence(input[scenario.artifact], scenario),
@@ -664,11 +676,13 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
   assert.equal(value.rendererZeroEgressCanary, value.gates.rendererZeroEgressCanaryPassed)
   assert.equal(value.normalLaunchDebugSurfaceAbsent, value.gates.normalLaunchDebugSurfaceAbsentPassed)
   assert.equal(value.packagedFileGrantSmoke, value.gates.packagedFileGrantSmokePassed)
+  assert.equal(value.packagedRootsMagicWorkbench, value.gates.packagedRootsMagicWorkbenchPassed)
   assert.equal(value.performancePassed, true)
 
   validateDigest(value.artifacts?.metrics, `${value.runner} metrics artifact`)
   validateDigest(value.artifacts?.fuseInspection, `${value.runner} fuse inspection artifact`)
   validateDigest(value.artifacts?.fileGrantEvidence, `${value.runner} packaged file-grant evidence artifact`)
+  validateDigest(value.artifacts?.rootsMagicEvidence, `${value.runner} packaged RootsMagic workbench evidence artifact`)
   assertArtifactBound(receipts.packageRuntimePassed, 'metrics', value.artifacts.metrics, `${value.runner} packaged runtime metrics`)
   assertArtifactBound(receipts.fusesInspectedPassed, 'fuseInspection', value.artifacts.fuseInspection, `${value.runner} fuse inspection`)
   assertArtifactBound(
@@ -676,6 +690,12 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
     'fileGrantEvidence',
     value.artifacts.fileGrantEvidence,
     `${value.runner} packaged file-grant mediation`,
+  )
+  assertArtifactBound(
+    receipts.packagedRootsMagicWorkbenchPassed,
+    'rootsMagicEvidence',
+    value.artifacts.rootsMagicEvidence,
+    `${value.runner} packaged RootsMagic workbench`,
   )
 
   const fileGrantEvidenceFile = findArtifactFile(
@@ -687,6 +707,17 @@ function validateTargetEvidence(value, gitHead, receiptRecords, files) {
     value.fileGrantMediation,
     validatedFileGrantEvidence(fileGrantEvidenceFile.value),
     `${value.runner} packaged file-grant evidence differs from its downloaded artifact`,
+  )
+
+  const rootsMagicEvidenceFile = findArtifactFile(
+    files,
+    value.artifacts.rootsMagicEvidence,
+    `${value.runner} packaged RootsMagic workbench evidence artifact`,
+  )
+  assert.deepEqual(
+    value.rootsMagicWorkbench,
+    validateRootsMagicEvidence(rootsMagicEvidenceFile.value, value.sidecarTarget),
+    `${value.runner} packaged RootsMagic workbench evidence differs from its downloaded artifact`,
   )
 
   for (const [gate, scenario] of Object.entries(FAULT_SCENARIOS)) {
@@ -839,7 +870,7 @@ export async function runCli([command, ...args]) {
   const common = new Set(['git-head', 'output'])
   let allowed
   if (command === 'target') {
-    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'file-grant-evidence', 'withhold-evidence', 'restart-evidence', 'integrity-evidence', 'receipts'])
+    allowed = new Set([...common, 'runner', 'sidecar-target', 'expected-os', 'actual-os', 'arch', 'host-arch', 'package-boundary', 'metrics', 'fuse-inspection', 'file-grant-evidence', 'rootsmagic-evidence', 'withhold-evidence', 'restart-evidence', 'integrity-evidence', 'receipts'])
   } else if (command === 'security') {
     allowed = new Set([...common, 'sbom', 'receipts'])
   } else if (command === 'aggregate') {
@@ -857,6 +888,7 @@ export async function runCli([command, ...args]) {
     const metricsBytes = await readFile(required(values, 'metrics'))
     const fuseInspectionBytes = await readFile(required(values, 'fuse-inspection'))
     const fileGrantEvidenceBytes = await readFile(required(values, 'file-grant-evidence'))
+    const rootsMagicEvidenceBytes = await readFile(required(values, 'rootsmagic-evidence'))
     const withholdEvidenceBytes = await readFile(required(values, 'withhold-evidence'))
     const restartEvidenceBytes = await readFile(required(values, 'restart-evidence'))
     const integrityEvidenceBytes = await readFile(required(values, 'integrity-evidence'))
@@ -875,6 +907,8 @@ export async function runCli([command, ...args]) {
       fuseInspectionBytes,
       fileGrantMediation: JSON.parse(fileGrantEvidenceBytes.toString('utf8')),
       fileGrantEvidenceBytes,
+      rootsMagicWorkbench: JSON.parse(rootsMagicEvidenceBytes.toString('utf8')),
+      rootsMagicEvidenceBytes,
       withholdEvidence: JSON.parse(withholdEvidenceBytes.toString('utf8')),
       withholdEvidenceBytes,
       restartEvidence: JSON.parse(restartEvidenceBytes.toString('utf8')),

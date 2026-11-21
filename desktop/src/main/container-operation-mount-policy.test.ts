@@ -45,6 +45,22 @@ describe('mediated operation mount policy', () => {
     await expect(lstat(unexpected)).resolves.toMatchObject({})
   })
 
+  it('recovers exact RootsMagic manifest remnants after an interrupted inspection or export', async () => {
+    const root = await runtimeRoot()
+    const staging = await initializeGedcomIntakeStaging(root)
+    const source = join(staging, `${'a'.repeat(64)}.rootsmagic-source.json`)
+    const output = join(staging, `${'b'.repeat(64)}.rootsmagic-output.json`)
+    await writeFile(source, '{}', { mode: 0o600 })
+    await writeFile(output, '{}', { mode: 0o600 })
+    await expect(initializeGedcomIntakeStaging(root)).resolves.toBe(staging)
+    await expect(lstat(source)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+    const unexpected = join(staging, `${'c'.repeat(64)}.rootsmagic-source.json.bak`)
+    await writeFile(unexpected, '{}')
+    await expect(initializeGedcomIntakeStaging(root)).rejects.toMatchObject({ code: 'STAGING_UNSAFE' })
+    await expect(lstat(unexpected)).resolves.toMatchObject({})
+  })
+
   it('rejects linked intake directories and staged symlinks without touching their targets', async () => {
     const root = await runtimeRoot()
     const outside = await runtimeRoot()

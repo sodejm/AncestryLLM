@@ -366,7 +366,7 @@ The foundation sequence is:
 | `desktop/src/renderer/src/design-system/`, shell integration, and fictional development gallery | #106 (`EL-10`). |
 | `src/ancestryllm/api/`, FastAPI dependencies, deterministic OpenAPI artifact | #11 (`EL-03`) for foundation; later domain routers stay with their published issues. |
 | `pyproject.toml` and `uv.lock` | The issue introducing the Python dependency, coordinated serially; #11 owns initial FastAPI/Uvicorn additions. |
-| Root JavaScript dependency and lock files | Not permitted. `desktop/pnpm-lock.yaml` is the sole JavaScript lockfile and #99 owns it initially. |
+| Root JavaScript dependency and lock files | Not permitted. `desktop/pnpm-lock.yaml` is the sole application dependency lockfile and #99 owns it initially. The isolated `desktop/toolchain/pnpm/package-lock.json` pins only the CI pnpm bootstrap for Intel macOS; it does not resolve application dependencies. |
 | GitHub workflows | The issue explicitly assigned a CI/release change; shared edits are coordinated and never copied across worktrees. |
 | Root `Makefile` | #99 owns initial desktop delegation targets; later edits require coordinator review. |
 | Architecture and security documents: `ARCHITECTURE.md`, this ADR, `THREAT_MODEL.md`, privacy, contributor, and desktop backlog decisions | #98 (`EL-01`) for ratification; later boundary changes update them in the owning issue. |

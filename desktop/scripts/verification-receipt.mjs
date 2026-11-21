@@ -28,6 +28,7 @@ export const TARGET_RECEIPT_GATES = Object.freeze([
   'rendererZeroEgressCanaryPassed',
   'normalLaunchDebugSurfaceAbsentPassed',
   'packagedFileGrantSmokePassed',
+  'packagedRootsMagicWorkbenchPassed',
   'packagedSidecarWithholdRetryPassed',
   'packagedSidecarRestartExhaustionQuitPassed',
   'packagedSidecarIntegritySubstitutionPassed',
@@ -120,6 +121,35 @@ function validateReceiptContext(value) {
   return value
 }
 
+/**
+ * Validates the exact observations and native target of a packaged RootsMagic run.
+ * @param {Record<string, any>} value - Untrusted parsed observation document.
+ * @param {string} target - Native sidecar target recorded by the receipt.
+ * @returns {Record<string, any>} The validated observation document.
+ */
+export function validateRootsMagicEvidence(value, target) {
+  assert.deepEqual(Object.keys(value ?? {}).sort(), [
+    'kind', 'observations', 'schemaVersion', 'status', 'target', 'verificationOnlyDialogAdapter',
+  ], 'RootsMagic evidence must use the exact schema')
+  assert.equal(value.schemaVersion, 1, 'RootsMagic evidence schema is unsupported')
+  assert.equal(value.kind, 'ancestryllm-packaged-rootsmagic-workbench', 'RootsMagic evidence kind is invalid')
+  assert.equal(value.status, 'passed', 'RootsMagic evidence did not pass')
+  assert.match(target, /^(?:darwin|linux|win32)-(?:arm64|x64)$/, 'RootsMagic evidence requires a native target')
+  assert.equal(value.target, target, 'RootsMagic evidence target differs from its receipt')
+  assert.equal(value.verificationOnlyDialogAdapter, true, 'RootsMagic evidence requires verification dialog mediation')
+  const observations = [
+    'sourceInspection', 'peoplePaging', 'familyLinks', 'events', 'rootedPortableExport',
+    'livingExcluded', 'unrelatedExcluded', 'digestAgreement', 'sourceUnchanged',
+    'artifactReveal', 'sourceWorkspaceRetained', 'sourceDisposal',
+    'keyboardWorkflow', 'automatedWcagChecks',
+  ].sort()
+  assert.deepEqual(Object.keys(value.observations ?? {}).sort(), observations, 'RootsMagic evidence observations are incomplete')
+  for (const observation of observations) {
+    assert.equal(value.observations[observation], true, `RootsMagic evidence did not establish ${observation}`)
+  }
+  return value
+}
+
 function validateWorkspace(value) {
   assert.deepEqual(
     Object.keys(value ?? {}).sort(),
@@ -203,15 +233,30 @@ export function validateVerificationReceipt(value, requestedHead, requestedConte
     assert.match(name, ARTIFACT_NAME, 'receipt artifact has an invalid name')
     validateDigest(artifact, `receipt artifact ${name}`)
   }
+  if (value.gates.includes('packagedRootsMagicWorkbenchPassed')) {
+    assert.ok(value.artifacts.rootsMagicEvidence, 'RootsMagic evidence artifact is required')
+  }
   validateWorkspace(value.workspace)
   return value
 }
 
-async function captureCommand(executable, args, repositoryRoot) {
+function gitEnvironment() {
+  const env = { ...process.env }
+  delete env.GIT_DIR
+  delete env.GIT_WORK_TREE
+  delete env.GIT_INDEX_FILE
+  delete env.GIT_OBJECT_DIRECTORY
+  delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES
+  delete env.GIT_COMMON_DIR
+  return env
+}
+
+async function captureCommand(executable, args, repositoryRoot, env = process.env) {
   const chunks = []
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(executable, args, {
       cwd: repositoryRoot,
+      env,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -227,7 +272,7 @@ async function captureCommand(executable, args, repositoryRoot) {
 }
 
 async function gitOutput(repositoryRoot, args) {
-  return captureCommand('git', args, repositoryRoot)
+  return captureCommand('git', args, repositoryRoot, gitEnvironment())
 }
 
 async function gitHead(repositoryRoot) {
@@ -482,6 +527,10 @@ export async function runVerificationCommand({
   await ensureOutputAbsent(outputPath)
   const allowedOutputEntriesBefore = await existingAllowedOutputEntries(repositoryRoot, allowedOutputs)
   const artifactDigestsBefore = await existingArtifactDigests(repositoryRoot, artifacts)
+  if (sortedGates.includes('packagedRootsMagicWorkbenchPassed')) {
+    assert.ok(artifacts.rootsMagicEvidence, 'RootsMagic evidence artifact is required')
+    assert.equal(artifactDigestsBefore.rootsMagicEvidence, undefined, 'Receipt requires fresh RootsMagic evidence')
+  }
   const headBefore = exactHead(await gitHead(repositoryRoot), 'headBefore')
   assert.equal(headBefore, expectedHead, 'verification command is not starting at the requested exact head')
   const normalizedOutputs = await normalizedAllowedOutputs(repositoryRoot, allowedOutputs, artifacts, outputPath)
@@ -503,7 +552,11 @@ export async function runVerificationCommand({
   const artifactDigests = {}
   for (const name of Object.keys(artifacts).sort()) {
     const artifactPath = isAbsolute(artifacts[name]) ? artifacts[name] : resolve(repositoryRoot, artifacts[name])
-    artifactDigests[name] = digest(await readFile(artifactPath))
+    const artifactBytes = await readFile(artifactPath)
+    if (name === 'rootsMagicEvidence' && sortedGates.includes('packagedRootsMagicWorkbenchPassed')) {
+      validateRootsMagicEvidence(JSON.parse(artifactBytes.toString('utf8')), sidecarTarget)
+    }
+    artifactDigests[name] = digest(artifactBytes)
     if (artifactDigestsBefore[name] !== undefined) {
       assert.deepEqual(
         artifactDigests[name],

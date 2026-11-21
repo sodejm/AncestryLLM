@@ -13,6 +13,7 @@ import { normalizeVerificationSelection } from './native-file-dialogs.packaged-v
 import {
   findPackagedMainProcess,
   isExpectedLastWindowCloseError,
+  parsePosixProcessSnapshot,
   recordsForProcessIds,
   type ProcessRecord,
 } from './process-records'
@@ -72,9 +73,11 @@ const click = async (selector: string) => {
 
 const text = async (selector: string) => (await visible(selector)).getText()
 
-const labeledInput = async (label: string) => visible(
-  `//label[normalize-space(.)="${label}"]//input`,
-)
+const labeledInput = async (label: string) => {
+  const input = await visible(`//label[normalize-space(.)="${label}"]//input`)
+  await input.waitForEnabled()
+  return input
+}
 
 async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds))
@@ -217,7 +220,8 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       '    pid = [int]$_.ProcessId;',
       '    ppid = [int]$_.ParentProcessId;',
       '    rssBytes = [long]$_.WorkingSetSize;',
-      '    commandLine = [string]$_.CommandLine',
+      '    commandLine = [string]$_.CommandLine;',
+      '    executablePath = [string]$_.ExecutablePath',
       '  }',
       '} | ConvertTo-Json -Compress',
     ].join('\n')
@@ -234,23 +238,15 @@ async function processSnapshot(): Promise<ProcessRecord[]> {
       ppid: Number(record.ppid),
       rssBytes: Number(record.rssBytes),
       commandLine: String(record.commandLine ?? ''),
+      executablePath: String(record.executablePath ?? ''),
     }))
   }
 
-  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,command='], {
+  const { stdout } = await execFileAsync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,stat=,command='], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
   })
-  return stdout.split('\n').flatMap((line): ProcessRecord[] => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/u)
-    if (!match?.[1] || !match[2] || !match[3] || match[4] === undefined) return []
-    return [{
-      pid: Number.parseInt(match[1], 10),
-      ppid: Number.parseInt(match[2], 10),
-      rssBytes: Number.parseInt(match[3], 10) * 1024,
-      commandLine: match[4],
-    }]
-  })
+  return parsePosixProcessSnapshot(stdout)
 }
 
 function descendantProcessTree(records: readonly ProcessRecord[], rootPid: number): ProcessRecord[] {
@@ -590,12 +586,15 @@ async function expectAccessibleShell(): Promise<void> {
   assert.deepEqual(await browser.execute(() => Array.from(
     document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
     (link) => link.textContent?.trim(),
-  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'Diagnostics', 'Settings'])
+  )), ['Home', 'Chat', 'Tasks', 'GEDCOM', 'RootsMagic', 'Diagnostics', 'Settings'])
 
   await click('a=Settings')
   await expectFocusedHeading('Settings')
   assert.equal((await $$('[aria-labelledby="general-settings-title"] input[type="radio"]')).length, 3)
   await (await labeledInput('dark')).click()
+  await browser.waitUntil(async () => browser.execute(() => (
+    document.documentElement.dataset.theme === 'dark'
+  )), { timeoutMsg: 'Packaged theme preference was not applied' })
   await (await labeledInput('Reduce motion')).click()
   await browser.waitUntil(async () => browser.execute(() => (
     document.documentElement.dataset.theme === 'dark'

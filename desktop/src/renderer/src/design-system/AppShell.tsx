@@ -10,6 +10,7 @@ const routeIcons = {
   chat: MessageSquareText,
   tasks: ListTodo,
   gedcom: Files,
+  rootsmagic: Files,
   diagnostics: Stethoscope,
   settings: Settings,
 } as const

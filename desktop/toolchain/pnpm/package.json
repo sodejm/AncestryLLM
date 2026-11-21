@@ -1,0 +1,9 @@
+{
+  "name": "ancestryllm-verified-pnpm-bootstrap",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Integrity-locked JavaScript pnpm bootstrap for Intel macOS CI",
+  "dependencies": {
+    "pnpm": "11.11.0"
+  }
+}

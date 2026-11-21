@@ -19,6 +19,7 @@ import type {
   ProviderConfiguration,
 } from '../shared-contract/desktop'
 import { desktopChannels, desktopEventChannels } from '../shared-contract/desktop'
+import type { RootsMagicPresetDefinitions } from '../shared-contract/rootsmagic'
 import { FileGrantBrokerError } from './file-grant-broker'
 import { readyStartupReportFixture } from '../mock-bridge/fixtures'
 import { SidecarClientError } from './sidecar-client'
@@ -506,7 +507,73 @@ describe('desktop IPC handlers', () => {
       fileGrantBroker(),
     )
     expect([...handlers.keys()].sort()).toEqual(Object.values(desktopChannels).sort())
-    expect(handlers.size).toBe(42)
+    expect(handlers.size).toBe(50)
+  })
+
+  it('envelopes RootsMagic preset definitions returned by the native broker', async () => {
+    const presets = Object.freeze({
+      schema_version: 1 as const,
+      queries: Object.freeze([
+        Object.freeze({
+          query_id: 'people' as const,
+          label: 'People',
+          description: 'Browse people.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'family_links' as const,
+          label: 'Family links',
+          description: 'Browse family links.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+        Object.freeze({
+          query_id: 'events' as const,
+          label: 'Events',
+          description: 'Browse events.',
+          parameters: Object.freeze([]),
+          maximum_rows: 100,
+        }),
+      ]),
+    }) satisfies RootsMagicPresetDefinitions
+    const rootsMagic = {
+      inspect: vi.fn(),
+      presets: vi.fn().mockResolvedValue(presets),
+      query: vi.fn(),
+      selectOutput: vi.fn(),
+      export: vi.fn(),
+      result: vi.fn(),
+      discard: vi.fn(),
+      reveal: vi.fn(),
+      observeJob: vi.fn(),
+      revokeGrant: vi.fn(),
+      revokeOwner: vi.fn(),
+      revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+
+    await expect(handlers.get(desktopChannels.getRootsMagicPresets)!(event())).resolves.toEqual(
+      result(presets),
+    )
+    expect(rootsMagic.presets).toHaveBeenCalledWith(expect.any(AbortSignal))
+  })
+
+  it.each([
+    'ROOTSMAGIC_CAPABILITY_INVALID', 'ROOTSMAGIC_RESULT_UNAVAILABLE', 'ROOTSMAGIC_SOURCE_UNAVAILABLE',
+    'ROOTSMAGIC_JOB_CAPACITY', 'ROOTSMAGIC_SOURCE_CAPACITY',
+  ] as const)('preserves %s without forwarding private error details', async (code) => {
+    const failure = new SidecarClientError(code)
+    failure.message = '/private/family-tree.rmtree: private payload\u0000'
+    const rootsMagic = {
+      inspect: vi.fn(), presets: vi.fn().mockRejectedValue(failure), query: vi.fn(),
+      selectOutput: vi.fn(), export: vi.fn(), result: vi.fn(), discard: vi.fn(), reveal: vi.fn(),
+      observeJob: vi.fn(), revokeGrant: vi.fn(), revokeOwner: vi.fn(), revokeAll: vi.fn(),
+    } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+    const { event, handlers } = harness(bridge(), { rootsMagic })
+    const response = await handlers.get(desktopChannels.getRootsMagicPresets)!(event())
+    expect(response).toMatchObject({ ok: false, error: { code } })
+    expect(JSON.stringify(response)).not.toMatch(/family-tree|private payload|\\u0000/)
   })
 
   it('authorizes and bounds GEDCOM intake before entering its native owner port', async () => {
@@ -1358,7 +1425,6 @@ describe('desktop IPC handlers', () => {
       )
     },
   )
-
   it('returns a stable timeout while the underlying operation remains stalled', async () => {
     const control = bridge()
     const signals: AbortSignal[] = []
@@ -1400,5 +1466,59 @@ describe('desktop IPC handlers', () => {
     expect(fileGrants.revokeOwner).toHaveBeenCalledTimes(1)
     expect(fileGrants.revokeOwner).toHaveBeenCalledWith(contents)
     expect(fileGrants.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('delivers a committed RootsMagic export to the renderer even when the outer IPC deadline wins the race', async () => {
+    vi.useFakeTimers()
+    try {
+      const committedJob = {
+        ...runningJob,
+        state: 'completed' as const,
+        finished_at: '2026-08-12T12:00:03Z',
+        outcome_summary: 'Export committed.',
+      }
+      const rootsMagic = {
+        inspect: vi.fn(),
+        presets: vi.fn(),
+        query: vi.fn(),
+        selectOutput: vi.fn(),
+        export: vi.fn((_owner: unknown, _request: unknown, signal?: AbortSignal) => new Promise<typeof committedJob>((resolve, reject) => {
+          signal?.addEventListener('abort', () => resolve(committedJob), { once: true })
+          setTimeout(() => reject(new Error('unexpected non-aborted completion')), 50)
+        })),
+        result: vi.fn(),
+        discard: vi.fn(),
+        reveal: vi.fn(),
+        observeJob: vi.fn(),
+        revokeGrant: vi.fn(),
+        revokeOwner: vi.fn(async () => undefined),
+        revokeAll: vi.fn(async () => undefined),
+      } satisfies NonNullable<RegistrationOptions['rootsMagic']>
+      const { event, handlers, controller } = harness(bridge(), { rootsMagic, operationTimeoutMs: 5 })
+      const exportRequest = {
+        schema_version: 1,
+        source_ref: 'b'.repeat(64),
+        output_capability: 'c'.repeat(64),
+        root_person_id: 1,
+        scope: 'connected',
+        generations: null,
+        living: 'exclude',
+      }
+
+      const pending = handlers.get(desktopChannels.exportRootsMagic)!(event(), exportRequest)
+      await vi.advanceTimersByTimeAsync(5)
+      await expect(pending).resolves.toEqual(result(committedJob))
+
+      rootsMagic.export.mockImplementationOnce((_owner: unknown, _request: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('cancelled before commit')), { once: true })
+      }))
+      const timedOutExport = handlers.get(desktopChannels.exportRootsMagic)!(event(), exportRequest)
+      await vi.advanceTimersByTimeAsync(5)
+      await expect(timedOutExport).resolves.toMatchObject({ ok: false, error: { code: 'REQUEST_TIMEOUT' } })
+
+      controller.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

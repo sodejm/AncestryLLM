@@ -167,6 +167,32 @@ function fileGrantEvidence() {
   }
 }
 
+function rootsMagicEvidence(target) {
+  return {
+    schemaVersion: 1,
+    kind: 'ancestryllm-packaged-rootsmagic-workbench',
+    status: 'passed',
+    target,
+    verificationOnlyDialogAdapter: true,
+    observations: {
+      artifactReveal: true,
+      automatedWcagChecks: true,
+      digestAgreement: true,
+      events: true,
+      familyLinks: true,
+      keyboardWorkflow: true,
+      livingExcluded: true,
+      peoplePaging: true,
+      rootedPortableExport: true,
+      sourceDisposal: true,
+      sourceInspection: true,
+      sourceUnchanged: true,
+      sourceWorkspaceRetained: true,
+      unrelatedExcluded: true,
+    },
+  }
+}
+
 function targetFixture(row, observed = metrics, receiptContext) {
   const [runner, sidecarTarget, expectedOs, actualOs, arch, hostArch] = row
   const targetContext = receiptContext ?? { runner, sidecarTarget }
@@ -204,6 +230,8 @@ function targetFixture(row, observed = metrics, receiptContext) {
   const integrityEvidenceBytes = encoded(integrityEvidence)
   const fileGrantMediation = fileGrantEvidence()
   const fileGrantEvidenceBytes = encoded(fileGrantMediation)
+  const rootsMagicWorkbench = rootsMagicEvidence(sidecarTarget)
+  const rootsMagicEvidenceBytes = encoded(rootsMagicWorkbench)
   const runtimeReceipt = targetReceipt(
     ['packageRuntimePassed', 'rendererZeroEgressCanaryPassed'],
     { metrics: digest(metricsBytes) },
@@ -246,6 +274,17 @@ function targetFixture(row, observed = metrics, receiptContext) {
       'packaged',
       '--grep',
       'mediates opaque packaged open and save file grants',
+    ],
+  )
+  const rootsMagicReceipt = targetReceipt(
+    ['packagedRootsMagicWorkbenchPassed'],
+    { rootsMagicEvidence: digest(rootsMagicEvidenceBytes) },
+    [
+      'node',
+      'desktop/scripts/run-wdio.mjs',
+      'packaged',
+      '--grep',
+      'queries and exports an immutable RootsMagic source through the native workbench',
     ],
   )
   const withholdReceipt = targetReceipt(
@@ -291,6 +330,7 @@ function targetFixture(row, observed = metrics, receiptContext) {
     sidecarReceipt,
     fuseReceipt,
     fileGrantReceipt,
+    rootsMagicReceipt,
     withholdReceipt,
     restartReceipt,
     integrityReceipt,
@@ -310,6 +350,8 @@ function targetFixture(row, observed = metrics, receiptContext) {
     fuseInspectionBytes,
     fileGrantMediation,
     fileGrantEvidenceBytes,
+    rootsMagicWorkbench,
+    rootsMagicEvidenceBytes,
     withholdEvidence,
     withholdEvidenceBytes,
     restartEvidence,
@@ -323,6 +365,7 @@ function targetFixture(row, observed = metrics, receiptContext) {
     metricsBytes,
     fuseInspectionBytes,
     fileGrantEvidenceBytes,
+    rootsMagicEvidenceBytes,
     withholdEvidenceBytes,
     restartEvidenceBytes,
     integrityEvidenceBytes,
@@ -391,6 +434,8 @@ test('target evidence derives gates for the native Windows 11 ARM64 boundary onl
     fuseInspectionBytes: fixture.fuseInspectionBytes,
     fileGrantMediation: fileGrantEvidence(),
     fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: JSON.parse(fixture.rootsMagicEvidenceBytes),
+    rootsMagicEvidenceBytes: fixture.rootsMagicEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
@@ -459,6 +504,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     fuseInspectionBytes: fixture.fuseInspectionBytes,
     fileGrantMediation: fileGrantEvidence(),
     fileGrantEvidenceBytes: fixture.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: JSON.parse(fixture.rootsMagicEvidenceBytes),
+    rootsMagicEvidenceBytes: fixture.rootsMagicEvidenceBytes,
     withholdEvidence: JSON.parse(fixture.withholdEvidenceBytes),
     withholdEvidenceBytes: fixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(fixture.restartEvidenceBytes),
@@ -498,6 +545,8 @@ test('target evidence rejects a digest-unbound artifact and the wrong platform A
     fuseInspectionBytes: wrongBytes,
     fileGrantMediation: fileGrantEvidence(),
     fileGrantEvidenceBytes: linuxFixture.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: JSON.parse(linuxFixture.rootsMagicEvidenceBytes),
+    rootsMagicEvidenceBytes: linuxFixture.rootsMagicEvidenceBytes,
     withholdEvidence: JSON.parse(linuxFixture.withholdEvidenceBytes),
     withholdEvidenceBytes: linuxFixture.withholdEvidenceBytes,
     restartEvidence: JSON.parse(linuxFixture.restartEvidenceBytes),
@@ -541,6 +590,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
     await writeFile(join(runnerRoot, 'metrics.json'), fixture.metricsBytes)
     await writeFile(join(runnerRoot, 'fuse-inspection.json'), fixture.fuseInspectionBytes)
     await writeFile(join(runnerRoot, 'file-grant-mediation.json'), fixture.fileGrantEvidenceBytes)
+    await writeFile(join(runnerRoot, 'rootsmagic-workbench.json'), fixture.rootsMagicEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-withhold-retry.json'), fixture.withholdEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-restart-exhaustion-quit.json'), fixture.restartEvidenceBytes)
     await writeFile(join(runnerRoot, 'sidecar-integrity-substitution.json'), fixture.integrityEvidenceBytes)
@@ -573,7 +623,7 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.deepEqual(aggregate.toolVersions, {
     python: '3.12',
     node: '26.5.0',
-    pnpm: '11.9.0',
+    pnpm: '11.11.0',
     vitest: '4.1.11',
     webdriverio: '9.32.0',
   })
@@ -590,4 +640,146 @@ test('target evidence CLI rejects literal platform-validation booleans', async (
     'target',
     '--platform-validated', 'true',
   ]), /Unknown evidence option: --platform-validated/)
+})
+
+test('target evidence rejects missing, mismatched, wrong-target, and wrong-head RootsMagic evidence', async () => {
+  const row = rows[0]
+  const valid = targetFixture(row)
+  const target = row[1]
+  const targetContext = { runner: row[0], sidecarTarget: target }
+  const wrongTargetEvidence = rootsMagicEvidence('linux-x64')
+  const wrongTargetBytes = encoded(wrongTargetEvidence)
+
+  // Missing receipt / artifact
+  const withoutRootsMagic = {
+    ...valid.evidence,
+    gates: { ...valid.evidence.gates, packagedRootsMagicWorkbenchPassed: false },
+  }
+  assert.throws(() => createTargetEvidence({
+    gitHead,
+    runner: row[0],
+    sidecarTarget: target,
+    expectedOs: row[2],
+    actualOs: row[3],
+    arch: row[4],
+    hostArch: row[5],
+    packageBoundary: 'unpacked-native',
+    metrics,
+    metricsBytes: valid.metricsBytes,
+    fuseInspection: valid.evidence.inspection,
+    fuseInspectionBytes: valid.fuseInspectionBytes,
+    fileGrantMediation: valid.evidence.fileGrantMediation,
+    fileGrantEvidenceBytes: valid.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: valid.evidence.rootsMagicWorkbench,
+    rootsMagicEvidenceBytes: valid.rootsMagicEvidenceBytes,
+    withholdEvidence: valid.evidence.faultScenarios['sidecar-withhold-retry'],
+    withholdEvidenceBytes: valid.withholdEvidenceBytes,
+    restartEvidence: valid.evidence.faultScenarios['sidecar-restart-exhaustion-quit'],
+    restartEvidenceBytes: valid.restartEvidenceBytes,
+    integrityEvidence: valid.evidence.faultScenarios['sidecar-integrity-substitution'],
+    integrityEvidenceBytes: valid.integrityEvidenceBytes,
+    receiptRecords: valid.receiptRecords.filter(
+      (record) => !record.receipt.gates.includes('packagedRootsMagicWorkbenchPassed'),
+    ),
+  }), /packagedRootsMagicWorkbenchPassed/)
+
+  // Mismatched digest against receipt
+  assert.throws(() => createTargetEvidence({
+    gitHead,
+    runner: row[0],
+    sidecarTarget: target,
+    expectedOs: row[2],
+    actualOs: row[3],
+    arch: row[4],
+    hostArch: row[5],
+    packageBoundary: 'unpacked-native',
+    metrics,
+    metricsBytes: valid.metricsBytes,
+    fuseInspection: valid.evidence.inspection,
+    fuseInspectionBytes: valid.fuseInspectionBytes,
+    fileGrantMediation: valid.evidence.fileGrantMediation,
+    fileGrantEvidenceBytes: valid.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: valid.evidence.rootsMagicWorkbench,
+    rootsMagicEvidenceBytes: encoded({ ...valid.evidence.rootsMagicWorkbench, extra: 1 }),
+    withholdEvidence: valid.evidence.faultScenarios['sidecar-withhold-retry'],
+    withholdEvidenceBytes: valid.withholdEvidenceBytes,
+    restartEvidence: valid.evidence.faultScenarios['sidecar-restart-exhaustion-quit'],
+    restartEvidenceBytes: valid.restartEvidenceBytes,
+    integrityEvidence: valid.evidence.faultScenarios['sidecar-integrity-substitution'],
+    integrityEvidenceBytes: valid.integrityEvidenceBytes,
+    receiptRecords: valid.receiptRecords,
+  }), /packaged RootsMagic workbench is not the artifact produced/)
+
+  // Wrong target
+  assert.throws(() => createTargetEvidence({
+    gitHead,
+    runner: row[0],
+    sidecarTarget: target,
+    expectedOs: row[2],
+    actualOs: row[3],
+    arch: row[4],
+    hostArch: row[5],
+    packageBoundary: 'unpacked-native',
+    metrics,
+    metricsBytes: valid.metricsBytes,
+    fuseInspection: valid.evidence.inspection,
+    fuseInspectionBytes: valid.fuseInspectionBytes,
+    fileGrantMediation: valid.evidence.fileGrantMediation,
+    fileGrantEvidenceBytes: valid.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: wrongTargetEvidence,
+    rootsMagicEvidenceBytes: wrongTargetBytes,
+    withholdEvidence: valid.evidence.faultScenarios['sidecar-withhold-retry'],
+    withholdEvidenceBytes: valid.withholdEvidenceBytes,
+    restartEvidence: valid.evidence.faultScenarios['sidecar-restart-exhaustion-quit'],
+    restartEvidenceBytes: valid.restartEvidenceBytes,
+    integrityEvidence: valid.evidence.faultScenarios['sidecar-integrity-substitution'],
+    integrityEvidenceBytes: valid.integrityEvidenceBytes,
+    receiptRecords: valid.receiptRecords.map((record) => (
+      record.receipt.gates.includes('packagedRootsMagicWorkbenchPassed')
+        ? receiptRecord(
+          ['packagedRootsMagicWorkbenchPassed'],
+          { rootsMagicEvidence: digest(wrongTargetBytes) },
+          ['node', '--test'],
+          targetContext,
+        )
+        : record
+    )),
+  }), /RootsMagic evidence target differs/)
+
+  // Wrong head on RootsMagic receipt
+  const wrongHeadReceipt = (() => {
+    const receipt = {
+      ...valid.receiptRecords.find((record) => record.receipt.gates.includes('packagedRootsMagicWorkbenchPassed')).receipt,
+      gitHead: 'f'.repeat(40),
+    }
+    return { receipt, raw: encoded(receipt) }
+  })()
+  assert.throws(() => createTargetEvidence({
+    gitHead,
+    runner: row[0],
+    sidecarTarget: target,
+    expectedOs: row[2],
+    actualOs: row[3],
+    arch: row[4],
+    hostArch: row[5],
+    packageBoundary: 'unpacked-native',
+    metrics,
+    metricsBytes: valid.metricsBytes,
+    fuseInspection: valid.evidence.inspection,
+    fuseInspectionBytes: valid.fuseInspectionBytes,
+    fileGrantMediation: valid.evidence.fileGrantMediation,
+    fileGrantEvidenceBytes: valid.fileGrantEvidenceBytes,
+    rootsMagicWorkbench: valid.evidence.rootsMagicWorkbench,
+    rootsMagicEvidenceBytes: valid.rootsMagicEvidenceBytes,
+    withholdEvidence: valid.evidence.faultScenarios['sidecar-withhold-retry'],
+    withholdEvidenceBytes: valid.withholdEvidenceBytes,
+    restartEvidence: valid.evidence.faultScenarios['sidecar-restart-exhaustion-quit'],
+    restartEvidenceBytes: valid.restartEvidenceBytes,
+    integrityEvidence: valid.evidence.faultScenarios['sidecar-integrity-substitution'],
+    integrityEvidenceBytes: valid.integrityEvidenceBytes,
+    receiptRecords: valid.receiptRecords.map((record) => (
+      record.receipt.gates.includes('packagedRootsMagicWorkbenchPassed') ? wrongHeadReceipt : record
+    )),
+  }), /receipt is not from the requested exact head/)
+  assert.equal(withoutRootsMagic.gates.packagedRootsMagicWorkbenchPassed, false)
 })

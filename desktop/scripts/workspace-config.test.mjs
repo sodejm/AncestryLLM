@@ -16,6 +16,16 @@ const runtimePolicyResource = {
   to: 'runtime-policy/macos-arm64-runtime-policy-v1.json',
 }
 
+test('workspace discovery excludes the independent pnpm bootstrap package', async () => {
+  const workspace = await readFile(workspaceUrl, 'utf8')
+  const bootstrap = JSON.parse(
+    await readFile(new URL('../toolchain/pnpm/package.json', import.meta.url), 'utf8'),
+  )
+
+  assert.equal(bootstrap.name, 'ancestryllm-verified-pnpm-bootstrap')
+  assert.match(workspace, /^packages:\n {2}- '\.'\n(?=\S)/m)
+})
+
 test('pnpm 11 controls live in the supported workspace config and lockfile', async () => {
   const workspace = await readFile(workspaceUrl, 'utf8')
   const lockfile = await readFile(lockfileUrl, 'utf8')

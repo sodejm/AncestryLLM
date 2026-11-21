@@ -69,6 +69,17 @@ class JobState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class CommittedJobResult:
+    """Preserve a durable publication outcome despite concurrent cancellation.
+
+    Only trusted workers that have completed their irreversible commit may
+    return this marker. Ordinary results retain the final cancellation check.
+    """
+
+    result: Any
+
+
+@dataclass(frozen=True, slots=True)
 class ProgressEvent:
     """Report a typed progress update for a background job."""
 
@@ -405,6 +416,7 @@ class JobManager:
         token = self._token(job_id)
         result: Any = None
         result_available = False
+        committed = False
         try:
             with bind_cancellation_token(token):
                 try:
@@ -415,8 +427,12 @@ class JobManager:
                     token.raise_if_cancelled()
                     self._transition(job_id, JobState.RUNNING, started_at=_timestamp())
                     result = function(JobReporter(self, job_id))
-                    result_available = True
-                    token.raise_if_cancelled()
+                    committed = isinstance(result, CommittedJobResult)
+                    if isinstance(result, CommittedJobResult):
+                        result = result.result
+                    else:
+                        result_available = True
+                        token.raise_if_cancelled()
                 except CancellationError:
                     if result_available:
                         self._cleanup_result(job_id, result)
@@ -460,6 +476,7 @@ class JobManager:
                         JobState.COMPLETED,
                         finished_at=_timestamp(),
                         result=result,
+                        committed=committed,
                     )
         finally:
             for lock in reversed(acquired):
@@ -508,13 +525,19 @@ class JobManager:
         bounded = redacted.replace("\x00", "\ufffd")[:maximum]
         return bounded if bounded.strip() else "Sensitive background job detail was removed."
 
-    def _transition(self, job_id: str, state: JobState, **changes: Any) -> None:
+    def _transition(
+        self, job_id: str, state: JobState, *, committed: bool = False, **changes: Any
+    ) -> None:
         cleanup: tuple[Callable[[Any], None], Any] | None = None
         with self._lock:
             record = self._records[job_id]
             current = record.snapshot
             completed_result = changes.get("result") if state is JobState.COMPLETED else None
-            if state is JobState.COMPLETED and record.cancellation_accepted_at is not None:
+            if (
+                state is JobState.COMPLETED
+                and record.cancellation_accepted_at is not None
+                and not committed
+            ):
                 if completed_result is not None and record.result_cleanup is not None:
                     cleanup = (record.result_cleanup, completed_result)
                 state = JobState.CANCELLED

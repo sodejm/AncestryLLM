@@ -154,7 +154,10 @@ test('WebdriverIO suites remain explicit after the Mocha parent upgrade', () => 
   assert.doesNotMatch(wdioConfig, /^\s*watch\s*:/mu)
   assert.match(wdioConfig, /^\s*specs:\s*\[\],$/mu)
   assert.match(wdioConfig, /^\s*source:\s*\['\.\/e2e\/shell\.wdio\.ts'\],$/mu)
-  assert.match(wdioConfig, /^\s*packaged:\s*\['\.\/e2e\/packaged-shell\.wdio\.ts'\],$/mu)
+  assert.match(
+    wdioConfig,
+    /^\s*packaged:\s*\['\.\/e2e\/packaged-shell\.wdio\.ts', '\.\/e2e\/rootsmagic-workbench\.packaged\.wdio\.ts'\],$/mu,
+  )
 })
 
 test('packaging entry points fail closed for every nonempty legacy proxy switch', () => {

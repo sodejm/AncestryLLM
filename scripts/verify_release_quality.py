@@ -50,6 +50,7 @@ TARGET_RECEIPT_GATES = (
     "packagedSidecarWithholdRetryPassed",
     "packagedSidecarRestartExhaustionQuitPassed",
     "packagedSidecarIntegritySubstitutionPassed",
+    "packagedRootsMagicWorkbenchPassed",
 )
 TARGET_EVIDENCE_KEYS = {
     "schemaVersion",
@@ -71,11 +72,13 @@ TARGET_EVIDENCE_KEYS = {
     "rendererZeroEgressCanary",
     "normalLaunchDebugSurfaceAbsent",
     "packagedFileGrantSmoke",
+    "packagedRootsMagicWorkbench",
     "performancePassed",
     "gates",
     "receipts",
     "artifacts",
     "fileGrantMediation",
+    "rootsMagicWorkbench",
     "faultScenarios",
     "performance",
     "inspection",
@@ -84,6 +87,7 @@ TARGET_ARTIFACT_BINDINGS = (
     ("packageRuntimePassed", "metrics", "metrics"),
     ("fusesInspectedPassed", "fuseInspection", "fuseInspection"),
     ("packagedFileGrantSmokePassed", "fileGrantEvidence", "fileGrantEvidence"),
+    ("packagedRootsMagicWorkbenchPassed", "rootsMagicEvidence", "rootsMagicEvidence"),
     ("packagedSidecarWithholdRetryPassed", "faultEvidence", "withholdEvidence"),
     (
         "packagedSidecarRestartExhaustionQuitPassed",
@@ -109,6 +113,7 @@ TARGET_RECEIPT_ARTIFACTS: dict[str, frozenset[str]] = {
     "packagedSidecarIntegritySubstitutionPassed": frozenset(
         {"failureDiagnostics", "faultEvidence", "substitutedSidecar"}
     ),
+    "packagedRootsMagicWorkbenchPassed": frozenset({"rootsMagicEvidence"}),
 }
 TARGET_GATE_FLAGS = {
     "packageRuntime": "packageRuntimePassed",
@@ -117,6 +122,7 @@ TARGET_GATE_FLAGS = {
     "rendererZeroEgressCanary": "rendererZeroEgressCanaryPassed",
     "normalLaunchDebugSurfaceAbsent": "normalLaunchDebugSurfaceAbsentPassed",
     "packagedFileGrantSmoke": "packagedFileGrantSmokePassed",
+    "packagedRootsMagicWorkbench": "packagedRootsMagicWorkbenchPassed",
 }
 
 
@@ -265,6 +271,9 @@ def _target_receipt_commands(runner: str, sidecar_target: str) -> dict[str, dict
         "packagedSidecarIntegritySubstitutionPassed": scenario(
             "rejects a substituted packaged sidecar before launch"
         ),
+        "packagedRootsMagicWorkbenchPassed": scenario(
+            "queries and exports an immutable RootsMagic source through the native workbench"
+        ),
     }
 
 
@@ -275,6 +284,22 @@ FILE_GRANT_OBSERVATIONS = {
     "replacementConfirmed": True,
     "revocationPassed": True,
     "selectedPathsAbsent": True,
+}
+ROOTSMAGIC_WORKBENCH_OBSERVATIONS = {
+    "sourceInspection": True,
+    "peoplePaging": True,
+    "familyLinks": True,
+    "events": True,
+    "rootedPortableExport": True,
+    "livingExcluded": True,
+    "unrelatedExcluded": True,
+    "digestAgreement": True,
+    "sourceUnchanged": True,
+    "artifactReveal": True,
+    "sourceWorkspaceRetained": True,
+    "sourceDisposal": True,
+    "keyboardWorkflow": True,
+    "automatedWcagChecks": True,
 }
 FAULT_SCENARIOS: dict[str, dict[str, Any]] = {
     "packagedSidecarWithholdRetryPassed": {
@@ -966,6 +991,43 @@ def _validate_file_grant_mediation(value: Any, runner: str) -> None:
         _reject("RQ006", f"{observations_label} did not pass")
 
 
+def _validate_rootsmagic_workbench(value: Any, runner: str, sidecar_target: str) -> None:
+    label = f"{runner} RootsMagic workbench evidence"
+    evidence = _object(value, "RQ006", label)
+    _exact_keys(
+        evidence,
+        {
+            "schemaVersion",
+            "kind",
+            "status",
+            "target",
+            "verificationOnlyDialogAdapter",
+            "observations",
+        },
+        "RQ006",
+        label,
+    )
+    _schema_version(evidence["schemaVersion"], 1, "RQ006", label)
+    if (
+        evidence["kind"] != "ancestryllm-packaged-rootsmagic-workbench"
+        or evidence["status"] != "passed"
+        or evidence["verificationOnlyDialogAdapter"] is not True
+    ):
+        _reject("RQ006", f"{label} identity or result is invalid")
+    if evidence["target"] != sidecar_target:
+        _reject("RQ006", f"{label} target differs from {runner} ({sidecar_target})")
+    observations_label = f"{runner} RootsMagic workbench observations"
+    observations = _object(evidence["observations"], "RQ006", observations_label)
+    _exact_keys(
+        observations,
+        set(ROOTSMAGIC_WORKBENCH_OBSERVATIONS),
+        "RQ006",
+        observations_label,
+    )
+    if not _matches_typed_value(observations, ROOTSMAGIC_WORKBENCH_OBSERVATIONS):
+        _reject("RQ006", f"{observations_label} did not pass")
+
+
 def _validate_fault_scenarios(value: Any, runner: str) -> None:
     scenarios = _object(value, "RQ006", f"{runner} fault scenarios")
     expected_names = {str(spec["name"]) for spec in FAULT_SCENARIOS.values()}
@@ -1197,6 +1259,11 @@ def _validate_performance(
                     f"{runner} {target_artifact} is not bound to its successful receipt",
                 )
         _validate_file_grant_mediation(row["fileGrantMediation"], runner)
+        _validate_rootsmagic_workbench(
+            row["rootsMagicWorkbench"],
+            runner,
+            str(contract["sidecarTarget"]),
+        )
         _validate_fault_scenarios(row["faultScenarios"], runner)
         platform = str(contract["sidecarTarget"]).split("-", maxsplit=1)[0]
         _validate_inspection(row["inspection"], runner, platform)

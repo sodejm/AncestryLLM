@@ -20,6 +20,7 @@ function dependencies() {
       showOpenDialog: vi.fn().mockResolvedValue({ canceled: false, filePaths: ['/safe/tree.ged'] }),
       showSaveDialog: vi.fn().mockResolvedValue({ canceled: false, filePath: '/safe/report.md' }),
       showMessageBox: vi.fn().mockResolvedValue({ response: 0 }),
+      showItemInFolder: vi.fn(),
     },
   }
 }
@@ -76,5 +77,41 @@ describe('native file dialog adapter', () => {
       cancelId: 0,
     })
     expect(JSON.stringify(options)).not.toContain('/safe/')
+  })
+
+  it('selects the exact new RootsMagic output path and preserves cancellation', async () => {
+    const selected = dependencies()
+    selected.port.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/safe/Tree Export' })
+    const dialogs = createNativeFileDialogPort(selected.port)
+
+    await expect(dialogs.selectNewOutputDirectory({}, 'Tree Export')).resolves.toBe('/safe/Tree Export')
+    expect(selected.port.showSaveDialog).toHaveBeenCalledWith(selected.window, {
+      title: 'Choose a new RootsMagic export folder',
+      defaultPath: 'Tree Export',
+      showsTagField: false,
+      filters: [],
+    })
+
+    const canceled = dependencies()
+    canceled.port.showSaveDialog.mockResolvedValue({ canceled: true })
+    await expect(createNativeFileDialogPort(canceled.port).selectNewOutputDirectory({}, 'Tree Export'))
+      .resolves.toBeNull()
+  })
+
+  it('reveals the exact completed folder and maps native failures to a coded error', async () => {
+    const working = dependencies()
+    await expect(createNativeFileDialogPort(working.port).reveal('/safe/Tree Export')).resolves.toBeUndefined()
+    expect(working.port.showItemInFolder).toHaveBeenCalledWith('/safe/Tree Export')
+
+    const failingReveal = dependencies()
+    failingReveal.port.showItemInFolder.mockImplementation(() => { throw new Error('native failure') })
+    await expect(createNativeFileDialogPort(failingReveal.port).reveal('/safe/Tree Export')).rejects.toMatchObject({
+      code: 'FILE_DIALOG_FAILED',
+    })
+
+    const failingPicker = dependencies()
+    failingPicker.port.showSaveDialog.mockRejectedValue(new Error('native failure'))
+    await expect(createNativeFileDialogPort(failingPicker.port).selectNewOutputDirectory({}, 'Tree Export'))
+      .rejects.toMatchObject({ code: 'FILE_DIALOG_FAILED' })
   })
 })

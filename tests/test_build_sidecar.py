@@ -82,6 +82,16 @@ def test_pyinstaller_collects_runtime_grammar_data(tmp_path: Path) -> None:
     assert [arguments[index + 1] for index in collect_data_indexes] == ["rfc3987_syntax"]
 
 
+def test_pyinstaller_includes_dynamically_loaded_sqlite_dialect(tmp_path: Path) -> None:
+    arguments = pyinstaller_arguments(tmp_path / "output", "darwin-arm64", tmp_path / "work")
+    imports = [
+        arguments[index + 1]
+        for index, argument in enumerate(arguments)
+        if argument == "--hidden-import"
+    ]
+    assert "sqlglot.dialects.sqlite" in imports
+
+
 def test_payload_manifest_is_deterministic_and_covers_the_complete_payload(
     tmp_path: Path,
 ) -> None:

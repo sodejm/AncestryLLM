@@ -116,15 +116,50 @@ supplies its canonical staging directory through the private launch frame:
 - `POST /api/v1/gedcom/intake/{job_id}/discard` revokes access, forgets the
   result, and requests cancellation if inspection is still running.
 
+Issue #119 adds seven private native RootsMagic path templates using the same
+Main-owned private mediation directory:
+
+- `POST /api/v1/rootsmagic/sources` consumes one source capability and submits inspection.
+- `POST /api/v1/rootsmagic/sources/{source_ref}/discard` revokes the source session.
+- `GET /api/v1/rootsmagic/presets` returns the three fixed query definitions.
+- `POST /api/v1/rootsmagic/queries` submits a preset query with bounded parameters.
+- `POST /api/v1/rootsmagic/exports` consumes a new-folder capability for a rooted export.
+- `POST /api/v1/rootsmagic/submissions/{capability}/cancel` cancels a submission
+  after a lost response and returns an already accepted export's job when available.
+- `GET /api/v1/rootsmagic/jobs/{job_id}/result` returns an owned completed result.
+
+Requests require schema version 1 and reject unknown fields. Source and output
+capabilities are opaque 64-character identifiers. Query IDs are `people`,
+`family_links`, or `events`; selected person IDs are integers from 1 through
+9,007,199,254,740,991 so native JavaScript clients preserve their identity exactly.
+Larger SQLite IDs are returned as decimal text and cannot be selected. Literal
+name filters contain at most 200 characters, page sizes are
+1–100, and offsets are 0–1,000,000. Related-person presets require a person;
+People accepts only the optional name filter and pagination. Export generations
+are 1–100 when supplied. Only connected, ancestors, and descendants scopes and
+exclude, include, and anonymize living policies are accepted. These routes
+accept neither SQL nor paths. Results remain private to the current sidecar
+session and become unavailable after discard or restart. Main uses bounded
+submission recovery against the original sidecar session: an interrupted
+inspection releases its source allowance, while a committed export retains its
+job and receipt. Recovery also consumes an unaccepted capability so a delayed
+submission cannot reuse it.
+
+The private source manifest uses schema version 2 and carries exact decimal
+device/inode identities, sizes, and SHA-256 digests for the picker-approved
+database and each present WAL/SHM companion. Missing companions are explicit.
+The sidecar checks this approved generation before reading the snapshot.
+This private manifest version does not change the HTTP request schema.
+
 The base control composition has twenty-five exact path templates; native
-intake adds four, and the committed OpenAPI composition includes all thirty-six
-by explicitly supplying both adapters. A composition without the corresponding
+intake adds four, RootsMagic adds seven, and the committed OpenAPI composition
+includes all forty-three by explicitly supplying the adapters. A composition without the corresponding
 authority omits those routes instead of advertising unusable operations. This
 is source-level capability, not evidence of supported packaged GEDCOM workflows.
-There is no generic command or route dispatcher, RootsMagic, storage, host-file,
+There is no generic command or route dispatcher, storage, host-file,
 direct-provider, or tool-capable route. Only the fixed chat and explicitly
 composed provider-capable GEDCOM operations can execute a provider; native
-intake is deterministic and network-free. Credential and provider-configuration
+intake and RootsMagic presets/exports are deterministic and network-free. Credential and provider-configuration
 routes cannot read a secret value or execute a provider. General job routes
 expose lifecycle metadata only; they do not admit work. Follow-on workflows
 must adapt the same transport-neutral application services.

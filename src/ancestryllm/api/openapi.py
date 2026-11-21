@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from ancestryllm.api.gedcom_intake import GedcomIntake
+    from ancestryllm.api.rootsmagic_workbench import NativeRootsMagicWorkbench
     from ancestryllm.application.gedcom_jobs import GedcomJobFacade
     from ancestryllm.core.commands import ModuleDescriptor
 
@@ -53,6 +54,7 @@ def contract_app() -> FastAPI:
         secret_service=SecretManagementService(MemorySecretStore({})),
         gedcom_job_service=lambda: cast("GedcomJobFacade", object()),
         gedcom_intake=lambda: cast("GedcomIntake", object()),
+        rootsmagic_workbench=lambda: cast("NativeRootsMagicWorkbench", object()),
     )
 
 
