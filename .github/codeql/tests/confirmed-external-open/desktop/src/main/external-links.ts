@@ -1,3 +1,4 @@
+/** Exercises destination-bound confirmation; marked unsafe cases are intentional fixtures. */
 declare const operations: any, shell: any, dialog: any, flag: boolean;
 declare function validateExternalLink(value: string): string;
 declare function externalLinkPrompt(value: string): unknown;

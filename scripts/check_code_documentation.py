@@ -35,11 +35,13 @@ from typing import Final
 # Extensions whose files carry executable/behaviour-defining configuration or
 # first-party code and therefore require file-level documentation.
 FIRST_PARTY_CODE_EXTENSIONS: Final = frozenset(
-    {".py", ".ts", ".tsx", ".js", ".mjs", ".sh", ".swift", ".html", ".css"}
+    {".py", ".ts", ".tsx", ".js", ".mjs", ".sh", ".swift", ".html", ".css", ".ql", ".qll"}
 )
 
 # Makefile and comment-capable config formats that require file-level purpose comments.
-EXEC_CONFIG_EXTENSIONS: Final = frozenset({".dockerfile", ".graphql", ".yml", ".yaml", ".toml"})
+EXEC_CONFIG_EXTENSIONS: Final = frozenset(
+    {".dockerfile", ".graphql", ".yml", ".yaml", ".toml", ".qls"}
+)
 
 # Extensions that identify generated/vendored or lock files — excluded from
 # documentation requirements but must be explicitly classified.
@@ -57,14 +59,18 @@ NON_CODE_DOC_EXTENSIONS: Final = frozenset({".md", ".png", ".rst", ".txt"})
 # explained in NON_COMMENT_FORMAT_MAP below.
 NON_COMMENT_FORMAT_EXTENSIONS: Final = frozenset({".json", ".plist", ".xml"})
 
-# Files whose suffix ordinarily permits comments but whose stricter parser contract
-# intentionally does not. These Compose manifests remain strict JSON so duplicate
-# keys and non-JSON YAML constructs fail closed.
+# Exact reviewed files whose parser contract does not permit purpose comments.
+# Compose manifests remain strict JSON; CodeQL references and expected tables
+# retain their CLI-defined literal formats without a blanket suffix exemption.
 NON_COMMENT_FORMAT_PATHS: Final = frozenset(
     {
         "containers/compose.yaml",
         "containers/compose.local.yaml",
         "containers/compose.remote.yaml",
+        ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.qlref",
+        ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.expected",
+        ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.qlref",
+        ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.expected",
     }
 )
 
@@ -89,8 +95,13 @@ EXTENSIONLESS_BASENAMES: Final = {
 # Pseudo-extensions for files with compound names or known special cases.
 KNOWN_SPECIAL_EXTENSIONS: Final = frozenset({".example", ".in"})
 
-# Non-comment JSON/plist files mapped to their adjacent authoritative document.
+# Non-comment formats mapped to their authoritative document.
 NON_COMMENT_FORMAT_MAP: Final[dict[str, str]] = {
+    # CodeQL query references and exact result tables; comments would alter the input.
+    ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.qlref": ".github/codeql/README.md",
+    ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.expected": ".github/codeql/README.md",
+    ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.qlref": ".github/codeql/README.md",
+    ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.expected": ".github/codeql/README.md",
     # Strict-JSON Compose topology and reviewed deployment profiles.
     "containers/compose.yaml": "docs/DEPLOYMENT.md",
     "containers/compose.local.yaml": "docs/DEPLOYMENT.md",
@@ -591,7 +602,7 @@ def _has_file_level_comment(path: Path) -> bool:
         return False
 
     suffix = path.suffix.lower()
-    if suffix in {".ts", ".tsx", ".js", ".mjs"}:
+    if suffix in {".ts", ".tsx", ".js", ".mjs", ".ql", ".qll"}:
         return _has_jsdoc_header(text)
     if suffix == ".swift":
         return _has_swift_doc_header(text)

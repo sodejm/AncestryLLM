@@ -1,3 +1,4 @@
+/** Exercises cross-module confirmation adapters with intentional safe and unsafe fixtures. */
 import { openExternalLinkWithConfirmation } from './external-links';
 declare const shell: any, dialog: any;
 declare function externalLinkPrompt(value: string): unknown;

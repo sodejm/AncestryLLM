@@ -60,6 +60,9 @@ _CLASSIFICATION_CASES: dict[str, tuple[str, str]] = {
         "first-party-script",
     ),
     "yaml-workflow": (".github/workflows/ci.yml", "first-party-config-exec"),
+    "codeql-query": (".github/codeql/queries/example.ql", "first-party-code"),
+    "codeql-library": (".github/codeql/queries/example.qll", "first-party-code"),
+    "codeql-suite": (".github/codeql/desktop-guards.qls", "first-party-config-exec"),
     "toml-pyproject": ("pyproject.toml", "first-party-config-exec"),
     "graphql-query": (
         "config/release-project-query-v1.graphql",
@@ -123,6 +126,12 @@ class TestClassify:
         with pytest.raises(ValueError, match="unclassified"):
             classify("src/ancestryllm/foo.xyz")
 
+    @pytest.mark.parametrize("suffix", ["qlref", "expected"])
+    @pytest.mark.parametrize("directory", ["tests", ".github/codeql/tests/unreviewed"])
+    def test_unreviewed_codeql_fixture_format_raises(self, suffix: str, directory: str) -> None:
+        with pytest.raises(ValueError, match="unclassified"):
+            classify(f"{directory}/example.{suffix}")
+
 
 # ---------------------------------------------------------------------------
 # check_inventory() — whole-list diagnostics
@@ -157,6 +166,28 @@ class TestCheckInventory:
         diagnostics = check_inventory(tracked, tmp_path)
         assert any("unknown-extension" in d for d in diagnostics)
         assert any("src/foo.xyz" in d for d in diagnostics)
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.qlref",
+            ".github/codeql/tests/authorized-ipc/RequireAuthorizedDesktopIpc.expected",
+            ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.qlref",
+            ".github/codeql/tests/confirmed-external-open/RequireConfirmedExternalOpen.expected",
+        ],
+    )
+    def test_codeql_parser_formats_require_authoritative_document(
+        self, tmp_path: Path, relative_path: str
+    ) -> None:
+        assert classify(relative_path) == "non-comment-format"
+        assert NON_COMMENT_FORMAT_MAP[relative_path] == ".github/codeql/README.md"
+        assert check_inventory([relative_path], tmp_path) == [
+            f"{relative_path}:non-comment-format-map-target-missing"
+        ]
+        document = tmp_path / ".github/codeql/README.md"
+        document.parent.mkdir(parents=True)
+        document.write_text("# Desktop CodeQL guards\n")
+        assert check_inventory([relative_path], tmp_path) == []
 
     def test_permanent_baseline_is_forbidden(self, tmp_path: Path) -> None:
         baseline = tmp_path / "docs" / "CODE_DOCUMENTATION_BASELINE.txt"
@@ -286,6 +317,21 @@ class TestTrackedFiles:
 
 class TestCheckFileDocumentation:
     """Tests for the per-file documentation presence check."""
+
+    @pytest.mark.parametrize("suffix", ["ql", "qll", "qls"])
+    @pytest.mark.parametrize("documented", [True, False])
+    def test_codeql_sources_require_meaningful_header(
+        self, tmp_path: Path, suffix: str, documented: bool
+    ) -> None:
+        relative_path = f".github/codeql/example.{suffix}"
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True)
+        purpose = "Checks desktop trust boundaries." if documented else "TODO"
+        header = f"# {purpose}\n" if suffix == "qls" else f"/** {purpose} */\n"
+        source = "- queries: queries\n" if suffix == "qls" else "import javascript\n"
+        target.write_text(header + source)
+        expected = [] if documented else [f"{relative_path}:missing-file-header-comment"]
+        assert check_file_documentation(relative_path, tmp_path) == expected
 
     @pytest.mark.parametrize(
         ("relative_path", "fixture_name"),

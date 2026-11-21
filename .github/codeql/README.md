@@ -44,6 +44,10 @@ codeql test run .github/codeql/tests --threads=2 --ram=4096
 ```
 
 The expected files enumerate every unsafe fixture and omit every safe fixture.
+Each `.qlref` contains the relative query path, and each `.expected` contains the
+CLI's exact result table, including source locations and diagnostic text. These
+four parser inputs carry no purpose comments; this README is their authoritative
+documentation under the repository's exact-path documentation policy.
 For sandboxed local runs, append `--common-caches=.cache/codeql/common`. Production
 analysis must also remain clean when changing a query, so the fixtures cannot
 silently replace validation against the real wrapper and registration helper.

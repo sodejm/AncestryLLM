@@ -1,3 +1,4 @@
+/** Exercises IPC authorization guards; marked unsafe cases are intentional fixtures. */
 declare const ipc: any, authorize: any, schedule: any, unauthorized: any, flag: boolean;
 declare const otherEvent: unknown, fileGrants: any;
 

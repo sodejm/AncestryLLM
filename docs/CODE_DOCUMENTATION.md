@@ -46,6 +46,10 @@ they intentionally remain strict JSON-compatible YAML so duplicate keys and non-
 constructs fail closed. Their semantics must be explained in an adjacent authoritative
 document mapped in `NON_COMMENT_FORMAT_MAP` inside `scripts/check_code_documentation.py`.
 
+The four reviewed CodeQL regression `.qlref` and `.expected` paths use literal query
+references and exact result tables, respectively. They are individually classified and
+mapped to `.github/codeql/README.md`; other paths with these suffixes fail closed.
+
 Vendor patch syntax does not have a portable file-header comment form. Such artifacts are
 classified as `generated-vendor` only when their exact repository path appears in
 `GENERATED_VENDOR_PATHS`; an unreviewed patch path remains an unknown extension and fails
@@ -102,6 +106,13 @@ installation and security guidance.
 - Swift DocC-compatible `///` comments document the file's purpose and all callable
   declarations.
 - Parameter, return, error, and platform/keychain behaviour documented where applicable.
+
+### CodeQL (`.ql`, `.qll`, `.qls`)
+
+- Queries and libraries are first-party code and require a meaningful `/** … */` purpose
+  header. Query metadata may provide that purpose through its name and description.
+- Query suites are executable configuration and require a leading `#` purpose comment.
+- Deliberately unsafe TypeScript query fixtures retain the normal module-header requirement.
 
 ### Shell (`.sh`)
 
