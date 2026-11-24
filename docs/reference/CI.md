@@ -314,13 +314,19 @@ changed archive, missing reviewed rule, conflicting rule ID, or unreviewed
 redirect fails closed.
 
 The registry snapshots contain 151 Python rules and 52 secrets rules, plus the
-ten selected Trail of Bits rules below. When registry content changes, review
-the downloaded rules and selected IDs, update both the byte and semantic pins
-in `scripts/run_pinned_semgrep.py` and its contract tests, and run the security
-gate before committing. For a new byte encoding of an existing ruleset,
-verify that the decoded rules produce the reviewed semantic digest before
-adding the byte digest. The secrets and Trail of Bits bundles each have two
-reviewed byte encodings with identical decoded rules. Remove obsolete byte
+ten selected Trail of Bits rules below. The Python and Trail of Bits bundles
+pin exact bytes plus semantic content. The secrets snapshot instead retrieves
+each reviewed rule through its version-specific Semgrep Registry endpoint;
+the committed rule-ID/version-ID pairs and aggregate semantic digest cover the
+whole set before generated-config deduplication. When registry content changes, review the downloaded rules and
+selected IDs, update the applicable pins in `scripts/run_pinned_semgrep.py`
+and its contract tests, and run the security gate before committing. For a new
+byte encoding of an existing bundle, verify that the decoded rules produce the
+reviewed semantic digest before adding the byte digest. For a secrets update,
+compare every versioned definition with the approved snapshot, pin its expected
+version ID and the aggregate semantic digest, and never treat a fresh
+`p/secrets` response hash as approval. The Trail of Bits bundle has two
+reviewed byte encodings with identical decoded rules; remove obsolete byte
 encodings when the rules change.
 
 The reviewed third-party additions deliberately cover only current repository
