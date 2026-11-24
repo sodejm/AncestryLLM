@@ -10,10 +10,10 @@ semantic differences for the evaluated commit.
 | Item | Result |
 | --- | --- |
 | Production backend | `setuptools.build_meta` with `setuptools>=83` |
-| Candidate backend | `uv_build` resolved to 0.12.3 from `uv_build>=0.12.0,<0.13` |
-| Build frontend | Verified repository-local `uv 0.12.1` |
-| Evaluated source | `b94f5b8338079d05bd0b386df6c5ec9b33b55422` |
-| `SOURCE_DATE_EPOCH` | `1786426222` |
+| Candidate backend | `uv_build` resolved to 0.12.24 from `uv_build>=0.12.0,<0.13` |
+| Build frontend | Verified repository-local `uv 0.13.9` |
+| Evaluated source | `43fab33226ff203e0865511949d9fa90d6170bbb` |
+| `SOURCE_DATE_EPOCH` | `1795493199` |
 | Evaluation status | **Incompatible** |
 | 0.7 decision | Adoption rejected/deferred under #305 for this candidate and configuration |
 
