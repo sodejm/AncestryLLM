@@ -6,11 +6,15 @@ import errno
 import json
 import subprocess
 from email.message import Message
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from scripts.container_ci_smoke import ContainerLifecycleError, _prove_logs_exclude_probe_token
+from scripts.container_ci_smoke import (
+    ContainerLifecycleError,
+    _prove_logs_exclude_probe_token,
+    _read_inventory,
+)
 
 from ancestryllm.container_inventory import build_inventory, build_operating_system_inventory
 from ancestryllm.container_runtime import ContainerRuntimeError, publish_private_runtime_file
@@ -29,6 +33,9 @@ class _Distribution:
         *,
         license_expression: str | None = None,
         classifiers: tuple[str, ...] = (),
+        license_files: dict[str, bytes] | None = None,
+        license_files_directory: bool = True,
+        license_files_dist_info: str = "fictional_package",
     ) -> None:
         package_metadata = Message()
         if name is not None:
@@ -39,7 +46,27 @@ class _Distribution:
             package_metadata["License-Expression"] = license_expression
         for classifier in classifiers:
             package_metadata["Classifier"] = classifier
+        self._license_files: dict[PurePosixPath, bytes] = {}
+        for license_file, content in (license_files or {}).items():
+            package_metadata["License-File"] = license_file
+            directory = PurePosixPath(f"{license_files_dist_info}-{version}.dist-info")
+            location = directory / license_file
+            if license_files_directory:
+                location = directory / "licenses" / license_file
+            self._license_files[location] = content
         self.metadata = package_metadata
+        self.files = tuple(self._license_files)
+
+    def locate_file(self, path: PurePosixPath) -> _LicenseFile:
+        return _LicenseFile(self._license_files[path])
+
+
+class _LicenseFile:
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+
+    def read_bytes(self) -> bytes:
+        return self._content
 
 
 def _distribution(
@@ -48,6 +75,9 @@ def _distribution(
     *,
     license_expression: str | None = None,
     classifiers: tuple[str, ...] = (),
+    license_files: dict[str, bytes] | None = None,
+    license_files_directory: bool = True,
+    license_files_dist_info: str = "fictional_package",
 ) -> metadata.Distribution:
     return cast(
         "metadata.Distribution",
@@ -56,6 +86,9 @@ def _distribution(
             version,
             license_expression=license_expression,
             classifiers=classifiers,
+            license_files=license_files,
+            license_files_directory=license_files_directory,
+            license_files_dist_info=license_files_dist_info,
         ),
     )
 
@@ -124,7 +157,7 @@ def test_package_inventory_is_schema_versioned_sorted_and_secret_free() -> None:
         ),
     )
 
-    assert inventory["schema_version"] == 1
+    assert inventory["schema_version"] == 2
     assert inventory["status"] == "complete"
     packages = inventory["python_packages"]
     names = [package["name"] for package in packages]
@@ -132,7 +165,9 @@ def test_package_inventory_is_schema_versioned_sorted_and_secret_free() -> None:
     assert "ancestryllm" in names
     assert "uvicorn" in names
     assert packages[0]["license_classifiers"] == ["OSI Approved :: MIT License"]
+    assert packages[0]["license_file_sha256"] == []
     assert packages[1]["license"] == "BSD-3-Clause"
+    assert packages[1]["license_file_sha256"] == []
     serialized = json.dumps(inventory, sort_keys=True)
     assert str(Path.home()) not in serialized
     assert "environment" not in serialized.casefold()
@@ -202,6 +237,54 @@ def test_inventory_rejects_missing_python_license_evidence() -> None:
         )
 
 
+def test_inventory_accepts_and_hashes_declared_python_license_file() -> None:
+    inventory = build_inventory(
+        (
+            _distribution(
+                "fictional-package",
+                "1.0",
+                license_files={"LICENSE": b"reviewed license evidence\n"},
+            ),
+        ),
+        operating_system_packages=(),
+    )
+
+    package = inventory["python_packages"][0]
+    assert package["license"] == "UNKNOWN"
+    assert package["license_classifiers"] == []
+    assert package["license_file_sha256"] == [
+        "d1235bb54dfefd86869bda9b761d561f8aa61899aa36d4099271abfd47102b9d"
+    ]
+
+
+def test_inventory_accepts_declared_legacy_python_license_file() -> None:
+    inventory = build_inventory(
+        (
+            _distribution(
+                "fictional-package",
+                "1.0",
+                license_files={"LICENSE": b"reviewed license evidence\n"},
+                license_files_directory=False,
+            ),
+        ),
+        operating_system_packages=(),
+    )
+
+    assert inventory["python_packages"][0]["license_file_sha256"] == [
+        "d1235bb54dfefd86869bda9b761d561f8aa61899aa36d4099271abfd47102b9d"
+    ]
+
+
+def test_inventory_rejects_missing_declared_python_license_file() -> None:
+    distribution = _Distribution("fictional-package", "1.0")
+    distribution.metadata["License-File"] = "LICENSE"
+
+    with pytest.raises(ContainerRuntimeError, match="CONTAINER_INVENTORY_LICENSE_MISSING"):
+        build_inventory(
+            (cast("metadata.Distribution", distribution),), operating_system_packages=()
+        )
+
+
 def test_inventory_rejects_duplicate_normalized_package_identity() -> None:
     with pytest.raises(ContainerRuntimeError, match="CONTAINER_INVENTORY_DUPLICATE"):
         build_inventory(
@@ -229,6 +312,47 @@ class _SplitStreamLogDocker:
             "",
             "Authorization: Bearer fictional-token\n",
         )
+
+
+class _InventoryDocker:
+    def __init__(self, inventory: dict[str, object]) -> None:
+        self._inventory = inventory
+
+    def run(
+        self,
+        *arguments: str,
+        check: bool = True,
+        timeout: int = 120,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, timeout
+        assert arguments[0] == "exec"
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(self._inventory), "")
+
+
+def test_lifecycle_inventory_accepts_declared_license_file_evidence() -> None:
+    inventory = build_inventory(
+        (
+            _distribution("ancestryllm", "0.6.0", license_expression="MIT"),
+            _distribution(
+                "sqlcipher3",
+                "0.6.5",
+                license_files={"LICENSE": b"reviewed PEP 639 license evidence\n"},
+                license_files_dist_info="sqlcipher3",
+            ),
+            _distribution("uvicorn", "0.54.0", license_expression="BSD-3-Clause"),
+        ),
+        operating_system_packages=(
+            {
+                "name": "base-files",
+                "version": "13",
+                "architecture": "amd64",
+                "licenses": ["GPL"],
+                "license_file_sha256": "b" * 64,
+            },
+        ),
+    )
+
+    assert _read_inventory(cast("Docker", _InventoryDocker(inventory)), "gateway") == inventory
 
 
 def test_log_redaction_proof_scans_docker_stderr() -> None:

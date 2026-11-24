@@ -248,7 +248,7 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert "ANCESTRYLLM_DOCS_SCREENSHOT_REPORT:" not in job.split("steps:\n", maxsplit=1)[0]
     assert "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0" in job
     assert 'node-version: "26.5.0"' in job
-    assert "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0" in job
+    assert "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1" in job
     assert 'version: "11.9.0"' in job
     for package in (
         "locales=2.39-0ubuntu8.12",
@@ -287,7 +287,7 @@ def test_all_workflows_use_the_cross_platform_pnpm_setup_action() -> None:
     workflows = "\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
 
     assert (
-        workflows.count("pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0") == 7
+        workflows.count("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1") == 7
     )
     assert "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320" not in workflows
 
@@ -500,7 +500,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     lock_versions = {
         package["name"]: package["version"] for package in lock["package"] if "version" in package
     }
-    assert lock_versions["ruff"] == "0.16.3"
+    assert lock_versions["ruff"] == "0.17.6"
     assert bootstrap_policy["uv"]["version"] == "0.12.1"
     assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
 
@@ -529,7 +529,7 @@ def test_code_docs_check_is_required_in_ci_and_release_readiness() -> None:
     ci_quality = _job(ci, "quality")
     readiness_quality = _job(readiness, "quality")
     setup_node = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
-    setup_pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413"
+    setup_pnpm = "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115"
 
     for quality_job in (ci_quality, readiness_quality):
         assert quality_job.count("make code-docs-check") == 1

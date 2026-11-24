@@ -8,8 +8,8 @@ import json
 import platform
 import re
 from importlib import metadata
-from pathlib import Path
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, cast
 
 from ancestryllm.container_runtime import ContainerRuntimeError
 
@@ -32,6 +32,68 @@ def _bounded_license(value: str | None) -> str:
     if not normalized or len(normalized) > 256:
         return "UNKNOWN"
     return normalized
+
+
+def _python_license_file_hashes(
+    distribution: metadata.Distribution,
+    package_metadata: metadata.PackageMetadata,
+    raw_name: str,
+    version: str,
+) -> list[str]:
+    """Return retained, declared wheel-license evidence without exposing paths."""
+
+    declared_files = package_metadata.get_all("License-File", [])
+    if not declared_files:
+        return []
+    distribution_files = distribution.files or ()
+    dist_info_suffix = f"-{version}.dist-info"
+    digests: list[str] = []
+    for declared_file in declared_files:
+        declared_path = PurePosixPath(declared_file)
+        if declared_path.is_absolute() or ".." in declared_path.parts:
+            raise ContainerRuntimeError(
+                "CONTAINER_INVENTORY_LICENSE_MISSING",
+                "An installed Python distribution declared invalid license-file evidence.",
+            )
+        accepted_suffixes = (
+            ("licenses", *declared_path.parts),
+            declared_path.parts,
+        )
+        matching_files = [
+            path
+            for path in distribution_files
+            if (parts := PurePosixPath(str(path)).parts)
+            and any(
+                len(parts) == len(suffix) + 1
+                and parts[-len(suffix) :] == suffix
+                and (directory := parts[-len(suffix) - 1])
+                .casefold()
+                .endswith(dist_info_suffix.casefold())
+                and _normalized_name(directory[: -len(dist_info_suffix)])
+                == _normalized_name(raw_name)
+                for suffix in accepted_suffixes
+            )
+        ]
+        if len(matching_files) != 1:
+            raise ContainerRuntimeError(
+                "CONTAINER_INVENTORY_LICENSE_MISSING",
+                "An installed Python distribution omitted its declared license-file evidence.",
+            )
+        try:
+            license_file = cast("Path", distribution.locate_file(matching_files[0]))
+            content = license_file.read_bytes()
+        except OSError as exc:
+            raise ContainerRuntimeError(
+                "CONTAINER_INVENTORY_LICENSE_MISSING",
+                "An installed Python distribution omitted its declared license-file evidence.",
+            ) from exc
+        if not content:
+            raise ContainerRuntimeError(
+                "CONTAINER_INVENTORY_LICENSE_MISSING",
+                "An installed Python distribution declared empty license-file evidence.",
+            )
+        digests.append(hashlib.sha256(content).hexdigest())
+    return sorted(digests)
 
 
 def _debian_paragraphs(value: str) -> list[dict[str, str]]:
@@ -150,7 +212,10 @@ def build_inventory(
         license_identity = _bounded_license(
             package_metadata.get("License-Expression") or package_metadata.get("License")
         )
-        if license_identity == "UNKNOWN" and not license_classifiers:
+        license_file_hashes = _python_license_file_hashes(
+            distribution, package_metadata, raw_name, version
+        )
+        if license_identity == "UNKNOWN" and not license_classifiers and not license_file_hashes:
             raise ContainerRuntimeError(
                 "CONTAINER_INVENTORY_LICENSE_MISSING",
                 "An installed Python distribution omitted its reviewed license evidence.",
@@ -161,6 +226,7 @@ def build_inventory(
                 "version": version,
                 "license": license_identity,
                 "license_classifiers": license_classifiers,
+                "license_file_sha256": license_file_hashes,
             }
         )
     packages.sort(key=lambda item: str(item["name"]).casefold())
@@ -205,7 +271,7 @@ def build_inventory(
         os_seen.add(os_name)
     os_packages.sort(key=lambda item: str(item["name"]))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "python": {
             "implementation": platform.python_implementation(),

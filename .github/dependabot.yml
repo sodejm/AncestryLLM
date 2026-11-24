@@ -31,3 +31,19 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+
+  - package-ecosystem: "npm"
+    directory: "/desktop"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    groups:
+      weekly-batch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "desktop"

@@ -26,9 +26,9 @@ def test_dependabot_batches_routine_updates_without_delaying_security_fixes() ->
         "version: 2",
         "updates:",
     ]
-    assert configuration.count('package-ecosystem: "') == 2
+    assert configuration.count('package-ecosystem: "') == 3
 
-    for ecosystem in ("uv", "github-actions"):
+    for ecosystem in ("uv", "npm", "github-actions"):
         block = _ecosystem_block(configuration, ecosystem)
         assert 'interval: "weekly"' in block
         assert "cooldown:\n      default-days: 3" in block

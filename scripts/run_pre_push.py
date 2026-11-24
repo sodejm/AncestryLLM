@@ -15,6 +15,20 @@ from pathlib import Path
 
 MINIMUM_TRIVY_VERSION = (0, 75)
 SEMGREP_LOCK = "scripts/run_pinned_semgrep.py.lock"
+GIT_REPOSITORY_ENV = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
 
 
 class PushGateError(RuntimeError):
@@ -31,6 +45,7 @@ def _execute(arguments: list[str], root: Path, *, capture: bool = False) -> byte
     result = subprocess.run(  # noqa: S603 - fixed tool arguments; no shell evaluation
         [executable, *arguments[1:]],
         cwd=root,
+        env={key: value for key, value in os.environ.items() if key not in GIT_REPOSITORY_ENV},
         stdout=subprocess.PIPE if capture else None,
         check=False,
     )

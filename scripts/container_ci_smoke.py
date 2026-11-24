@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import secrets
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 _IMAGE_ID = "sha256:"
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 _EXPECTED_PACKAGES = frozenset({"ancestryllm", "sqlcipher3", "uvicorn"})
 _FORBIDDEN_PACKAGES = frozenset(
     {
@@ -291,7 +293,7 @@ def _read_inventory(docker: Docker, gateway: str) -> dict[str, object]:
             "CONTAINER_INVENTORY_INVALID",
             "The embedded package and license inventory was malformed.",
         ) from exc
-    if not isinstance(inventory, dict) or inventory.get("schema_version") != 1:
+    if not isinstance(inventory, dict) or inventory.get("schema_version") != 2:
         _fail("CONTAINER_INVENTORY_INVALID", "The embedded inventory schema was unsupported.")
     packages = inventory.get("python_packages")
     if not isinstance(packages, list):
@@ -314,7 +316,16 @@ def _read_inventory(docker: Docker, gateway: str) -> dict[str, object]:
         or not all(
             isinstance(value, str) and value for value in item.get("license_classifiers", [])
         )
-        or (item.get("license") == "UNKNOWN" and not item.get("license_classifiers"))
+        or not isinstance(item.get("license_file_sha256"), list)
+        or not all(
+            isinstance(value, str) and _SHA256.fullmatch(value)
+            for value in item.get("license_file_sha256", [])
+        )
+        or (
+            item.get("license") == "UNKNOWN"
+            and not item.get("license_classifiers")
+            and not item.get("license_file_sha256")
+        )
         for item in packages
     ):
         _fail("CONTAINER_INVENTORY_INVALID", "A package omitted version or license evidence.")
