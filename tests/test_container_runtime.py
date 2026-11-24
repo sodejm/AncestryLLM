@@ -10,7 +10,11 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from scripts.container_ci_smoke import ContainerLifecycleError, _prove_logs_exclude_probe_token
+from scripts.container_ci_smoke import (
+    ContainerLifecycleError,
+    _prove_logs_exclude_probe_token,
+    _read_inventory,
+)
 
 from ancestryllm.container_inventory import build_inventory, build_operating_system_inventory
 from ancestryllm.container_runtime import ContainerRuntimeError, publish_private_runtime_file
@@ -31,6 +35,7 @@ class _Distribution:
         classifiers: tuple[str, ...] = (),
         license_files: dict[str, bytes] | None = None,
         license_files_directory: bool = True,
+        license_files_dist_info: str = "fictional_package",
     ) -> None:
         package_metadata = Message()
         if name is not None:
@@ -44,7 +49,7 @@ class _Distribution:
         self._license_files: dict[PurePosixPath, bytes] = {}
         for license_file, content in (license_files or {}).items():
             package_metadata["License-File"] = license_file
-            directory = PurePosixPath("fictional_package-1.0.dist-info")
+            directory = PurePosixPath(f"{license_files_dist_info}-{version}.dist-info")
             location = directory / license_file
             if license_files_directory:
                 location = directory / "licenses" / license_file
@@ -72,6 +77,7 @@ def _distribution(
     classifiers: tuple[str, ...] = (),
     license_files: dict[str, bytes] | None = None,
     license_files_directory: bool = True,
+    license_files_dist_info: str = "fictional_package",
 ) -> metadata.Distribution:
     return cast(
         "metadata.Distribution",
@@ -82,6 +88,7 @@ def _distribution(
             classifiers=classifiers,
             license_files=license_files,
             license_files_directory=license_files_directory,
+            license_files_dist_info=license_files_dist_info,
         ),
     )
 
@@ -305,6 +312,47 @@ class _SplitStreamLogDocker:
             "",
             "Authorization: Bearer fictional-token\n",
         )
+
+
+class _InventoryDocker:
+    def __init__(self, inventory: dict[str, object]) -> None:
+        self._inventory = inventory
+
+    def run(
+        self,
+        *arguments: str,
+        check: bool = True,
+        timeout: int = 120,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, timeout
+        assert arguments[0] == "exec"
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(self._inventory), "")
+
+
+def test_lifecycle_inventory_accepts_declared_license_file_evidence() -> None:
+    inventory = build_inventory(
+        (
+            _distribution("ancestryllm", "0.6.0", license_expression="MIT"),
+            _distribution(
+                "sqlcipher3",
+                "0.6.5",
+                license_files={"LICENSE": b"reviewed PEP 639 license evidence\n"},
+                license_files_dist_info="sqlcipher3",
+            ),
+            _distribution("uvicorn", "0.54.0", license_expression="BSD-3-Clause"),
+        ),
+        operating_system_packages=(
+            {
+                "name": "base-files",
+                "version": "13",
+                "architecture": "amd64",
+                "licenses": ["GPL"],
+                "license_file_sha256": "b" * 64,
+            },
+        ),
+    )
+
+    assert _read_inventory(cast("Docker", _InventoryDocker(inventory)), "gateway") == inventory
 
 
 def test_log_redaction_proof_scans_docker_stderr() -> None:
