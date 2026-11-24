@@ -204,8 +204,7 @@ export async function terminateNativeSidecarProcess(
   }
 
   if (platform !== 'win32' && child.pid !== undefined) {
-    let groupTerminationCompleted = false
-    let groupSurvived = false
+    let groupSurvived: boolean
     try {
       if (!posixGroup.exists(child.pid)) return
       posixGroup.signal(child.pid, 'SIGTERM')
@@ -216,16 +215,13 @@ export async function terminateNativeSidecarProcess(
         posixGroup,
         FORCE_TERMINATION_TIMEOUT_MS,
       ))
-      groupTerminationCompleted = true
     } catch {
       throw new Error('The sidecar process group could not be terminated.')
     }
-    if (groupTerminationCompleted) {
-      if (groupSurvived) {
-        throw new Error('The sidecar process group did not terminate.')
-      }
-      return
+    if (groupSurvived) {
+      throw new Error('The sidecar process group did not terminate.')
     }
+    return
   }
 
   if (child.exitCode !== null || child.signalCode !== null) return

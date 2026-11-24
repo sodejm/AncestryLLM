@@ -949,7 +949,6 @@ export class FileGrantBroker {
           binding.parentFingerprint,
           publicationAttempted ? basename(binding.path) : undefined,
         )
-        temporaryHandle = undefined
       } else if (!published && temporaryPath !== undefined) {
         await removeIfPresent(temporaryPath).catch(() => undefined)
       }

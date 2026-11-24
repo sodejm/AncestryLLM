@@ -477,7 +477,7 @@ jobs:
           receipt-artifact-name: uv-bootstrap-release-desktop-${{ matrix.runner }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
           architecture: ${{ matrix.arch }}
           package-manager-cache: false
       - name: Verify native ARM64 runtimes on Windows
@@ -490,7 +490,7 @@ jobs:
           if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: "11.9.0"
+          version: "12.23.0"
       - name: Install wheel-only locked Python desktop build dependencies
         shell: bash
         run: |
@@ -1073,7 +1073,7 @@ jobs:
           architecture: ${{ matrix.runtime_arch }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
           architecture: ${{ matrix.runtime_arch }}
           package-manager-cache: false
       - name: Verify native ARM64 runtimes on Windows
@@ -1086,7 +1086,7 @@ jobs:
           if ($pythonPlatform -ne 'win-arm64') { throw "expected win-arm64 Python runtime, found $pythonPlatform" }
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: "11.9.0"
+          version: "12.23.0"
       - name: Install locked desktop test dependencies
         shell: bash
         run: node desktop/scripts/install-locked.mjs

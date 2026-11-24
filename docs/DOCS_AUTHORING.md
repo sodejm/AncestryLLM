@@ -201,8 +201,8 @@ source or installing tools. Operating-system text rendering can change PNG
 bytes even with the same bundled font; a native macOS capture is therefore not
 a publication baseline. From macOS or Windows, run the canonical commands
 inside an Ubuntu 24.04 x86_64 VM or container with the reviewed dependencies
-from `.github/workflows/ci.yml`. Run `make setup`, install exact Node 26.5.0 and
-pnpm 11.9.0, and use `xvfb-run --auto-servernum make docs-screenshots` followed
+from `.github/workflows/ci.yml`. Run `make setup`, install exact Node 26.13.1 and
+pnpm 12.23.0, and use `xvfb-run --auto-servernum make docs-screenshots` followed
 by `xvfb-run --auto-servernum make docs-screenshots-check`. Review the resulting
 images before committing them. The frozen desktop lock, manifest-owned locale,
 timezone, viewport, fonts, animation settings, and pinned virtual display

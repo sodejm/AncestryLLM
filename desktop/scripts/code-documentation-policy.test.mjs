@@ -141,7 +141,7 @@ test('workspace pins and invokes the reviewed desktop documentation policy', asy
   const packageJson = JSON.parse(await readFile(join(desktopDirectory, 'package.json'), 'utf8'))
   const eslintConfig = await readFile(join(desktopDirectory, 'eslint.config.js'), 'utf8')
 
-  assert.equal(packageJson.devDependencies['eslint-plugin-jsdoc'], '64.1.0')
+  assert.equal(packageJson.devDependencies['eslint-plugin-jsdoc'], '65.5.2')
   assert.equal(
     packageJson.scripts['docs:check'],
     'node scripts/check-code-documentation.mjs && eslint . --max-warnings=0',

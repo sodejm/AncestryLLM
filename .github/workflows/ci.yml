@@ -198,10 +198,10 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: "11.9.0"
+          version: "12.23.0"
           run_install: false
       - name: Set up verified uv
         uses: ./.github/actions/setup-verified-uv
@@ -250,10 +250,10 @@ jobs:
           receipt-artifact-name: uv-bootstrap-ci-docs-screenshots
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          version: "11.9.0"
+          version: "12.23.0"
           run_install: false
       - name: Install deterministic display and locale packages
         run: |
@@ -263,8 +263,8 @@ jobs:
             xauth=1:1.1.2-1build1 \
             xvfb=2:21.1.12-1ubuntu1.9
           sudo locale-gen en_US.UTF-8
-          test "$(node --version)" = "v26.5.0"
-          test "$(pnpm --version)" = "11.9.0"
+          test "$(node --version)" = "v26.13.1"
+          test "$(pnpm --version)" = "12.23.0"
           test "$(dpkg-query --showformat='${Version}' --show locales)" = "2.39-0ubuntu8.12"
           test "$(dpkg-query --showformat='${Version}' --show xauth)" = "1:1.1.2-1build1"
           test "$(dpkg-query --showformat='${Version}' --show xvfb)" = "2:21.1.12-1ubuntu1.9"

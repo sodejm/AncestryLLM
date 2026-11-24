@@ -763,7 +763,7 @@ export class SidecarSupervisor {
     } catch (error) {
       this.reportUnavailable('startup_failed')
       if (error instanceof SidecarShutdownTimeoutError) throw error
-      throw new Error('Sidecar shutdown failed.')
+      throw new Error('Sidecar shutdown failed.', { cause: error })
     }
     this.transition('stopped', null)
   }

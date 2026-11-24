@@ -38,6 +38,11 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // The desktop renderer does not opt into React Compiler. Its bridge initialization and
+      // subscription effects intentionally synchronize local asynchronous state and refs.
+      // Preserve the established Hooks correctness rules without claiming compiler compatibility.
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       'no-restricted-imports': ['error', { patterns: ['node:*', 'electron', 'node_modules/*'] }],
     },

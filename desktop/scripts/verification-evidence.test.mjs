@@ -572,10 +572,10 @@ test('aggregate requires six exact-head rows, security, raw receipts, and raw bo
   assert.deepEqual(aggregate.publicationRequirements, { desktopInstaller: true })
   assert.deepEqual(aggregate.toolVersions, {
     python: '3.12',
-    node: '26.5.0',
-    pnpm: '11.9.0',
-    vitest: '4.1.12',
-    webdriverio: '9.32.0',
+    node: '26.13.1',
+    pnpm: '12.23.0',
+    vitest: '5.1.1',
+    webdriverio: '10.2.0',
   })
 
   await writeFile(join(targetsRoot, 'windows-11-arm', 'evidence.json'), encoded({

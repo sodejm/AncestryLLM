@@ -16,7 +16,7 @@ const runtimePolicyResource = {
   to: 'runtime-policy/macos-arm64-runtime-policy-v1.json',
 }
 
-test('pnpm 11 controls live in the supported workspace config and lockfile', async () => {
+test('pnpm 12 controls live in the supported workspace config and lockfile', async () => {
   const workspace = await readFile(workspaceUrl, 'utf8')
   const lockfile = await readFile(lockfileUrl, 'utf8')
   const packageJson = JSON.parse(await readFile(packageUrl, 'utf8'))
@@ -34,8 +34,6 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   }
   assert.match(lockfile, /^settings:\n {2}autoInstallPeers: false$/m)
   for (const [selector, resolution] of [
-    ['@puppeteer/browsers>extract-zip', 'npm:@electron-internal/extract-zip@1.0.5'],
-    ['get-uri>basic-ftp', '6.2.4'],
     ['@wdio/mocha-framework>mocha', '11.8.0'],
     ['mocha>diff', '8.0.3'],
     ['glob@>=9.0.0 <=14.0.1', '14.0.6'],
@@ -47,10 +45,6 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
         .some((line) => lockfile.split('\n').includes(line)),
     )
   }
-  assert.match(lockfile, /^ {2}'@electron-internal\/extract-zip@1\.0\.5':$/m)
-  assert.doesNotMatch(lockfile, /^ {2}extract-zip@2\.0\.1:$/m)
-  assert.match(lockfile, /^ {2}basic-ftp@6\.2\.4:$/m)
-  assert.doesNotMatch(lockfile, /^ {2}basic-ftp@5\.3\.1:$/m)
   assert.match(lockfile, /^ {2}chokidar@4\.0\.3:$/m)
   assert.doesNotMatch(lockfile, /^ {2}braces@3\.0\.3:$/m)
   assert.match(lockfile, /^ {2}diff@8\.0\.3:$/m)
@@ -65,14 +59,11 @@ test('pnpm 11 controls live in the supported workspace config and lockfile', asy
   assert.doesNotMatch(lockfile, /^ {2}deepmerge-ts@8\.0\.0:$/m)
   assert.match(lockfile, /^ {2}serialize-javascript@7\.1\.3:$/m)
   assert.doesNotMatch(lockfile, /^ {2}serialize-javascript@(?:6\.0\.2|7\.0\.3):$/m)
-  assert.equal(packageJson.devDependencies['expect-webdriverio'], '6.1.0')
-  assert.match(
-    workspace,
-    /^packageExtensions:\n {2}'@wdio\/electron-service@10\.3\.0':\n {4}dependencies:\n {6}expect-webdriverio: 5\.6\.5$/m,
-  )
-  assert.equal(packageJson.devDependencies['@testing-library/dom'], '10.4.1')
-  assert.equal(packageJson.devDependencies['electron-builder'], '26.15.7')
-  assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.15.7')
+  assert.equal(packageJson.devDependencies['expect-webdriverio'], '8.1.0')
+  assert.doesNotMatch(workspace, /^packageExtensions:/m)
+  assert.equal(packageJson.devDependencies['@testing-library/dom'], '10.4.2')
+  assert.equal(packageJson.devDependencies['electron-builder'], '26.18.0')
+  assert.equal(packageJson.devDependencies['electron-builder-squirrel-windows'], '26.18.0')
   await assert.rejects(access(npmrcUrl), { code: 'ENOENT' })
 })
 

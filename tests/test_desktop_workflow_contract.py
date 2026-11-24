@@ -133,7 +133,7 @@ def test_workflow_uses_pinned_pnpm_action_and_machine_readable_evidence() -> Non
     workflow = _workflow()
 
     assert workflow.count("pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115") == 2
-    assert workflow.count('version: "11.9.0"') == 2
+    assert workflow.count('version: "12.23.0"') == 2
     assert "npm install --global pnpm" not in workflow
     assert "pnpm --dir desktop run test:e2e:packaged" not in workflow
     assert workflow.count("node desktop/scripts/run-wdio.mjs packaged") == 6
@@ -465,7 +465,7 @@ def test_desktop_security_job_enforces_the_release_quality_policy() -> None:
     assert workflow.index(sandbox_preparation) < workflow.index(accessibility)
     assert "pnpm --dir desktop run test:e2e" in workflow
     assert "tests/test_structured_diagnostics.py" in workflow
-    assert package["devDependencies"]["@vitest/coverage-v8"] == "4.1.12"
+    assert package["devDependencies"]["@vitest/coverage-v8"] == "5.1.1"
     assert "test:coverage" in package["scripts"]
     coverage = policy["qa"]["desktopCoverage"]
     assert f"provider: '{coverage['provider']}'" in vitest

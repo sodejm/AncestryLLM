@@ -159,11 +159,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: matrix.python == '3.12'
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: matrix.python == '3.12'
         with:
-          version: "11.9.0"
+          version: "12.23.0"
           run_install: false
       - name: Set up verified uv
         uses: ./.github/actions/setup-verified-uv

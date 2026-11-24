@@ -7,11 +7,11 @@ The supported 0.6.0 product surface is a one-time local welcome on Home, a tempo
 
 ## Reproducible setup and gates
 
-From the repository root, use Node `26.5.0` (see `.node-version`), Corepack, and the repository-pinned pnpm `11.9.0`:
+From the repository root, use Node `26.13.1` (see `.node-version`), Corepack, and the repository-pinned pnpm `12.23.0`:
 
 ```sh
 corepack enable
-corepack prepare pnpm@11.9.0 --activate
+corepack prepare pnpm@12.23.0 --activate
 make desktop-install
 make desktop-check
 make desktop-e2e
@@ -23,12 +23,11 @@ pnpm --dir desktop test:visual
 `desktop-install` performs the frozen-lockfile install, explicitly rebuilds the
 locked Electron package, and fails with a stable error if its platform runtime
 is still absent. The explicit rebuild makes setup fail closed even when a
-shared pnpm store contains stale build-script state. Electron 42.11.16 remains
-exactly pinned. The frozen lockfile scopes reviewed security replacements to
-the affected installer and test-tool dependency paths, including the
-Electron-maintained `@electron-internal/extract-zip` 1.0.5 fork; no runtime
-patch is required for the current Electron installer. WebdriverIO uses Mocha
-11.8.0 with Chokidar 4. The lockfile selects glob 14.0.6 and minimatch
+shared pnpm store contains stale build-script state. Electron 45.4.1 remains
+exactly pinned. The frozen lockfile keeps the current Puppeteer archive
+extractor and test-tool dependency paths under review; no runtime patch is
+required for the current Electron installer. WebdriverIO uses Mocha 11.8.0
+with Chokidar 4. The lockfile selects glob 14.0.6 and minimatch
 11.0.9 for affected ranges used by packaging and test discovery. The
 unused optional `@electron/get` legacy proxy agent is removed because it has
 no patched release. Installation and packaging fail explicitly when
