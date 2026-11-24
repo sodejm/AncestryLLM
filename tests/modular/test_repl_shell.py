@@ -8,6 +8,7 @@ import importlib
 import io
 import json
 import shlex
+import shutil
 import sqlite3
 import sys
 import threading
@@ -1088,17 +1089,25 @@ def test_sync_service_cli_and_repl_publish_matching_semantic_bundles(
     from ancestryllm.gedcom.service import GedcomService
 
     fixtures = Path(__file__).parents[1] / "fixtures" / "gedcom_incremental"
+    input_root = tmp_path / "inputs"
+    input_root.mkdir()
+    for fixture_name in (
+        "baseline-master.ged",
+        "ancestry-snapshot-v1.ged",
+        "myheritage-snapshot-v1.ged",
+    ):
+        shutil.copyfile(fixtures / fixture_name, input_root / fixture_name)
 
     def arguments(release_root: Path) -> list[str]:
         return [
             "update",
             "--master",
-            str(fixtures / "baseline-master.ged"),
+            str(input_root / "baseline-master.ged"),
             "--initialize-manifest",
             "--snapshot",
-            f"ancestry-main:ancestry={fixtures / 'ancestry-snapshot-v1.ged'}",
+            f"ancestry-main:ancestry={input_root / 'ancestry-snapshot-v1.ged'}",
             "--snapshot",
-            f"myheritage-main:myheritage={fixtures / 'myheritage-snapshot-v1.ged'}",
+            f"myheritage-main:myheritage={input_root / 'myheritage-snapshot-v1.ged'}",
             "--exported-at",
             "ancestry-main=2025-01-15",
             "--exported-at",

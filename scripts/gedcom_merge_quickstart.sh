@@ -88,6 +88,17 @@ RUN_DIR="${OUTPUT_PARENT%/}/gedcom-merge-${timestamp}-$$"
 mkdir -- "$RUN_DIR"
 RUN_CONFIG_DIR="${RUN_DIR}/.ancestryllm/config"
 RUN_DATA_DIR="${RUN_DIR}/.ancestryllm/data"
+INPUT_DIR="${RUN_DIR}/inputs"
+mkdir -- "$INPUT_DIR"
+# The application rejects hard-linked inputs to prevent time-of-check/time-of-use
+# substitution. Materialize the public examples in this private demo workspace so
+# the quickstart remains portable across local Git clones that preserve hard links.
+cp -- "$SOURCE_A" "$INPUT_DIR/xref-source-a.ged"
+cp -- "$SOURCE_B" "$INPUT_DIR/xref-source-b.ged"
+cp -- "$MALFORMED_SOURCE" "$INPUT_DIR/malformed-rejected.ged"
+SOURCE_A="$INPUT_DIR/xref-source-a.ged"
+SOURCE_B="$INPUT_DIR/xref-source-b.ged"
+MALFORMED_SOURCE="$INPUT_DIR/malformed-rejected.ged"
 
 PYTHON="${ANCESTRYLLM_PYTHON:-python3}"
 PYTHONPATH_PREFIX="${REPO_ROOT}/src"
