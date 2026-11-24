@@ -2187,7 +2187,7 @@ jobs:
           uv run --locked --no-default-groups --group release-verifier python scripts/verify_pypi_attestations.py \
             --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" \
-            --verifier pypi-attestations==0.0.30 \
+            --verifier pypi-attestations==0.0.32 \
             --checksums downloaded/SHA256SUMS \
             --artifacts downloaded \
             --evidence attestation-evidence

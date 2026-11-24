@@ -326,7 +326,7 @@ def test_release_workflows_bind_exact_evidence_notes_and_full_checksums() -> Non
     assert "verify_release_assets.py" in release
 
     assert "verify_pypi_attestations.py" in release
-    assert "pypi-attestations==0.0.30" in release
+    assert "pypi-attestations==0.0.32" in release
     assert "uv sync --locked --no-default-groups --group release-verifier" in release
     assert "uv sync --locked --extra dev" not in release
     assert (
@@ -389,8 +389,8 @@ def test_security_gates_use_lockfile_semgrep_and_content_pinned_rules() -> None:
     }
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    assert '#     "semgrep==1.170.0",' in script
-    assert [package["version"] for package in locked_semgrep] == ["1.170.0"]
+    assert '#     "semgrep==1.186.0",' in script
+    assert [package["version"] for package in locked_semgrep] == ["1.186.0"]
     assert all(
         (match := re.match(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)", dependency)) is None
         or match.group(1).lower().replace("_", "-") != "uv"
