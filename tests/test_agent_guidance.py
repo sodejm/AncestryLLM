@@ -24,6 +24,14 @@ def test_copilot_guidance_defers_to_shared_authorities() -> None:
     assert "must not weaken the shared requirements" in text
 
 
+def test_agent_guidance_declares_aaif_agents_md_format() -> None:
+    text = _normalized(AGENTS)
+
+    assert "AGENTS.md format" in text
+    assert "https://aaif.io/projects" in text
+    assert "Agentic AI Foundation (AAIF)" in text
+
+
 def test_agent_guidance_agrees_on_implemented_and_future_boundaries() -> None:
     agents = _normalized(AGENTS)
     copilot = _normalized(COPILOT)

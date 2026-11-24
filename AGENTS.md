@@ -2,6 +2,10 @@
 
 ## Authority, layout, and current state
 
+- This root `AGENTS.md` uses the open [AGENTS.md format](https://aaif.io/projects)
+  listed by the Agentic AI Foundation (AAIF) for coding-agent guidance. Keep this
+  file concrete, current, and scoped to repository practice; do not place
+  credentials, personal data, or unverified capability claims here.
 - `src/ancestryllm/` is the application package; `tests/` uses fictional data.
 - `docs/` contains supporting guidance for privacy, providers, GEDCOM, backups,
   security, CLI use, and the release process.
