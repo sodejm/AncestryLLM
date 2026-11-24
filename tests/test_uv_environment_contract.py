@@ -96,7 +96,10 @@ def test_verified_uv_cache_is_versioned_per_reviewed_release() -> None:
 
     assert "UV_TOOL_DIR := .tools/uv/0.13.9" in makefile
     assert "UV_RECEIPT := .tools/receipts/uv-bootstrap-0.13.9.json" in makefile
-    assert 'DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv" / UV_VERSION' in bootstrap
+    assert (
+        'DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv" / UV_VERSION'
+        in bootstrap
+    )
     assert 'f"uv-bootstrap-{UV_VERSION}.json"' in bootstrap
 
 

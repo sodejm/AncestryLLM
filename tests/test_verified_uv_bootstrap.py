@@ -353,11 +353,11 @@ def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
     assert {(artifact["filename"], artifact["sha256"]) for artifact in verifier["artifacts"]} == {
         (
             "pypi_attestations-0.0.32-py3-none-any.whl",
-                "ec7bc5919783964a2b4605fc10e2167a2031daa1efbc04bfadc4a653cda480e6",
+            "ec7bc5919783964a2b4605fc10e2167a2031daa1efbc04bfadc4a653cda480e6",
         ),
         (
             "pypi_attestations-0.0.32.tar.gz",
-                "986bfb1e1cafd50dfd5087c5ef12f93cd6fada95761175a96e704d6eb59076c4",
+            "986bfb1e1cafd50dfd5087c5ef12f93cd6fada95761175a96e704d6eb59076c4",
         ),
     }
     assert verifier["reviewed_update_procedure"].startswith("docs/")
@@ -396,7 +396,9 @@ def test_windows_uv_archives_use_the_reviewed_flat_executable_member(
     policy_path = tmp_path / "windows-policy.json"
     policy_path.write_text(json.dumps(payload), encoding="utf-8")
     gh_url = f"https://github.com/cli/cli/releases/download/v2.100.0/{gh_asset['archive_name']}"
-    uv_url = f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/{uv_asset['archive_name']}"
+    uv_url = (
+        f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/{uv_asset['archive_name']}"
+    )
     downloader = FixtureDownloader({gh_url: gh_archive, uv_url: uv_archive})
     runner = FixtureRunner(_attestation_payload(uv_asset["archive_name"], _sha256(uv_archive)))
 

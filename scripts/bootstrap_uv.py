@@ -48,10 +48,7 @@ SETUP_UV_COMMIT = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
 POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "uv-bootstrap-policy.json"
 DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv" / UV_VERSION
 DEFAULT_RECEIPT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / ".tools"
-    / "receipts"
-    / f"uv-bootstrap-{UV_VERSION}.json"
+    Path(__file__).resolve().parents[1] / ".tools" / "receipts" / f"uv-bootstrap-{UV_VERSION}.json"
 )
 
 PLATFORM_KEYS = frozenset(
