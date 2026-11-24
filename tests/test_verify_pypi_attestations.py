@@ -143,7 +143,7 @@ def test_verifies_every_file_and_writes_pep740_evidence(
         )
         assert (evidence / f"{name}.verification.txt").read_text(encoding="utf-8") == "verified\n"
     summary = json.loads((evidence / "verification.json").read_text(encoding="utf-8"))
-    assert summary["verifier"] == "pypi-attestations==0.0.30"
+    assert summary["verifier"] == "pypi-attestations==0.0.32"
     assert summary["artifacts"] == [
         {"filename": name, "sha256": digests[name]} for name in sorted(digests)
     ]

@@ -218,7 +218,9 @@ def test_exclusion_schema_and_lock_source_are_strict(tmp_path: Path) -> None:
 
 
 def test_repository_export_covers_every_group_extra_and_transitive() -> None:
-    uv_binary = ROOT / ".tools/uv" / ("uv.exe" if sys.platform == "win32" else "uv")
+    uv_binary = ROOT / ".tools" / "uv" / "0.13.9" / (
+        "uv.exe" if sys.platform == "win32" else "uv"
+    )
     export_text = run_export(uv_binary, ROOT)
     prepared = prepare_audit_requirements(
         ROOT / "uv.lock",

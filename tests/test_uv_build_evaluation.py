@@ -60,8 +60,8 @@ def test_evaluation_contract_keeps_setuptools_authoritative() -> None:
 @pytest.mark.parametrize(
     "output",
     (
-        "uv 0.12.1",
-        "uv 0.12.1 (329541a50 2026-07-31 aarch64-apple-darwin)",
+        "uv 0.13.9",
+        "uv 0.13.9 (6b2d39dcc 2026-11-17 aarch64-apple-darwin)",
     ),
 )
 def test_evaluation_accepts_only_the_pinned_uv_release(output: str) -> None:
@@ -72,8 +72,8 @@ def test_evaluation_accepts_only_the_pinned_uv_release(output: str) -> None:
     "output",
     (
         "uv 0.12.0",
-        "uv 0.12.10",
-        "uv 0.12.1 unreviewed",
+        "uv 0.13.10",
+        "uv 0.13.9 unreviewed",
         "uv latest",
     ),
 )
@@ -345,7 +345,7 @@ def test_checked_evaluation_evidence_records_fail_closed_decision() -> None:
     evaluation.validate_report(report)
     assert report["status"] == "incompatible"
     assert report["tools"] == {
-        "build_frontend": "uv 0.12.1",
+        "build_frontend": "uv 0.13.9",
         "python": "3.14.6",
         "setuptools": {
             "requirement": "setuptools>=83",

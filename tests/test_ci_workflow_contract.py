@@ -501,8 +501,8 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
         package["name"]: package["version"] for package in lock["package"] if "version" in package
     }
     assert lock_versions["ruff"] == "0.17.6"
-    assert bootstrap_policy["uv"]["version"] == "0.12.1"
-    assert bootstrap_policy["uv"]["release_tag"] == "0.12.1"
+    assert bootstrap_policy["uv"]["version"] == "0.13.9"
+    assert bootstrap_policy["uv"]["release_tag"] == "0.13.9"
 
     assert hooks.count("stages: [pre-push]") == 1
     assert "bootstrap: setup hooks" in makefile

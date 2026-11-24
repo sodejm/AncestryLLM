@@ -21,7 +21,7 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   failure recovery, and validation limits.
 
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
-0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
+0.13.9 versions. CI and Make remain authoritative: `make lint` also applies
 the checked-in GFM structural checks to every tracked Markdown file, whether
 or not a contributor installed the hooks. `make code-docs-check` is the
 separate, canonical declaration-documentation gate for Python, Swift, and the
@@ -29,13 +29,13 @@ desktop TypeScript/JavaScript tree.
 
 `make setup` first runs the
 [verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
-repository-local `.tools/uv/uv` binary to install the locked environment
+repository-local `.tools/uv/0.13.9/uv` binary to install the locked environment
 without changing Git hooks. It requires a system-supplied Python 3.12-3.15;
 `.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
 downloads. Setup runs the exact full-profile command
 `uv sync --locked --all-extras --all-groups`. The bootstrap refuses an
 unverified `uv` from `PATH`, re-hashes a cached local binary, and emits the sanitized
-`.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
+`.tools/receipts/uv-bootstrap-0.13.9.json` receipt before `uv --version` or another
 `uv` command may run. This is the appropriate target for automation and
 disposable environments. Local developers authenticate once with
 `gh auth login --hostname github.com`; headless shells provide `GH_TOKEN`

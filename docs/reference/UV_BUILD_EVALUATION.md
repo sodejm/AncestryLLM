@@ -27,7 +27,7 @@ smokes, sdist reconstruction, and double-build reproducibility controls.
 `make evaluate-uv-build` runs `scripts/evaluate_uv_build.py` from the locked
 `build` dependency group. The harness:
 
-1. requires a clean Git checkout and exact verified `uv 0.12.1`;
+1. requires a clean Git checkout and exact verified `uv 0.13.9`;
 2. creates identical source trees from the same committed archive;
 3. changes only the candidate tree's reviewed build-system configuration and
    explicit source include list;

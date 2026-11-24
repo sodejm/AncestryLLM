@@ -8,7 +8,7 @@ environment they need before calling the canonical Make command. This keeps
 quality, security, build, desktop, and release-verification jobs from relying
 on undeclared cross-profile tools.
 
-The repository-local, verified `uv` 0.12.1 bootstrap is the only supported way
+The repository-local, verified `uv` 0.13.9 bootstrap is the only supported way
 to create or update these environments. It requires a system-supplied Python
 3.12-3.15; `.python-version` selects 3.12 by default, and `[tool.uv]` prohibits
 Python downloads. `uv` is not a project dependency and must not be installed
@@ -113,7 +113,7 @@ Semgrep, zizmor, CycloneDX, gitleaks, TruffleHog, or CodeQL.
    groups and preserve exact pins for trust-sensitive verifiers. For an
    already-compatible transitive fix, use verified repository-local `uv lock
    --upgrade-package <package>` rather than adding an unused direct dependency.
-   `make lock` verifies and executes repository-local `uv` 0.12.1 when a
+   `make lock` verifies and executes repository-local `uv` 0.13.9 when a
    manifest change requires regenerating the complete lock.
 3. Run `make lock-check`, then inspect both the direct-dependency diff and every
    changed package record in `uv.lock`. An unrelated version change, missing
