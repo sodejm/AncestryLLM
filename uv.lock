@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.16"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -160,7 +160,7 @@ lint = [
     { name = "pre-commit", specifier = ">=4.5,<5" },
     { name = "ruff", specifier = ">=0.15,<1" },
 ]
-release-verifier = [{ name = "pypi-attestations", specifier = "==0.0.30" }]
+release-verifier = [{ name = "pypi-attestations", specifier = "==0.0.32" }]
 security = [
     { name = "cyclonedx-bom", specifier = ">=7.2,<8" },
     { name = "pip-audit", specifier = ">=2.10,<3" },
@@ -2381,21 +2381,20 @@ wheels = [
 
 [[package]]
 name = "pypi-attestations"
-version = "0.0.30"
+version = "0.0.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "packaging" },
-    { name = "pyasn1" },
     { name = "pydantic" },
-    { name = "requests" },
     { name = "rfc3986" },
     { name = "sigstore" },
     { name = "sigstore-models" },
+    { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/1e/eb8a0233cdcaf01acb18076ac8b8a057714177b3717baf26b78a11b8d929/pypi_attestations-0.0.30.tar.gz", hash = "sha256:14ff13c76bbef02a483c2b77532da02bfd746b5141b881f355e06b9807434423", size = 139108, upload-time = "2026-07-28T14:08:35.011Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/5f/3e9748d9ae083a1ecd8b3dcca4e3c778e1f0dc7157537104e92c12782601/pypi_attestations-0.0.32.tar.gz", hash = "sha256:986bfb1e1cafd50dfd5087c5ef12f93cd6fada95761175a96e704d6eb59076c4", size = 139942, upload-time = "2026-11-23T20:36:21.577Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/24/e59078318b5e2bca59be5a21957d70e082e6eb4f478adffe373f3b74daf4/pypi_attestations-0.0.30-py3-none-any.whl", hash = "sha256:b3a9c53f6cb89e5e7b5b70e6cfca97cfc66008c1ed54087355e06e40071cef21", size = 23015, upload-time = "2026-07-28T14:08:33.453Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/93/39572a59bf30eab2d4b1d9e998fb6e446427580559ce8d7c2fc3ab1a7efb/pypi_attestations-0.0.32-py3-none-any.whl", hash = "sha256:ec7bc5919783964a2b4605fc10e2167a2031daa1efbc04bfadc4a653cda480e6", size = 22703, upload-time = "2026-11-23T20:36:20.199Z" },
 ]
 
 [[package]]

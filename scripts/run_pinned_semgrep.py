@@ -2,8 +2,8 @@
 # /// script
 # requires-python = ">=3.12,<3.16"
 # dependencies = [
-#     "pyyaml==6.0.3",
-#     "semgrep==1.170.0",
+#     "pyyaml==6.0.4",
+#     "semgrep==1.186.0",
 # ]
 # ///
 """Run lockfile-pinned Semgrep with content-pinned registry rule bundles."""

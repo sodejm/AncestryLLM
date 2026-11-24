@@ -21,7 +21,7 @@ Run targeted tests while editing. `make bootstrap` installs two hook tiers:
   failure recovery, and validation limits.
 
 The exact hook commits match the lock-resolved Ruff 0.16.1 and repository uv
-0.12.1 versions. CI and Make remain authoritative: `make lint` also applies
+0.13.9 versions. CI and Make remain authoritative: `make lint` also applies
 the checked-in GFM structural checks to every tracked Markdown file, whether
 or not a contributor installed the hooks. `make code-docs-check` is the
 separate, canonical declaration-documentation gate for Python, Swift, and the
@@ -29,13 +29,13 @@ desktop TypeScript/JavaScript tree.
 
 `make setup` first runs the
 [verified uv bootstrap](../security/verified-uv-bootstrap.md), then uses the
-repository-local `.tools/uv/uv` binary to install the locked environment
+repository-local `.tools/uv/0.13.9/uv` binary to install the locked environment
 without changing Git hooks. It requires a system-supplied Python 3.12-3.15;
 `.python-version` selects 3.12 by default, and `[tool.uv]` disables Python
 downloads. Setup runs the exact full-profile command
 `uv sync --locked --all-extras --all-groups`. The bootstrap refuses an
 unverified `uv` from `PATH`, re-hashes a cached local binary, and emits the sanitized
-`.tools/receipts/uv-bootstrap.json` receipt before `uv --version` or another
+`.tools/receipts/uv-bootstrap-0.13.9.json` receipt before `uv --version` or another
 `uv` command may run. This is the appropriate target for automation and
 disposable environments. Local developers authenticate once with
 `gh auth login --hostname github.com`; headless shells provide `GH_TOKEN`
@@ -66,7 +66,7 @@ no-op. The Make targets remain the supported local developer interfaces.
 | Local full setup | All application extras and every dependency group, including `release-verifier` |
 | Python test matrix | `test` plus `all-llm` |
 | Quality | `lint` plus `typecheck`; exact ty is installed only for its visible advisory step |
-| Declaration documentation | `lint` plus the frozen desktop workspace under exact Node 26.5.0 and pnpm 11.9.0 |
+| Declaration documentation | `lint` plus the frozen desktop workspace under exact Node 26.13.1 and pnpm 12.23.0 |
 | Dependency audit, SBOM, and workflow audit | `security`; the pinned Semgrep script remains independent |
 | Package and release construction | `build`; release construction also installs `security` only for SBOM generation |
 | Production PyPI artifact verification | `release-verifier` only |
@@ -95,7 +95,7 @@ maintenance procedure are documented in [Dependency
 maintenance](DEPENDENCY_MAINTENANCE.md).
 
 The Python 3.12 quality job and its release-readiness counterpart install exact
-Node 26.5.0 and pnpm 11.9.0 before calling `make code-docs-check`. That Make
+Node 26.13.1 and pnpm 12.23.0 before calling `make code-docs-check`. That Make
 target owns the Ruff declaration subset, the tracked-file and Swift DocC
 classifier, the TypeScript compiler-AST export/security-boundary check, and the
 exact-pinned `eslint-plugin-jsdoc` syntax and description rules. The desktop

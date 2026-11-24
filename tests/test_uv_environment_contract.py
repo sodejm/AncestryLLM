@@ -40,7 +40,7 @@ def test_uv_requires_the_reviewed_version_and_never_downloads_python() -> None:
 
     assert configuration["project"]["requires-python"] == ">=3.12,<3.16"
     assert configuration["tool"]["uv"] == {
-        "required-version": "==0.12.1",
+        "required-version": "==0.13.9",
         "python-preference": "only-system",
         "python-downloads": "never",
     }
@@ -88,6 +88,21 @@ def test_make_uses_verified_uv_as_the_only_environment_owner() -> None:
         assert "verified-uv" in declaration.group("prerequisites"), target_name
 
 
+def test_verified_uv_cache_is_versioned_per_reviewed_release() -> None:
+    """A policy bump must bootstrap alongside, never trust, a prior cache."""
+
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "scripts" / "bootstrap_uv.py").read_text(encoding="utf-8")
+
+    assert "UV_TOOL_DIR := .tools/uv/0.13.9" in makefile
+    assert "UV_RECEIPT := .tools/receipts/uv-bootstrap-0.13.9.json" in makefile
+    assert (
+        'DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv" / UV_VERSION'
+        in bootstrap
+    )
+    assert 'f"uv-bootstrap-{UV_VERSION}.json"' in bootstrap
+
+
 def test_make_pins_uv_to_selected_system_python() -> None:
     selected_python = Path(sys.executable)
     environment = os.environ.copy()
@@ -128,7 +143,7 @@ def test_make_setup_repairs_an_unstartable_checkout_environment(tmp_path: Path) 
     venv_python = venv_dir / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     (venv_dir / "pyvenv.cfg").write_text(
-        "home = /deleted/python\nuv = 0.12.1\n",
+        "home = /deleted/python\nuv = 0.13.9\n",
         encoding="utf-8",
     )
     venv_python.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
@@ -266,7 +281,7 @@ def test_make_setup_refuses_symlinked_uv_ownership_metadata(tmp_path: Path) -> N
     venv_python.parent.mkdir(parents=True)
     ownership_metadata = tmp_path / "untrusted-pyvenv.cfg"
     ownership_metadata.write_text(
-        "home = /deleted/python\nuv = 0.12.1\n",
+        "home = /deleted/python\nuv = 0.13.9\n",
         encoding="utf-8",
     )
     (venv_dir / "pyvenv.cfg").symlink_to(ownership_metadata)

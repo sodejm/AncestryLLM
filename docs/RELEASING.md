@@ -590,7 +590,7 @@ Setuptools remains the production backend. The locked `uv_build` candidate and
 in the [uv_build evaluation](reference/UV_BUILD_EVALUATION.md); its incompatible result
 does not authorize a backend change or weaken any release check.
 Release construction uses SHA-pinned `actions/setup-python` with Python 3.12,
-then the verified repository contract requires exactly `uv` 0.12.1, selects
+then the verified repository contract requires exactly `uv` 0.13.9, selects
 only that system interpreter, and disables Python downloads. The workflow calls
 the canonical package-build and SBOM commands directly after its narrow locked
 synchronization. This keeps release enforcement independent of candidate-controlled
@@ -606,7 +606,7 @@ artifact hashes and then pauses for required production approval. Production
 PyPI publishing explicitly requests `attestations: true`. The workflow then
 verifies the PEP 740 provenance for both the wheel and source distribution, including
 exact repository, workflow, environment, filename, and SHA-256 identity, with
-the pinned `pypi-attestations==0.0.30` verifier. It preserves the provenance and
+the pinned `pypi-attestations==0.0.32` verifier. It preserves the provenance and
 verifier output as evidence and fails closed. The workflow installs this tool
 from the locked, non-default `release-verifier` dependency group so ordinary
 release construction does not inherit its platform-specific build

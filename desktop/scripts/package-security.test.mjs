@@ -52,7 +52,7 @@ test('packaging locks the production ASAR and Electron fuse policy', () => {
     grantFileProtocolExtraPrivileges: false,
   })
   assert.equal(packageJson.scripts['test:security'], 'pnpm package && vitest run src/main/security-policy.test.ts src/main/session-policy.test.ts src/main/external-links.test.ts && node scripts/inspect-package-fuses.mjs')
-  assert.equal(packageJson.devDependencies['@electron/fuses'], '2.1.2')
+  assert.equal(packageJson.devDependencies['@electron/fuses'], '2.1.3')
 })
 
 test('ordinary pre-v1 packages cannot auto-discover a signing identity', () => {
@@ -79,11 +79,6 @@ test('packaging pins Electron at the minimum audited security remediation', () =
 })
 
 test('dependency overrides preserve the audited transitive remediation floors', () => {
-  assert.match(
-    pnpmWorkspace,
-    /^ {2}'@puppeteer\/browsers>extract-zip': npm:@electron-internal\/extract-zip@1\.0\.5$/m,
-  )
-  assert.match(pnpmWorkspace, /^ {2}'get-uri>basic-ftp': 6\.2\.4$/m)
   assert.match(pnpmWorkspace, /^ {2}'@wdio\/mocha-framework>mocha': 11\.8\.0$/m)
   assert.match(pnpmWorkspace, /^ {2}'mocha>diff': 8\.0\.3$/m)
   assert.match(pnpmWorkspace, /^ {2}'@electron\/get@3>global-agent': '-'$/m)
@@ -91,7 +86,7 @@ test('dependency overrides preserve the audited transitive remediation floors', 
   assert.match(pnpmWorkspace, /^ {2}fast-uri: 3\.1\.9$/m)
   assert.match(pnpmWorkspace, /^ {2}js-yaml@4\.3\.0: 4\.3\.2$/m)
   assert.match(pnpmWorkspace, /^ {2}'@xmldom\/xmldom@0\.8\.13': 0\.8\.15$/m)
-  assert.match(pnpmWorkspace, /^ {2}nanoid@<3\.3\.18: 3\.3\.18$/m)
+  assert.doesNotMatch(pnpmWorkspace, /(?:extract-zip|get-uri>basic-ftp|ip-address@\^10|nanoid@<3\.3\.18)/u)
   assert.match(pnpmWorkspace, /^ {2}serialize-javascript: 7\.1\.3$/m)
   assert.doesNotMatch(pnpmWorkspace, /^patchedDependencies:/m)
 })

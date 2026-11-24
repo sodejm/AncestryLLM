@@ -171,8 +171,8 @@ def test_base_logging_budget_is_aggregate_when_worker_is_enabled() -> None:
 def test_dockerfile_pins_multiarch_inputs_and_minimal_runtime() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert "ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa816" in text
-    assert "python:3.12.11-slim-bookworm@sha256:519591d6871b" in text
+    assert "ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b1" in text
+    assert "python:3.12.16-slim-bookworm@sha256:935c3c5b1235" in text
     assert "USER 65532:65532" in text
     assert "AS gateway" in text
     assert "AS worker" in text
@@ -186,11 +186,11 @@ def test_dockerfile_pins_multiarch_inputs_and_minimal_runtime() -> None:
     "mutate",
     [
         lambda text: text.replace(
-            "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.1@sha256:"
-            "cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded",
+            "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.13.9@sha256:"
+            "d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d",
             "ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest\n"
-            "# ghcr.io/astral-sh/uv:0.12.1@sha256:"
-            "cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded",
+            "# ghcr.io/astral-sh/uv:0.13.9@sha256:"
+            "d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d",
         ),
         lambda text: text.replace(
             "USER 65532:65532",

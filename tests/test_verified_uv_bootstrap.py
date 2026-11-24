@@ -31,41 +31,41 @@ POLICY_PATH = ROOT / "config" / "uv-bootstrap-policy.json"
 SCRIPT_PATH = ROOT / "scripts" / "bootstrap_uv.py"
 ACTION_PATH = ROOT / ".github" / "actions" / "setup-verified-uv" / "action.yml"
 
-UV_VERSION = "0.12.1"
-UV_SOURCE_COMMIT = "329541a503de8a4d9bb021814f9c0875efe033c8"
+UV_VERSION = "0.13.9"
+UV_SOURCE_COMMIT = "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce"
 UV_SIGNER = "https://github.com/astral-sh/uv/.github/workflows/release.yml@refs/heads/main"
 SETUP_UV_COMMIT = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
 
 EXPECTED_UV_ARCHIVES = {
     "linux-x86_64": (
         "uv-x86_64-unknown-linux-gnu.tar.gz",
-        "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
-        21760555,
+        "a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5",
+        17068176,
     ),
     "linux-arm64": (
         "uv-aarch64-unknown-linux-gnu.tar.gz",
-        "769d373e146692c639b5fbaae33b331c297a32e03d30448772051902df52bbf4",
-        20534826,
+        "0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d",
+        16120245,
     ),
     "macos-x86_64": (
         "uv-x86_64-apple-darwin.tar.gz",
-        "69d9f9a00337f25a50dcb13882052da08b8469bac11091c98c5694c3c6721467",
-        19622543,
+        "617a3211261b0fc739562f0071aa34e9739797c510208ede8e2977c30903d041",
+        17362924,
     ),
     "macos-arm64": (
         "uv-aarch64-apple-darwin.tar.gz",
-        "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
-        17679560,
+        "5aeca67f2283f75235de40d0bd9c0a5bbc5fce23b6d48b3bf9fa1b2db08382ca",
+        14554974,
     ),
     "windows-x86_64": (
         "uv-x86_64-pc-windows-msvc.zip",
-        "8fcb0cb46e1229065e344758980924e569bef5882ef45f46fada8fb24e06b74a",
-        19073343,
+        "edd61f7f5728a56cc62455386661860bdfc7bab65872f39b0c25bdcc1d8e1beb",
+        15567875,
     ),
     "windows-arm64": (
         "uv-aarch64-pc-windows-msvc.zip",
-        "9bc7c18e616230fa2dc6fb24bc3afde18a95c2b5c9433de747e9502c66041568",
-        18030168,
+        "72eed595983a4d7d22d79f21065b0f4479cc7e5c7a89104bb410c8f47559a878",
+        15747415,
     ),
 }
 
@@ -233,7 +233,7 @@ class FixtureRunner:
         attestation_stdout: str,
         *,
         gh_version: str = "gh version 2.100.0 (fixture)",
-        uv_version: str = "uv 0.12.1",
+        uv_version: str = f"uv {UV_VERSION}",
         attestation_returncode: int = 0,
         attestation_stderr: str = "",
     ) -> None:
@@ -287,7 +287,7 @@ def _valid_fixture(
     )
     gh_url = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_amd64.tar.gz"
     uv_url = (
-        "https://github.com/astral-sh/uv/releases/download/0.12.1/"
+        f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/"
         "uv-x86_64-unknown-linux-gnu.tar.gz"
     )
     downloader = FixtureDownloader({gh_url: gh_archive, uv_url: uv_archive})
@@ -348,16 +348,16 @@ def test_policy_pins_every_reviewed_trust_root_and_supported_asset() -> None:
         "commit": SETUP_UV_COMMIT,
     }
     verifier = payload["python_verifiers"]["pypi-attestations"]
-    assert verifier["version"] == "0.0.30"
+    assert verifier["version"] == "0.0.32"
     assert verifier["source_repository"] == "https://github.com/pypi/pypi-attestations"
     assert {(artifact["filename"], artifact["sha256"]) for artifact in verifier["artifacts"]} == {
         (
-            "pypi_attestations-0.0.30-py3-none-any.whl",
-            "b3a9c53f6cb89e5e7b5b70e6cfca97cfc66008c1ed54087355e06e40071cef21",
+            "pypi_attestations-0.0.32-py3-none-any.whl",
+            "ec7bc5919783964a2b4605fc10e2167a2031daa1efbc04bfadc4a653cda480e6",
         ),
         (
-            "pypi_attestations-0.0.30.tar.gz",
-            "14ff13c76bbef02a483c2b77532da02bfd746b5141b881f355e06b9807434423",
+            "pypi_attestations-0.0.32.tar.gz",
+            "986bfb1e1cafd50dfd5087c5ef12f93cd6fada95761175a96e704d6eb59076c4",
         ),
     }
     assert verifier["reviewed_update_procedure"].startswith("docs/")
@@ -396,7 +396,9 @@ def test_windows_uv_archives_use_the_reviewed_flat_executable_member(
     policy_path = tmp_path / "windows-policy.json"
     policy_path.write_text(json.dumps(payload), encoding="utf-8")
     gh_url = f"https://github.com/cli/cli/releases/download/v2.100.0/{gh_asset['archive_name']}"
-    uv_url = f"https://github.com/astral-sh/uv/releases/download/0.12.1/{uv_asset['archive_name']}"
+    uv_url = (
+        f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/{uv_asset['archive_name']}"
+    )
     downloader = FixtureDownloader({gh_url: gh_archive, uv_url: uv_archive})
     runner = FixtureRunner(_attestation_payload(uv_asset["archive_name"], _sha256(uv_archive)))
 
@@ -445,10 +447,10 @@ def test_release_verifier_is_locked_but_excluded_from_general_setup() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    assert project["dependency-groups"]["release-verifier"] == ["pypi-attestations==0.0.30"]
+    assert project["dependency-groups"]["release-verifier"] == ["pypi-attestations==0.0.32"]
     assert "dev" not in project["project"]["optional-dependencies"]
     assert all(
-        "pypi-attestations==0.0.30" not in dependencies
+        "pypi-attestations==0.0.32" not in dependencies
         for dependencies in project["project"]["optional-dependencies"].values()
     )
     assert "uv sync --locked --no-default-groups --group release-verifier" in release
@@ -485,7 +487,7 @@ def test_uv_version_accepts_pinned_build_metadata(
 ) -> None:
     runner = FixtureRunner(
         "[]",
-        uv_version=("uv 0.12.1 (329541a50 2026-07-31 aarch64-apple-darwin)"),
+        uv_version=("uv 0.13.9 (6b2d39dcc 2026-11-17 aarch64-apple-darwin)"),
     )
 
     bootstrap_module._assert_uv_version(
@@ -501,7 +503,7 @@ def test_uv_version_accepts_pinned_linux_target_metadata(
 ) -> None:
     runner = FixtureRunner(
         "[]",
-        uv_version="uv 0.12.1 (x86_64-unknown-linux-gnu)",
+        uv_version="uv 0.13.9 (x86_64-unknown-linux-gnu)",
     )
 
     bootstrap_module._assert_uv_version(
@@ -515,9 +517,9 @@ def test_uv_version_accepts_pinned_linux_target_metadata(
     "reported_version",
     [
         "uv 0.12.2 (329541a50 2026-07-31 aarch64-apple-darwin)",
-        "uv 0.12.1 (000000000 2026-07-31 aarch64-apple-darwin)",
-        "uv 0.12.1 (x86_64-unknown-linux-gnu)",
-        "uv 0.12.1 substitute",
+        "uv 0.13.9 (000000000 2026-11-17 aarch64-apple-darwin)",
+        "uv 0.13.9 (x86_64-unknown-linux-gnu)",
+        "uv 0.13.9 substitute",
     ],
 )
 def test_uv_version_rejects_unreviewed_identity(
@@ -940,7 +942,7 @@ def test_corrupted_uv_never_reaches_attestation(
         ("subjectAlternativeName", "https://github.com/example/release.yml@refs/heads/main"),
         ("buildSignerURI", "https://github.com/example/release.yml@refs/heads/main"),
         ("sourceRepositoryDigest", "0" * 40),
-        ("sourceRepositoryRef", "refs/tags/0.12.1"),
+        ("sourceRepositoryRef", "refs/tags/0.13.9"),
         ("predicateType", "https://slsa.dev/provenance/v0.2"),
         ("issuer", "https://issuer.example.test"),
         ("subjectName", "uv-substitute.tar.gz"),
@@ -2226,7 +2228,7 @@ def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
     assert "python-version" in action
     assert "runner.os" in action
     assert "runner.arch" in action
-    assert 'version: "0.12.1"' in action
+    assert 'version: "0.13.9"' in action
     assert "checksum: ${{ steps.preflight.outputs.checksum }}" in action
     assert "download-from-astral-mirror: false" in action
     assert "enable-cache: true" in action
@@ -2257,7 +2259,7 @@ def test_composite_action_preflights_and_rehashes_pinned_setup_uv() -> None:
     assert "if: ${{ always() }}" in action
     assert "if-no-files-found: error" in action
     assert "include-hidden-files: true" in action
-    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in action
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2" in action
 
 
 def test_verify_installed_cli_requires_an_explicit_binary_path(

@@ -28,7 +28,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = 1
-UV_VERSION = "0.12.1"
+UV_VERSION = "0.13.9"
 UV_BUILD_REQUIREMENT = "uv_build>=0.12.0,<0.13"
 SETUPTOOLS_REQUIREMENT = "setuptools>=83"
 PRODUCTION_BUILD_SYSTEM = (
@@ -1268,7 +1268,7 @@ def evaluate(uv: Path) -> dict[str, Any]:
 def main() -> int:
     """Run the evaluate uv build command and return its exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--uv", type=Path, default=ROOT / ".tools" / "uv" / "uv")
+    parser.add_argument("--uv", type=Path, default=ROOT / ".tools" / "uv" / UV_VERSION / "uv")
     parser.add_argument(
         "--report",
         type=Path,

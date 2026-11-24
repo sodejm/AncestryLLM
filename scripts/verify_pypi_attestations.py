@@ -17,7 +17,7 @@ from urllib.parse import quote, urlparse
 
 IN_TOTO_STATEMENT = "https://in-toto.io/Statement/v1"
 PUBLISH_PREDICATE = "https://docs.pypi.org/attestations/publish/v1"
-PYPI_ATTESTATIONS = "pypi-attestations==0.0.30"
+PYPI_ATTESTATIONS = "pypi-attestations==0.0.32"
 PYPI_HOST = "pypi.org"
 PYPI_FILE_HOST = "files.pythonhosted.org"
 GITHUB_OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")

@@ -33,7 +33,7 @@ EXPECTED_GROUPS = {
         "uv_build>=0.12.0,<0.13",
         "wheel>=0.45,<1",
     ],
-    "release-verifier": ["pypi-attestations==0.0.30"],
+    "release-verifier": ["pypi-attestations==0.0.32"],
 }
 
 EXPECTED_EXTRAS = {
@@ -69,7 +69,7 @@ OLD_DEV_DEPENDENCIES = {
     "setuptools>=83,<85",
     "twine>=6.2,<8",
     "types-python-dateutil>=2.9,<3",
-    "uv==0.12.1",
+    "uv==0.13.9",
     "wheel>=0.45,<1",
     "zizmor==1.29.0",
 }
@@ -119,7 +119,7 @@ def test_every_old_dev_dependency_has_one_deliberate_destination() -> None:
         for name in ("lint", "typecheck", "test", "security", "build")
         for dependency in groups[name]
     }
-    deliberately_removed = {"click>=8.3.3,<9", "uv==0.12.1"}
+    deliberately_removed = {"click>=8.3.3,<9", "uv==0.13.9"}
     retained_as_extra = set(extras["desktop-build"])
 
     assert moved | deliberately_removed | retained_as_extra == (

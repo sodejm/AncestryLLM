@@ -153,17 +153,17 @@ def test_checked_in_policy_pins_the_complete_native_vhs_toolchain() -> None:
     assert policy.schema_version == 1
     assert policy.container_image == (
         "ghcr.io/charmbracelet/vhs@"
-        "sha256:9d5fc3dc0c160b0fb1d2212baff07e6bdf3fa9438c504a3237484567302fcf93"
+        "sha256:ea49a6a1c529be83153e88321892b5585964418f0b9055e8c1e0d732194234a3"
     )
     assert policy.supported_platforms == {
-        "linux/amd64": "sha256:16b21a3bf7bd13e7fcf60d3ece47c92e561ef594f2c1fca5f1683f11190954b8",
-        "linux/arm64": "sha256:2c34085dea86c69c94bd64a9bde0f8a839aadb6032c97d4c3268fd0aaeb09262",
+        "linux/amd64": "sha256:3afed459e6d7860f6bb8b9a22ae29d5927d628dac6e30f32a250113406a348b9",
+        "linux/arm64": "sha256:c6f82ef4e21c772815b3de2a7e703492262a47d34647d81cb9bc53c11d651978",
     }
     assert policy.tool_versions == {
-        "chromium": "Chromium 145.0.7632.159 built on Debian GNU/Linux 13 (trixie)",
-        "ffmpeg": "ffmpeg version 7.1.3-0+deb13u1",
-        "ttyd": "ttyd version 1.7.7-e2819f2",
-        "vhs": "vhs version v0.11.0 (c6af91a)",
+        "chromium": "Chromium 153.0.8010.52 built on Debian GNU/Linux 13 (trixie)",
+        "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1",
+        "ttyd": "ttyd version 1.7.7-2922cb8",
+        "vhs": "vhs version v0.12.1 (24fa225)",
     }
     assert policy.font == {
         "family": "JetBrains Mono",
@@ -616,13 +616,13 @@ class RecordingDockerRunner:
                         "manifests": [
                             {
                                 "digest": (
-                                    "sha256:2c34085dea86c69c94bd64a9bde0f8a839aadb6032c97d4c3268fd0aaeb09262"
+                                    "sha256:c6f82ef4e21c772815b3de2a7e703492262a47d34647d81cb9bc53c11d651978"
                                 ),
                                 "platform": {"architecture": "arm64", "os": "linux"},
                             },
                             {
                                 "digest": (
-                                    "sha256:16b21a3bf7bd13e7fcf60d3ece47c92e561ef594f2c1fca5f1683f11190954b8"
+                                    "sha256:3afed459e6d7860f6bb8b9a22ae29d5927d628dac6e30f32a250113406a348b9"
                                 ),
                                 "platform": {"architecture": "amd64", "os": "linux"},
                             },

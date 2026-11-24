@@ -20,8 +20,8 @@ if [ "$(uname -m)" != "arm64" ]; then
 fi
 
 runtime_root="${HOME}/Library/Caches/AncestryLLM/local-environment"
-node_version="26.5.0"
-pnpm_version="11.9.0"
+node_version="26.13.1"
+pnpm_version="12.23.0"
 node_bundle="node-v${node_version}-darwin-arm64"
 node_root="${runtime_root}/${node_bundle}"
 pnpm_root="${runtime_root}/pnpm-${pnpm_version}"
@@ -116,10 +116,10 @@ command = '''
 set -euo pipefail
 
 runtime_root="${HOME}/Library/Caches/AncestryLLM/local-environment"
-export PATH="${runtime_root}/node-v26.5.0-darwin-arm64/bin:${runtime_root}/pnpm-11.9.0/node_modules/.bin:${PATH}"
+export PATH="${runtime_root}/node-v26.13.1-darwin-arm64/bin:${runtime_root}/pnpm-12.23.0/node_modules/.bin:${PATH}"
 
-test "$(node --version)" = "v26.5.0"
-test "$(pnpm --version)" = "11.9.0"
+test "$(node --version)" = "v26.13.1"
+test "$(pnpm --version)" = "12.23.0"
 
 make desktop-check'''
 

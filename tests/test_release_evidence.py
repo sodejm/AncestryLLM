@@ -287,9 +287,9 @@ def test_bootstrap_receipt_requires_exact_schema_policy_asset_and_identity() -> 
 
     validated = evidence._validate_bootstrap_receipt(receipt)
 
-    assert validated["tool_version"] == "0.12.1"
+    assert validated["tool_version"] == "0.13.9"
     assert validated["platform"] == "macos-arm64"
-    assert validated["source_commit"] == "329541a503de8a4d9bb021814f9c0875efe033c8"
+    assert validated["source_commit"] == "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce"
 
     receipt["unexpected"] = "field"
     with pytest.raises(ValueError, match="fields do not match schema v1"):
@@ -485,10 +485,10 @@ def test_generator_embeds_dispositions_interoperability_and_hashes(
     assert "tests-and-coverage" in rendered
     assert "https://example.test/readiness-run#tests-and-coverage" in rendered
     assert "Bootstrap verification" in rendered
-    assert "uv` `0.12.1" in rendered
+    assert "uv` `0.13.9" in rendered
     assert "macos-arm64" in rendered
     assert hashlib.sha256(bootstrap_receipt_path.read_bytes()).hexdigest() in rendered
-    assert "329541a503de8a4d9bb021814f9c0875efe033c8" in rendered
+    assert "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce" in rendered
     assert "Version 1 security dependency verification" in rendered
     assert hashlib.sha256(security_dependency_path.read_bytes()).hexdigest() in rendered
     assert "#131" in rendered

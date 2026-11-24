@@ -6,7 +6,7 @@ A source checkout requires a system-supplied Python 3.12 through 3.15. When
 `uv` is invoked directly, the checked-in `.python-version` requests 3.12 by
 default. Canonical Make targets instead resolve their selected `PYTHON` command
 to its exact native executable path before invoking `uv`. Repository policy
-requires exactly `uv` 0.12.1 with Python downloads disabled. Run:
+requires exactly `uv` 0.13.9 with Python downloads disabled. Run:
 
 ```console
 make setup

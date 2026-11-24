@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "uv": {
-    "version": "0.12.1",
+    "version": "0.13.9",
     "release_repository": "astral-sh/uv",
-    "release_tag": "0.12.1",
+    "release_tag": "0.13.9",
     "release_url_template": "https://github.com/{repository}/releases/download/{tag}/{asset}",
     "source_repository": "https://github.com/astral-sh/uv",
-    "source_commit": "329541a503de8a4d9bb021814f9c0875efe033c8",
+    "source_commit": "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce",
     "source_ref": "refs/heads/main",
     "oidc_issuer": "https://token.actions.githubusercontent.com",
     "signer_workflow_identity": "https://github.com/astral-sh/uv/.github/workflows/release.yml@refs/heads/main",
@@ -14,45 +14,45 @@
     "assets": {
       "linux-x86_64": {
         "archive_name": "uv-x86_64-unknown-linux-gnu.tar.gz",
-        "sha256": "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
-        "size_bytes": 21760555,
+        "sha256": "a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5",
+        "size_bytes": 17068176,
         "binary_path": "uv-x86_64-unknown-linux-gnu/uv",
-        "binary_sha256": "92face6b1f0462ad911857957bd168cd4ae45515e2a2cb3fcc3ecbda3d4d82b1"
+        "binary_sha256": "b73acdf73b96c3ac9e56d2fa933427b3ee6a901e3cce6ba1e3ecb3f91ca0d86a"
       },
       "linux-arm64": {
         "archive_name": "uv-aarch64-unknown-linux-gnu.tar.gz",
-        "sha256": "769d373e146692c639b5fbaae33b331c297a32e03d30448772051902df52bbf4",
-        "size_bytes": 20534826,
+        "sha256": "0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d",
+        "size_bytes": 16120245,
         "binary_path": "uv-aarch64-unknown-linux-gnu/uv",
-        "binary_sha256": "d8e93d894c81ebaa27ef159a5c5b1398283e30fdf91f662433caa494fa421b9f"
+        "binary_sha256": "6109e47a75f2380d1cc90b00a6ee82b7b5792ddf66588625ec168545ae17512e"
       },
       "macos-x86_64": {
         "archive_name": "uv-x86_64-apple-darwin.tar.gz",
-        "sha256": "69d9f9a00337f25a50dcb13882052da08b8469bac11091c98c5694c3c6721467",
-        "size_bytes": 19622543,
+        "sha256": "617a3211261b0fc739562f0071aa34e9739797c510208ede8e2977c30903d041",
+        "size_bytes": 17362924,
         "binary_path": "uv-x86_64-apple-darwin/uv",
-        "binary_sha256": "88af0b228e9eaa017c670d73e8c74fbd220450cb74195025203dc0009335351e"
+        "binary_sha256": "9d275208c058354f9b300ea46a499c7a29de3249ae839503cadff2c01c159d69"
       },
       "macos-arm64": {
         "archive_name": "uv-aarch64-apple-darwin.tar.gz",
-        "sha256": "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
-        "size_bytes": 17679560,
+        "sha256": "5aeca67f2283f75235de40d0bd9c0a5bbc5fce23b6d48b3bf9fa1b2db08382ca",
+        "size_bytes": 14554974,
         "binary_path": "uv-aarch64-apple-darwin/uv",
-        "binary_sha256": "cf8774f78b8df0768991aeb5a1c78f9c61f3a0b4993c875b83d2b4a66b80bf9e"
+        "binary_sha256": "0e17c316d23b33b4e840669f516f5cb7f5c1faa816ebd3824052ab50082ecefb"
       },
       "windows-x86_64": {
         "archive_name": "uv-x86_64-pc-windows-msvc.zip",
-        "sha256": "8fcb0cb46e1229065e344758980924e569bef5882ef45f46fada8fb24e06b74a",
-        "size_bytes": 19073343,
+        "sha256": "edd61f7f5728a56cc62455386661860bdfc7bab65872f39b0c25bdcc1d8e1beb",
+        "size_bytes": 15567875,
         "binary_path": "uv.exe",
-        "binary_sha256": "f537cc65c1791d9d1a022132302b21ecd48cdf0a605a7b345809fbe8af4e807d"
+        "binary_sha256": "7e6349bc24cfc7249f892c41298e4371826a19008c3cbcfe13eacd08ac398470"
       },
       "windows-arm64": {
         "archive_name": "uv-aarch64-pc-windows-msvc.zip",
-        "sha256": "9bc7c18e616230fa2dc6fb24bc3afde18a95c2b5c9433de747e9502c66041568",
-        "size_bytes": 18030168,
+        "sha256": "72eed595983a4d7d22d79f21065b0f4479cc7e5c7a89104bb410c8f47559a878",
+        "size_bytes": 15747415,
         "binary_path": "uv.exe",
-        "binary_sha256": "9c11339f74a3fd89e800d22cdd1bc332d3810da517d54230b47cc21fa1c29206"
+        "binary_sha256": "4514fb99c05235f1e98ff38dbfd59ecbc57fdb8a1922b5af20e09a227f51fb13"
       }
     }
   },
@@ -106,21 +106,21 @@
   },
   "python_verifiers": {
     "pypi-attestations": {
-      "version": "0.0.30",
+      "version": "0.0.32",
       "project": "pypi-attestations",
       "project_url": "https://pypi.org/project/pypi-attestations/",
       "source_repository": "https://github.com/pypi/pypi-attestations",
       "reviewed_update_procedure": "docs/security/verified-uv-bootstrap.md#reviewed-policy-updates",
       "artifacts": [
         {
-          "filename": "pypi_attestations-0.0.30-py3-none-any.whl",
-          "sha256": "b3a9c53f6cb89e5e7b5b70e6cfca97cfc66008c1ed54087355e06e40071cef21",
-          "url": "https://files.pythonhosted.org/packages/5f/24/e59078318b5e2bca59be5a21957d70e082e6eb4f478adffe373f3b74daf4/pypi_attestations-0.0.30-py3-none-any.whl"
+          "filename": "pypi_attestations-0.0.32-py3-none-any.whl",
+          "sha256": "ec7bc5919783964a2b4605fc10e2167a2031daa1efbc04bfadc4a653cda480e6",
+          "url": "https://files.pythonhosted.org/packages/f8/93/39572a59bf30eab2d4b1d9e998fb6e446427580559ce8d7c2fc3ab1a7efb/pypi_attestations-0.0.32-py3-none-any.whl"
         },
         {
-          "filename": "pypi_attestations-0.0.30.tar.gz",
-          "sha256": "14ff13c76bbef02a483c2b77532da02bfd746b5141b881f355e06b9807434423",
-          "url": "https://files.pythonhosted.org/packages/97/1e/eb8a0233cdcaf01acb18076ac8b8a057714177b3717baf26b78a11b8d929/pypi_attestations-0.0.30.tar.gz"
+          "filename": "pypi_attestations-0.0.32.tar.gz",
+          "sha256": "986bfb1e1cafd50dfd5087c5ef12f93cd6fada95761175a96e704d6eb59076c4",
+          "url": "https://files.pythonhosted.org/packages/48/5f/3e9748d9ae083a1ecd8b3dcca4e3c778e1f0dc7157537104e92c12782601/pypi_attestations-0.0.32.tar.gz"
         }
       ]
     }

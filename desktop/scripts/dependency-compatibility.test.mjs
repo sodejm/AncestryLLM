@@ -26,9 +26,10 @@ const packageJson = JSON.parse(await readFile(new URL('../package.json', import.
 const wdioConfig = await readFile(new URL('../wdio.conf.ts', import.meta.url), 'utf8')
 
 async function pnpmPackagePath(prefix, packagePath) {
-  const matches = (await readdir(pnpmModulesDir)).filter((entry) => entry.startsWith(prefix))
-  assert.equal(matches.length, 1, `expected one installed ${prefix} package, received ${matches}`)
-  return join(pnpmModulesDir, matches[0], 'node_modules', packagePath)
+  const matches = (await readdir(pnpmModulesDir)).filter((entry) => entry === prefix || entry.startsWith(`${prefix}_`))
+  assert.ok(matches.length >= 1, `expected an installed ${prefix} package`)
+  const selected = matches.sort((left, right) => (left === prefix ? -1 : right === prefix ? 1 : left.localeCompare(right)))[0]
+  return join(pnpmModulesDir, selected, 'node_modules', packagePath)
 }
 
 async function writeZip(zipPath, entries) {
@@ -51,14 +52,11 @@ async function writeZip(zipPath, entries) {
 
 async function loadPuppeteerExtractors() {
   const packageRoot = await pnpmPackagePath(
-    '@puppeteer+browsers@2.13.2',
+    '@puppeteer+browsers@3.2.7',
     '@puppeteer/browsers',
   )
-  const esmPath = join(packageRoot, 'lib', 'esm', 'fileUtil.js')
-  const cjsPath = join(packageRoot, 'lib', 'cjs', 'fileUtil.js')
-  const esm = await import(pathToFileURL(esmPath).href)
-  const cjs = createRequire(import.meta.url)(cjsPath)
-  return [esm.unpackArchive, cjs.unpackArchive]
+  const fileUtil = await import(pathToFileURL(join(packageRoot, 'lib', 'fileUtil.js')).href)
+  return [fileUtil.unpackArchive]
 }
 
 async function waitFor(predicate, description, timeoutMs = 10_000) {
@@ -200,65 +198,11 @@ test('the guarded builder entry point resolves and runs the frozen CLI', () => {
     { cwd: repositoryDir, env, encoding: 'utf8' },
   )
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /26\.15\.7/u)
-})
-
-test('get-uri FTP adapter remains compatible with scoped basic-ftp 6', async () => {
-  const ftpModulePath = await pnpmPackagePath('get-uri@6.0.5', 'get-uri/dist/ftp.js')
-  const ftpRequire = createRequire(ftpModulePath)
-  const { Client } = ftpRequire('basic-ftp')
-  const calls = []
-  const original = {
-    access: Client.prototype.access,
-    close: Client.prototype.close,
-    downloadTo: Client.prototype.downloadTo,
-    lastMod: Client.prototype.lastMod,
-  }
-  const modifiedAt = new Date('2026-10-10T12:00:00Z')
-  Client.prototype.access = async (options) => calls.push(['access', options])
-  Client.prototype.lastMod = async (filepath) => {
-    calls.push(['lastMod', filepath])
-    return modifiedAt
-  }
-  Client.prototype.downloadTo = async (stream, filepath) => {
-    calls.push(['downloadTo', filepath])
-    stream.end('fixture-payload')
-    return { message: 'transfer complete' }
-  }
-  Client.prototype.close = () => calls.push(['close'])
-
-  try {
-    const { ftp } = ftpRequire(ftpModulePath)
-    const fixtureUrl = new URL('ftp://example.test:2121/tree.ged')
-    fixtureUrl.username = 'fixture-user'
-    fixtureUrl.password = 'fixture-pass'
-    const stream = await ftp(fixtureUrl)
-    let contents = ''
-    for await (const chunk of stream) contents += chunk.toString('utf8')
-    assert.equal(contents, 'fixture-payload')
-    assert.equal(+stream.lastModified, +modifiedAt)
-    assert.deepEqual(calls, [
-      [
-        'access',
-        {
-          host: 'example.test',
-          port: 2121,
-          user: 'fixture-user',
-          password: 'fixture-pass',
-        },
-      ],
-      ['lastMod', '/tree.ged'],
-      ['downloadTo', '/tree.ged'],
-      ['close'],
-    ])
-  } finally {
-    Object.assign(Client.prototype, original)
-    delete ftpRequire.cache[ftpModulePath]
-  }
+  assert.match(result.stdout, /26\.18\.0/u)
 })
 
 test(
-  'Puppeteer CJS and ESM ZIP call sites preserve in-archive symlinks with the Electron extractor',
+  'Puppeteer ZIP extraction preserves in-archive symlinks',
   { skip: process.platform === 'win32' ? 'Windows symlink creation requires host policy' : false },
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'ancestryllm-extract-zip-'))

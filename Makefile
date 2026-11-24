@@ -2,8 +2,8 @@
 SHELL := /bin/bash
 
 VENV_DIR ?= .venv
-UV_TOOL_DIR := .tools/uv
-UV_RECEIPT := .tools/receipts/uv-bootstrap.json
+UV_TOOL_DIR := .tools/uv/0.13.9
+UV_RECEIPT := .tools/receipts/uv-bootstrap-0.13.9.json
 DIST_DIR ?= dist
 UV_BUILD_REPORT ?= build/uv-build-evaluation.json
 SBOM_OUTPUT ?= sbom.json

@@ -26,44 +26,44 @@
   "artifacts": {
     "setuptools": {
       "sdist": {
-        "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "381606dc8beef94c0119e37149c2889041ed3fff543bc6c633838cb2de92e1e5"
+        "filename": "ancestryllm-0.6.0.tar.gz",
+        "sha256": "945d38cd56e4a7efd0bc7405347389cbf4d6cf14cd5a6f2d0ab41c9857946d6b"
       },
       "wheel": {
-        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
+        "filename": "ancestryllm-0.6.0-py3-none-any.whl",
+        "sha256": "1058728987244a23bb76a93d54462454c65f986463790eb98d3e73b918d38478"
       }
     },
     "setuptools_from_sdist": {
       "wheel": {
-        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "70a2cf2d1dcd3f6e0dc465845d09045d76ed9cc3768361a0230128212a7534b8"
+        "filename": "ancestryllm-0.6.0-py3-none-any.whl",
+        "sha256": "1058728987244a23bb76a93d54462454c65f986463790eb98d3e73b918d38478"
       }
     },
     "uv_build_first": {
       "sdist": {
-        "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
+        "filename": "ancestryllm-0.6.0.tar.gz",
+        "sha256": "4422accc954a160e42d3c24fe43f6c1593a016dfb66ee297e15f726d72e049e2"
       },
       "wheel": {
-        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+        "filename": "ancestryllm-0.6.0-py3-none-any.whl",
+        "sha256": "0707bf49814cb339b0f3eb44da924e02f083986770d09d042d595b2be7db558f"
       }
     },
     "uv_build_from_sdist": {
       "wheel": {
-        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+        "filename": "ancestryllm-0.6.0-py3-none-any.whl",
+        "sha256": "0707bf49814cb339b0f3eb44da924e02f083986770d09d042d595b2be7db558f"
       }
     },
     "uv_build_second": {
       "sdist": {
-        "filename": "ancestryllm-0.5.0.tar.gz",
-        "sha256": "58cc907badcf3da9134d36922ff521a32a6b88adf1e0fbb041d8a8c98f8502d5"
+        "filename": "ancestryllm-0.6.0.tar.gz",
+        "sha256": "4422accc954a160e42d3c24fe43f6c1593a016dfb66ee297e15f726d72e049e2"
       },
       "wheel": {
-        "filename": "ancestryllm-0.5.0-py3-none-any.whl",
-        "sha256": "c02af932310b6a22900668f8ecc22c1df61528d57203a0ff03f0d349290ad60b"
+        "filename": "ancestryllm-0.6.0-py3-none-any.whl",
+        "sha256": "0707bf49814cb339b0f3eb44da924e02f083986770d09d042d595b2be7db558f"
       }
     }
   },
@@ -97,12 +97,17 @@
     },
     "package_data_paths": {
       "differences": {
-        "added": [],
+        "added": [
+          "ancestryllm/core/CORE_JOBS.md",
+          "ancestryllm/gedcom/INSPECTION_RESULTS.md",
+          "ancestryllm/gedcom/MERGE_IDENTIFIER_ALLOCATION.md",
+          "ancestryllm/gedcom/ROOT_INDEX.md"
+        ],
         "changed": [],
         "removed": []
       },
       "failure_code": "UVBEVAL_PACKAGE_DATA_DRIFT",
-      "passed": true
+      "passed": false
     },
     "project_files": {
       "differences": {
@@ -129,9 +134,9 @@
           "dependency:keyring>=25.7,<26",
           "dependency:ollama>=0.6,<1 ; extra == 'all-llm'",
           "dependency:ollama>=0.6,<1 ; extra == 'ollama'",
-          "dependency:openai>=2.45,<3 ; extra == 'all-llm'",
-          "dependency:openai>=2.45,<3 ; extra == 'openai'",
-          "dependency:openai>=2.45,<3 ; extra == 'openrouter'",
+          "dependency:openai>=2.45,<4 ; extra == 'all-llm'",
+          "dependency:openai>=2.45,<4 ; extra == 'openai'",
+          "dependency:openai>=2.45,<4 ; extra == 'openrouter'",
           "dependency:platformdirs>=4.5,<5",
           "dependency:prompt-toolkit>=3.0.52,<4",
           "dependency:pydantic>=2.12,<3",
@@ -160,9 +165,9 @@
           "dependency:keyring<26,>=25.7",
           "dependency:ollama<1,>=0.6; extra == \"all-llm\"",
           "dependency:ollama<1,>=0.6; extra == \"ollama\"",
-          "dependency:openai<3,>=2.45; extra == \"all-llm\"",
-          "dependency:openai<3,>=2.45; extra == \"openai\"",
-          "dependency:openai<3,>=2.45; extra == \"openrouter\"",
+          "dependency:openai<4,>=2.45; extra == \"all-llm\"",
+          "dependency:openai<4,>=2.45; extra == \"openai\"",
+          "dependency:openai<4,>=2.45; extra == \"openrouter\"",
           "dependency:platformdirs<5,>=4.5",
           "dependency:prompt-toolkit<4,>=3.0.52",
           "dependency:pydantic<3,>=2.12",
@@ -182,15 +187,20 @@
     },
     "record": {
       "differences": {
-        "added": [],
+        "added": [
+          "ancestryllm/core/CORE_JOBS.md",
+          "ancestryllm/gedcom/INSPECTION_RESULTS.md",
+          "ancestryllm/gedcom/MERGE_IDENTIFIER_ALLOCATION.md",
+          "ancestryllm/gedcom/ROOT_INDEX.md"
+        ],
         "changed": [
-          "ancestryllm-0.5.0.dist-info/METADATA",
-          "ancestryllm-0.5.0.dist-info/WHEEL",
-          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+          "ancestryllm-0.6.0.dist-info/METADATA",
+          "ancestryllm-0.6.0.dist-info/WHEEL",
+          "ancestryllm-0.6.0.dist-info/entry_points.txt"
         ],
         "removed": [
-          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
-          "ancestryllm-0.5.0.dist-info/top_level.txt"
+          "ancestryllm-0.6.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.6.0.dist-info/top_level.txt"
         ]
       },
       "failure_code": "UVBEVAL_RECORD_DRIFT",
@@ -199,7 +209,11 @@
     "sdist_payload_except_controlled_build_configuration": {
       "differences": {
         "added": [
-          "pyproject.toml.orig"
+          "pyproject.toml.orig",
+          "src/ancestryllm/core/CORE_JOBS.md",
+          "src/ancestryllm/gedcom/INSPECTION_RESULTS.md",
+          "src/ancestryllm/gedcom/MERGE_IDENTIFIER_ALLOCATION.md",
+          "src/ancestryllm/gedcom/ROOT_INDEX.md"
         ],
         "changed": [
           "PKG-INFO"
@@ -279,16 +293,21 @@
     },
     "wheel_archive_contents": {
       "differences": {
-        "added": [],
+        "added": [
+          "ancestryllm/core/CORE_JOBS.md",
+          "ancestryllm/gedcom/INSPECTION_RESULTS.md",
+          "ancestryllm/gedcom/MERGE_IDENTIFIER_ALLOCATION.md",
+          "ancestryllm/gedcom/ROOT_INDEX.md"
+        ],
         "changed": [
-          "ancestryllm-0.5.0.dist-info/METADATA",
-          "ancestryllm-0.5.0.dist-info/RECORD",
-          "ancestryllm-0.5.0.dist-info/WHEEL",
-          "ancestryllm-0.5.0.dist-info/entry_points.txt"
+          "ancestryllm-0.6.0.dist-info/METADATA",
+          "ancestryllm-0.6.0.dist-info/RECORD",
+          "ancestryllm-0.6.0.dist-info/WHEEL",
+          "ancestryllm-0.6.0.dist-info/entry_points.txt"
         ],
         "removed": [
-          "ancestryllm-0.5.0.dist-info/licenses/LICENSE",
-          "ancestryllm-0.5.0.dist-info/top_level.txt"
+          "ancestryllm-0.6.0.dist-info/licenses/LICENSE",
+          "ancestryllm-0.6.0.dist-info/top_level.txt"
         ]
       },
       "failure_code": "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
@@ -347,16 +366,22 @@
     },
     "wheel_package_payload": {
       "differences": {
-        "added": [],
+        "added": [
+          "ancestryllm/core/CORE_JOBS.md",
+          "ancestryllm/gedcom/INSPECTION_RESULTS.md",
+          "ancestryllm/gedcom/MERGE_IDENTIFIER_ALLOCATION.md",
+          "ancestryllm/gedcom/ROOT_INDEX.md"
+        ],
         "changed": [],
         "removed": []
       },
       "failure_code": "UVBEVAL_WHEEL_PAYLOAD_DRIFT",
-      "passed": true
+      "passed": false
     }
   },
   "evaluation": "setuptools-vs-uv_build",
   "failure_codes": [
+    "UVBEVAL_PACKAGE_DATA_DRIFT",
     "UVBEVAL_PROJECT_FILE_DRIFT",
     "UVBEVAL_PROJECT_METADATA_DRIFT",
     "UVBEVAL_RECORD_DRIFT",
@@ -364,24 +389,25 @@
     "UVBEVAL_UV_BUILD_ALLOWLIST_VIOLATION",
     "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
     "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
-    "UVBEVAL_WHEEL_METADATA_DRIFT"
+    "UVBEVAL_WHEEL_METADATA_DRIFT",
+    "UVBEVAL_WHEEL_PAYLOAD_DRIFT"
   ],
   "schema_version": 1,
   "source": {
-    "commit": "b94f5b8338079d05bd0b386df6c5ec9b33b55422",
-    "source_date_epoch": 1786426222
+    "commit": "43fab33226ff203e0865511949d9fa90d6170bbb",
+    "source_date_epoch": 1795493199
   },
   "status": "incompatible",
   "tools": {
-    "build_frontend": "uv 0.12.1",
-    "python": "3.14.6",
+    "build_frontend": "uv 0.13.9",
+    "python": "3.15.0",
     "setuptools": {
       "requirement": "setuptools>=83",
-      "version": "83.0.0"
+      "version": "84.2.1"
     },
     "uv_build": {
       "requirement": "uv_build>=0.12.0,<0.13",
-      "version": "0.12.3"
+      "version": "0.12.24"
     }
   }
 }

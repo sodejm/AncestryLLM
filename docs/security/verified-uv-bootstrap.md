@@ -32,8 +32,8 @@ make setup
 ```
 
 The target runs the verified bootstrap, installs `uv` beneath the ignored
-repository-local `.tools/uv/` directory, writes the sanitized receipt at
-`.tools/receipts/uv-bootstrap.json`, and only then uses that exact binary. To
+repository-local `.tools/uv/0.13.9/` directory, writes the sanitized receipt at
+`.tools/receipts/uv-bootstrap-0.13.9.json`, and only then uses that exact binary. To
 perform only the verification and installation phase, run:
 
 ```bash
@@ -56,9 +56,10 @@ maintenance](../reference/DEPENDENCY_MAINTENANCE.md) for the complete group cont
 Do not replace this command with a `curl | sh` installer, `pip install uv`, an
 implicit latest release, an alternate index or mirror, or an existing `uv` on
 `PATH`. A cached repository-local executable is re-hashed against policy before
-reuse. A mismatch fails closed without deleting user data; remove only the
-specific ignored `.tools/uv/` cache and run the bootstrap again after resolving
-the cause.
+reuse. Each reviewed release has its own cache directory, so a policy upgrade
+installs alongside a prior cache without trusting or deleting it. A mismatch
+within the active release cache fails closed without deleting user data; remove
+only that specific ignored `.tools/uv/0.13.9/` cache after resolving the cause.
 
 Before synchronization, `make setup` probes an existing regular uv-managed
 `.venv` with an isolated standard-library import. If Python fails during that
@@ -75,7 +76,7 @@ repair an existing environment whose base interpreter has disappeared.
 
 Policy schema v1 binds all executable inputs needed by the bootstrap:
 
-- exactly `uv` 0.12.1 from `astral-sh/uv`, including the reviewed source commit
+- exactly `uv` 0.13.9 from `astral-sh/uv`, including the reviewed source commit
   and ref, release repository and tag, GitHub Actions OIDC issuer, signer
   workflow identity, and SLSA provenance-v1 predicate;
 - exact release archive names, reviewed byte sizes, archive SHA-256 values,
@@ -84,7 +85,7 @@ Policy schema v1 binds all executable inputs needed by the bootstrap:
 - GitHub CLI 2.100.0 as the pinned provenance verifier, with an exact archive and
   reviewed byte size and SHA-256 for every supported platform;
 - `astral-sh/setup-uv` v9.0.0 at its exact reviewed commit; and
-- `pypi-attestations` 0.0.30, its trusted PyPI project and source repository,
+- `pypi-attestations` 0.0.32, its trusted PyPI project and source repository,
   and every permitted wheel or sdist filename, URL, and SHA-256. The same
   verifier release and artifact hashes are represented by `uv.lock` in the
   non-default `release-verifier` dependency group. Full local setup includes
@@ -123,7 +124,7 @@ predicate. The extracted `uv` executable receives a second digest check and
 exact-version check before an atomic repository-local installation. Extraction
 selects only the exact policy-reviewed archive member; an absent or differently
 located executable fails closed before any candidate binary executes. In uv
-0.12.1, both reviewed Windows ZIP archives contain `uv.exe` at the archive root,
+0.13.9, both reviewed Windows ZIP archives contain `uv.exe` at the archive root,
 independent of the architecture-specific archive filename.
 The install and receipt destinations are resolved through stable parent handles:
 POSIX uses directory descriptors and relative filesystem operations, while
@@ -208,7 +209,7 @@ on all three attempts. Wait for the service to recover and rerun setup; no `uv`
 binary is installed or executed without successful provenance verification.
 
 For an interrupted download or a cache mismatch, leave user files untouched,
-remove only the repository-local ignored `.tools/uv/` cache, and retry. For a
+remove only the active repository-local ignored `.tools/uv/0.13.9/` cache, and retry. For a
 local `INSTALL_WRITE_FAILED`, correct the repository-local directory's space or
 permissions and retry; the failed temporary install is discarded. For a
 policy, provenance, or identity mismatch, stop and review the upstream release

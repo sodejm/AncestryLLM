@@ -33,12 +33,12 @@ from typing import Any, NoReturn, Protocol
 
 POLICY_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
-UV_VERSION = "0.12.1"
+UV_VERSION = "0.13.9"
 GH_VERSION = "2.100.0"
 RELEASE_URL_TEMPLATE = "https://github.com/{repository}/releases/download/{tag}/{asset}"
 UV_REPOSITORY = "astral-sh/uv"
 UV_SOURCE_REPOSITORY = "https://github.com/astral-sh/uv"
-UV_SOURCE_COMMIT = "329541a503de8a4d9bb021814f9c0875efe033c8"
+UV_SOURCE_COMMIT = "6b2d39dcc390293d51c9c0d2bbcd650f4bcbfdce"
 UV_SOURCE_REF = "refs/heads/main"
 UV_SIGNER_WORKFLOW = "https://github.com/astral-sh/uv/.github/workflows/release.yml@refs/heads/main"
 UV_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
@@ -46,9 +46,9 @@ UV_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 SETUP_UV_VERSION = "v9.0.0"
 SETUP_UV_COMMIT = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
 POLICY_PATH = Path(__file__).resolve().parents[1] / "config" / "uv-bootstrap-policy.json"
-DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv"
+DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / ".tools" / "uv" / UV_VERSION
 DEFAULT_RECEIPT_PATH = (
-    Path(__file__).resolve().parents[1] / ".tools" / "receipts" / "uv-bootstrap.json"
+    Path(__file__).resolve().parents[1] / ".tools" / "receipts" / f"uv-bootstrap-{UV_VERSION}.json"
 )
 
 PLATFORM_KEYS = frozenset(
@@ -122,13 +122,13 @@ GH_ASSET_SHAPE = {
     ),
 }
 PYPI_ARTIFACT_URLS = {
-    "pypi_attestations-0.0.30-py3-none-any.whl": (
-        "https://files.pythonhosted.org/packages/5f/24/e59078318b5e2bca59be5a21957d70e"
-        "082e6eb4f478adffe373f3b74daf4/pypi_attestations-0.0.30-py3-none-any.whl"
+    "pypi_attestations-0.0.32-py3-none-any.whl": (
+        "https://files.pythonhosted.org/packages/f8/93/39572a59bf30eab2d4b1d9e998fb6e446"
+        "427580559ce8d7c2fc3ab1a7efb/pypi_attestations-0.0.32-py3-none-any.whl"
     ),
-    "pypi_attestations-0.0.30.tar.gz": (
-        "https://files.pythonhosted.org/packages/97/1e/eb8a0233cdcaf01acb18076ac8b8a057"
-        "714177b3717baf26b78a11b8d929/pypi_attestations-0.0.30.tar.gz"
+    "pypi_attestations-0.0.32.tar.gz": (
+        "https://files.pythonhosted.org/packages/48/5f/3e9748d9ae083a1ecd8b3dcca4e3c778"
+        "e1f0dc7157537104e92c12782601/pypi_attestations-0.0.32.tar.gz"
     ),
 }
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -363,7 +363,7 @@ def _validate_policy(payload: Any) -> dict[str, Any]:
         "python_verifiers.pypi-attestations",
     )
     verifier_values = {
-        "version": "0.0.30",
+        "version": "0.0.32",
         "project": "pypi-attestations",
         "project_url": "https://pypi.org/project/pypi-attestations/",
         "source_repository": "https://github.com/pypi/pypi-attestations",

@@ -37,9 +37,9 @@ repos:
         args: ["--check"]
         files: ^(src|tests|scripts)/
 
-  # Commit corresponds to the repository's verified uv 0.12.1 contract.
+  # Commit corresponds to the repository's verified uv 0.13.9 contract.
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 8ff2449591c8de025b17661ba76d60237a1ae62b
+    rev: 00eaed0068329eb6ca6bcb8de7b46c372d8d1c19
     hooks:
       - id: uv-lock
         args: ["--check"]
@@ -57,6 +57,13 @@ repos:
       - id: trailing-whitespace
       - id: check-merge-conflict
       - id: check-yaml
+        exclude: ^desktop/pnpm-lock\.yaml$
+      # pnpm 12 emits a second YAML document for its generated lockfile. Keep
+      # the stricter default validator for every other YAML file.
+      - id: check-yaml
+        name: check-yaml (pnpm lockfile)
+        files: ^desktop/pnpm-lock\.yaml$
+        args: [--allow-multiple-documents]
       - id: check-toml
       - id: mixed-line-ending
         args: ["--fix=lf"]

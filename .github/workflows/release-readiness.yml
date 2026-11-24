@@ -159,11 +159,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: matrix.python == '3.12'
         with:
-          node-version: "26.5.0"
+          node-version: "26.13.1"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: matrix.python == '3.12'
         with:
-          version: "11.9.0"
+          version: "12.23.0"
           run_install: false
       - name: Set up verified uv
         uses: ./.github/actions/setup-verified-uv
@@ -204,7 +204,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Scan frozen candidate tree for secrets
-        uses: trufflesecurity/trufflehog@3bd2b5887eb0efb8fa18bfd1d296032924e4ffdc # v3.99.9
+        uses: trufflesecurity/trufflehog@4ef51f69ca6347aaa76a5e64a87eac9c0c909f71 # v3.100.1
         with:
           version: 3.95.9
           extra_args: --results=verified,unknown --fail-on-scan-errors
@@ -246,11 +246,11 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
-      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: python
           queries: security-extended
-      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           output: codeql-sarif
           upload: never
