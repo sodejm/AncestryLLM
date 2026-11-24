@@ -60,6 +60,23 @@ class RuleArchive:
     members: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RegistryRule:
+    """One Semgrep registry rule selected by its immutable version identifier."""
+
+    rule_id: str
+    version_id: str
+
+
+@dataclass(frozen=True)
+class RuleRegistrySnapshot:
+    """A reviewed set of versioned Semgrep registry rules."""
+
+    name: str
+    semantic_sha256: str
+    rules: tuple[RegistryRule, ...]
+
+
 RULE_BUNDLES = (
     RuleBundle(
         name="python",
@@ -69,21 +86,6 @@ RULE_BUNDLES = (
             RuleRevision(
                 sha256="de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5",
                 size=502_198,
-            ),
-        ),
-    ),
-    RuleBundle(
-        name="secrets",
-        url="https://semgrep.dev/c/p/secrets",
-        semantic_sha256="87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b",
-        revisions=(
-            RuleRevision(
-                sha256="d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a",
-                size=94_643,
-            ),
-            RuleRevision(
-                sha256="64bc763d47a751a9950705cad60c4d840e598409700b2f01ab0fb249f51a880c",
-                size=94_643,
             ),
         ),
     ),
@@ -112,6 +114,201 @@ RULE_BUNDLES = (
             "trailofbits.generic.tar-insecure-flags.tar-insecure-flags",
             "trailofbits.generic.wget-no-check-certificate.wget-no-check-certificate",
             "trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url",
+        ),
+    ),
+)
+
+RULE_REGISTRY_SNAPSHOTS = (
+    RuleRegistrySnapshot(
+        name="secrets",
+        semantic_sha256="989abeac7bb3f93823bdc0ed498e8ad371f4be9ac99758c870e1e89d075774cb",
+        rules=(
+            RegistryRule(
+                "generic.secrets.security.detected-amazon-mws-auth-token.detected-amazon-mws-auth-token",
+                "K3TKkGj",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-artifactory-password.detected-artifactory-password",
+                "qkTR7BB",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-artifactory-token.detected-artifactory-token",
+                "l4TJR6J",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-aws-access-key-id-value.detected-aws-access-key-id-value",
+                "YDTZenE",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-aws-appsync-graphql-key.detected-aws-appsync-graphql-key",
+                "o5TbD9o",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-aws-secret-access-key.detected-aws-secret-access-key",
+                "zyTb2Dr",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-aws-session-token.detected-aws-session-token",
+                "pZT03Lx",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-codeclimate.detected-codeclimate", "X0Tzy2o"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-facebook-access-token.detected-facebook-access-token",
+                "1QTyp7J",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-facebook-oauth.detected-facebook-oauth",
+                "9lT4b5N",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-google-gcm-service-account.detected-google-gcm-service-account",
+                "w8TRoDX",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-google-oauth-access-token.detected-google-oauth-access-token",
+                "xyTjzp6",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-heroku-api-key.detected-heroku-api-key",
+                "e1Tyj3N",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-hockeyapp.detected-hockeyapp", "vdT068z"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-mailchimp-api-key.detected-mailchimp-api-key",
+                "nWT2LoR",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-mailgun-api-key.detected-mailgun-api-key",
+                "ExTExAG",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-outlook-team.detected-outlook-team", "LjTkgA1"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-paypal-braintree-access-token.detected-paypal-braintree-access-token",
+                "8KT5ryb",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-pgp-private-key-block.detected-pgp-private-key-block",
+                "gETB7O4",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-picatic-api-key.detected-picatic-api-key",
+                "QkTGqwK",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-private-key.detected-private-key", "3ZT4X4Y"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-sauce-token.detected-sauce-token", "44TEjER"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-slack-token.detected-slack-token", "JdTzxz3"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-slack-webhook.detected-slack-webhook", "5PTo1oO"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key",
+                "bZTQ72r",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-square-access-token.detected-square-access-token",
+                "BjTkZkz",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-square-oauth-secret.detected-square-oauth-secret",
+                "DkTRbRG",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-ssh-password.detected-ssh-password", "WrTqKqY"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-stripe-api-key.detected-stripe-api-key",
+                "0bTKzK1",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-stripe-restricted-api-key.detected-stripe-restricted-api-key",
+                "K3TKkKj",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-telegram-bot-api-key.detected-telegram-bot-api-key",
+                "qkTR7RB",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-twilio-api-key.detected-twilio-api-key",
+                "l4TJRJJ",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-username-and-password-in-uri.detected-username-and-password-in-uri",
+                "YDTZeZE",
+            ),
+            RegistryRule("go.jwt-go.security.jwt.hardcoded-jwt-key", "pZT0305"),
+            RegistryRule(
+                "java.java-jwt.security.jwt-hardcode.java-jwt-hardcoded-secret", "d6Tyx8j"
+            ),
+            RegistryRule(
+                "javascript.express.security.express-jwt-hardcoded-secret.express-jwt-hardcoded-secret",
+                "pZT03Q0",
+            ),
+            RegistryRule("javascript.jose.security.jwt-hardcode.hardcoded-jwt-secret", "d6TyxbX"),
+            RegistryRule(
+                "javascript.jsonwebtoken.security.jwt-hardcode.hardcoded-jwt-secret", "gETB75D"
+            ),
+            RegistryRule(
+                "javascript.passport-jwt.security.passport-hardcode.hardcoded-passport-secret",
+                "X0TzyoE",
+            ),
+            RegistryRule("python.boto3.security.hardcoded-token.hardcoded-token", "gETB78n"),
+            RegistryRule(
+                "ruby.lang.security.hardcoded-http-auth-in-controller.hardcoded-http-auth-in-controller",
+                "0bTKzNK",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash", "2KTv236"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-etc-shadow.detected-etc-shadow", "jQTn5yp"
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-npm-registry-auth-token.detected-npm-registry-auth-token",
+                "7ZTE3n2",
+            ),
+            RegistryRule(
+                "terraform.lang.security.rds-insecure-password-storage-in-source-code.rds-insecure-password-storage-in-source-code",
+                "gETB77b",
+            ),
+            RegistryRule(
+                "terraform.aws.security.aws-provider-static-credentials.aws-provider-static-credentials",
+                "rxTAK76",
+            ),
+            RegistryRule(
+                "terraform.aws.security.aws-lambda-environment-credentials.aws-lambda-environment-credentials",
+                "jQTn573",
+            ),
+            RegistryRule(
+                "yaml.kubernetes.security.secrets-in-config-file.secrets-in-config-file", "xyTjz5B"
+            ),
+            RegistryRule(
+                "ruby.lang.security.hardcoded-secret-rsa-passphrase.hardcoded-secret-rsa-passphrase",
+                "K3TKkEo",
+            ),
+            RegistryRule(
+                "javascript.express.security.audit.express-session-hardcoded-secret.express-session-hardcoded-secret",
+                "LjTkgle",
+            ),
+            RegistryRule(
+                "kotlin.gradle.security.build-gradle-password-hardcoded.build-gradle-password-hardcoded",
+                "DkTRbLX",
+            ),
+            RegistryRule(
+                "generic.secrets.security.detected-onfido-live-api-token.detected-onfido-live-api-token",
+                "A8TJzE2",
+            ),
         ),
     ),
 )
@@ -162,6 +359,7 @@ RULE_ARCHIVES = (
 )
 
 _DOWNLOAD_ATTEMPTS = 3
+_MAX_REGISTRY_RULE_RESPONSE_BYTES = 1_000_000
 
 
 def _yaml_module() -> ModuleType:
@@ -181,6 +379,22 @@ def _validate_rule_url(url: str) -> None:
         or parsed.port not in (None, 443)
     ):
         raise ValueError(f"Semgrep rule URL is not trusted: {url}")
+
+
+def _registry_rule_url(version_id: str) -> str:
+    if not version_id.isalnum():
+        raise ValueError(f"Semgrep registry rule version is invalid: {version_id}")
+    return f"https://semgrep.dev/api/registry/rules/{version_id}"
+
+
+def _validate_registry_rule_url(url: str) -> None:
+    _validate_rule_url(url)
+    parsed = urlparse(url)
+    if parsed.query or parsed.fragment or not parsed.path.startswith("/api/registry/rules/"):
+        raise ValueError(f"Semgrep registry rule URL is not trusted: {url}")
+    version_id = parsed.path.removeprefix("/api/registry/rules/")
+    if not version_id or "/" in version_id or not version_id.isalnum():
+        raise ValueError(f"Semgrep registry rule URL is not trusted: {url}")
 
 
 def _validate_archive_url(url: str) -> None:
@@ -264,6 +478,73 @@ def _selected_bundle_rules(bundle: RuleBundle, payload: bytes) -> list[dict[str,
             + ", ".join(sorted(missing))
         )
     return [by_id[rule_id] for rule_id in bundle.include_rule_ids]
+
+
+def _download_registry_snapshot(snapshot: RuleRegistrySnapshot) -> list[dict[str, object]]:
+    """Fetch every committed Semgrep registry rule version and verify the aggregate."""
+    expected_rule_ids = [rule.rule_id for rule in snapshot.rules]
+    if not expected_rule_ids or len(set(expected_rule_ids)) != len(expected_rule_ids):
+        raise ValueError(f"Semgrep {snapshot.name} registry snapshot has duplicate rule ids")
+
+    rules: list[dict[str, object]] = []
+    for registry_rule in snapshot.rules:
+        url = _registry_rule_url(registry_rule.version_id)
+        _validate_registry_rule_url(url)
+        request = urllib.request.Request(  # noqa: S310
+            url,
+            headers={"User-Agent": "AncestryLLM-release-security-gate"},
+        )
+        observations: list[str] = []
+        for _attempt in range(_DOWNLOAD_ATTEMPTS):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                    final_url = response.geturl()
+                    _validate_registry_rule_url(final_url)
+                    if final_url != url:
+                        raise RuntimeError(
+                            f"Semgrep {snapshot.name} registry rule redirected unexpectedly"
+                        )
+                    payload = response.read(_MAX_REGISTRY_RULE_RESPONSE_BYTES + 1)
+            except OSError as error:
+                observations.append(f"transport_error={type(error).__name__}")
+                continue
+
+            if len(payload) > _MAX_REGISTRY_RULE_RESPONSE_BYTES:
+                observations.append("response_too_large")
+                continue
+            try:
+                document = json.loads(payload)
+                version_id = document["meta"]["rule"]["version_id"]
+                downloaded_rules = document["definition"]["rules"]
+            except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+                observations.append("invalid_response")
+                continue
+            if version_id != registry_rule.version_id:
+                observations.append(f"version_id={version_id!r}")
+                continue
+            if not isinstance(downloaded_rules, list) or len(downloaded_rules) != 1:
+                observations.append("unexpected_rule_count")
+                continue
+            downloaded_rule = downloaded_rules[0]
+            if not isinstance(downloaded_rule, dict):
+                observations.append("invalid_rule")
+                continue
+            rule = dict(downloaded_rule)
+            rule["id"] = registry_rule.rule_id
+            rules.append(rule)
+            break
+        else:
+            observed = "; ".join(dict.fromkeys(observations))
+            raise RuntimeError(
+                f"Semgrep {snapshot.name} registry rule {registry_rule.rule_id} differs "
+                f"from the committed release-security contract after "
+                f"{_DOWNLOAD_ATTEMPTS} attempts; observed {observed}"
+            )
+
+    semantic_payload = json.dumps({"rules": rules}, separators=(",", ":")).encode()
+    if _semantic_rule_digest(semantic_payload) != snapshot.semantic_sha256:
+        raise ValueError(f"Semgrep {snapshot.name} reviewed rules changed semantically")
+    return rules
 
 
 def download_rule_bundle(bundle: RuleBundle, destination: Path) -> None:
@@ -403,12 +684,28 @@ def _canonical_rule(rule: dict[str, object], *, matching_only: bool = False) -> 
         raise ValueError("Semgrep rule cannot be normalized") from error
 
 
+def _canonical_detection_rule(rule: dict[str, object]) -> bytes:
+    """Normalize non-matching Semgrep Registry presentation metadata."""
+    normalized = dict(rule)
+    metadata = normalized.get("metadata")
+    if isinstance(metadata, dict):
+        metadata = dict(metadata)
+        for key in ("semgrep.dev", "shortlink", "source"):
+            metadata.pop(key, None)
+        if metadata:
+            normalized["metadata"] = metadata
+        else:
+            normalized.pop("metadata", None)
+    return _canonical_rule(normalized)
+
+
 def _deduplicate_rules(
     rule_groups: Iterable[Iterable[dict[str, object]]],
 ) -> tuple[list[dict[str, object]], int]:
     """Remove identical IDs and matching logic while rejecting ID collisions."""
     selected: list[dict[str, object]] = []
     by_id: dict[str, bytes] = {}
+    detection_by_id: dict[str, bytes] = {}
     matching_fingerprints: set[bytes] = set()
     duplicate_count = 0
     for rules in rule_groups:
@@ -418,12 +715,13 @@ def _deduplicate_rules(
                 raise ValueError("Semgrep rule id must be a non-empty string")
             canonical = _canonical_rule(rule)
             previous = by_id.get(rule_id)
-            if previous is not None:
-                if previous != canonical:
+            if previous is not None and previous != canonical:
+                if detection_by_id[rule_id] != _canonical_detection_rule(rule):
                     raise ValueError(f"Semgrep rule id collision has different content: {rule_id}")
                 duplicate_count += 1
                 continue
             by_id[rule_id] = canonical
+            detection_by_id[rule_id] = _canonical_detection_rule(rule)
             matching_fingerprint = _canonical_rule(rule, matching_only=True)
             if matching_fingerprint in matching_fingerprints:
                 duplicate_count += 1
@@ -452,6 +750,9 @@ def run_scan(targets: list[str]) -> int:
             config_path = Path(temp_dir) / f"{bundle.name}.yml"
             download_rule_bundle(bundle, config_path)
             rule_groups.append(_selected_bundle_rules(bundle, config_path.read_bytes()))
+        rule_groups.extend(
+            _download_registry_snapshot(snapshot) for snapshot in RULE_REGISTRY_SNAPSHOTS
+        )
         rule_groups.extend(
             _archive_rules(archive, _download_rule_archive(archive)) for archive in RULE_ARCHIVES
         )

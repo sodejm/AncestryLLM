@@ -32,6 +32,14 @@ def test_agent_guidance_declares_aaif_agents_md_format() -> None:
     assert "Agentic AI Foundation (AAIF)" in text
 
 
+def test_agent_guidance_requires_aaif_compatibility_evidence() -> None:
+    text = _normalized(AGENTS)
+
+    assert "When changing an agent component, adapter, or protocol integration" in text
+    assert "AAIF projects" in text
+    assert "compatibility evidence" in text
+
+
 def test_agent_guidance_agrees_on_implemented_and_future_boundaries() -> None:
     agents = _normalized(AGENTS)
     copilot = _normalized(COPILOT)

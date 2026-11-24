@@ -57,6 +57,16 @@ def _rule_payload(*rules: dict[str, object], missed: int | None = None) -> bytes
     return json.dumps(document, separators=(",", ":")).encode()
 
 
+def _registry_payload(version_id: str, rule: dict[str, object]) -> bytes:
+    return json.dumps(
+        {
+            "meta": {"rule": {"version_id": version_id}},
+            "definition": {"rules": [rule]},
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
 def _load_runner() -> ModuleType:
     assert _SCRIPT.is_file(), "the pinned Semgrep runner must be checked in"
     spec = importlib.util.spec_from_file_location("run_pinned_semgrep", _SCRIPT)
@@ -322,12 +332,6 @@ def test_resolves_semgrep_beside_the_script_interpreter(
             502_198,
         ),
         (
-            "secrets",
-            "87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b",
-            "d1afb323ed493cf9d3ee5044447b989debf033b2b7cc8208662a81b8c162c66a",
-            94_643,
-        ),
-        (
             "trailofbits",
             "94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
             "3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
@@ -345,13 +349,6 @@ def test_configures_reviewed_registry_snapshot(
     assert bundle.url == f"https://semgrep.dev/c/p/{name}"
     assert bundle.semantic_sha256 == semantic_sha256
     expected = (runner.RuleRevision(sha256=sha256, size=size),)
-    if name == "secrets":
-        expected += (
-            runner.RuleRevision(
-                sha256="64bc763d47a751a9950705cad60c4d840e598409700b2f01ab0fb249f51a880c",
-                size=94_643,
-            ),
-        )
     if name == "trailofbits":
         expected += (
             runner.RuleRevision(
@@ -360,6 +357,91 @@ def test_configures_reviewed_registry_snapshot(
             ),
         )
     assert bundle.revisions == expected
+
+
+def test_configures_version_pinned_reviewed_secrets_snapshot() -> None:
+    runner = _load_runner()
+
+    snapshots = {snapshot.name: snapshot for snapshot in runner.RULE_REGISTRY_SNAPSHOTS}
+    secrets = snapshots["secrets"]
+
+    assert (
+        secrets.semantic_sha256
+        == "989abeac7bb3f93823bdc0ed498e8ad371f4be9ac99758c870e1e89d075774cb"
+    )
+    assert len(secrets.rules) == 52
+    assert all(rule.version_id.isalnum() for rule in secrets.rules)
+    assert len({rule.rule_id for rule in secrets.rules}) == len(secrets.rules)
+
+
+def test_loads_only_expected_versioned_registry_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    snapshot = runner.RuleRegistrySnapshot(
+        name="test",
+        semantic_sha256=_semantic_rule_sha256(
+            _rule_payload({"id": "reviewed", "pattern": "secret()"})
+        ),
+        rules=(runner.RegistryRule("reviewed", "Version1"),),
+    )
+    payload = _registry_payload("Version1", {"id": "upstream-id", "pattern": "secret()"})
+    monkeypatch.setattr(
+        runner.urllib.request,
+        "urlopen",
+        lambda request, timeout: _Download(payload, request.full_url),
+    )
+
+    assert runner._download_registry_snapshot(snapshot) == [
+        {"id": "reviewed", "pattern": "secret()"}
+    ]
+
+
+def test_rejects_changed_versioned_registry_rule_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    snapshot = runner.RuleRegistrySnapshot(
+        name="test",
+        semantic_sha256=_semantic_rule_sha256(
+            _rule_payload({"id": "reviewed", "pattern": "secret()"})
+        ),
+        rules=(runner.RegistryRule("reviewed", "Version1"),),
+    )
+    payload = _registry_payload("Version1", {"id": "upstream-id", "pattern": "changed()"})
+    monkeypatch.setattr(
+        runner.urllib.request,
+        "urlopen",
+        lambda request, timeout: _Download(payload, request.full_url),
+    )
+
+    with pytest.raises(ValueError, match="changed semantically"):
+        runner._download_registry_snapshot(snapshot)
+
+
+def test_rejects_mismatched_versioned_registry_rule_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    snapshot = runner.RuleRegistrySnapshot(
+        name="test",
+        semantic_sha256=_semantic_rule_sha256(
+            _rule_payload({"id": "reviewed", "pattern": "secret()"})
+        ),
+        rules=(runner.RegistryRule("reviewed", "Version1"),),
+    )
+    monkeypatch.setattr(runner, "_DOWNLOAD_ATTEMPTS", 1)
+    monkeypatch.setattr(
+        runner.urllib.request,
+        "urlopen",
+        lambda request, timeout: _Download(
+            _registry_payload("DifferentVersion", {"id": "upstream-id", "pattern": "secret()"}),
+            request.full_url,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="version_id='DifferentVersion'"):
+        runner._download_registry_snapshot(snapshot)
 
 
 def test_configures_reviewed_trailofbits_registry_bundle() -> None:
@@ -510,11 +592,21 @@ def test_deduplicates_identical_ids_and_matching_logic_but_rejects_collisions() 
     first = {"id": "first", "message": "one", "severity": "WARNING", "pattern": "danger()"}
     same_id = dict(first)
     same_logic = {"id": "second", "message": "two", "severity": "ERROR", "pattern": "danger()"}
+    registry_presentation_variant = {
+        **first,
+        "metadata": {
+            "source": "https://semgrep.dev/r/first",
+            "shortlink": "https://sg.run/first",
+            "semgrep.dev": {"rule": {"version_id": "Version1"}},
+        },
+    }
 
-    rules, duplicates = runner._deduplicate_rules(((first, same_id, same_logic),))
+    rules, duplicates = runner._deduplicate_rules(
+        ((first, same_id, same_logic, registry_presentation_variant),)
+    )
 
     assert rules == [first]
-    assert duplicates == 2
+    assert duplicates == 3
     with pytest.raises(ValueError, match="id collision has different content: first"):
         runner._deduplicate_rules(((first, {**first, "message": "changed"}),))
     with pytest.raises(ValueError, match="id collision has different content: second"):
@@ -555,6 +647,7 @@ def test_runs_locked_semgrep_with_verified_temporary_configs(
         )
     )
     monkeypatch.setattr(runner, "RULE_BUNDLES", bundles)
+    monkeypatch.setattr(runner, "RULE_REGISTRY_SNAPSHOTS", ())
     monkeypatch.setattr(runner, "RULE_ARCHIVES", ())
     monkeypatch.setattr(
         runner.urllib.request,
