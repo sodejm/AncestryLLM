@@ -1254,7 +1254,10 @@ def test_clean_install_entry_points_and_json_smoke(tmp_path: Path) -> None:
     repository = Path(__file__).resolve().parents[2]
     wheelhouse = tmp_path / "wheelhouse"
     uv_name = "uv.exe" if os.name == "nt" else "uv"
-    uv = repository / ".tools" / "uv" / uv_name
+    policy = json.loads(
+        (repository / "config/uv-bootstrap-policy.json").read_text(encoding="utf-8")
+    )
+    uv = repository / ".tools" / "uv" / policy["uv"]["version"] / uv_name
     assert uv.is_file(), "make setup must install the verified repository-local uv"
     uv_environment = {
         **os.environ,
