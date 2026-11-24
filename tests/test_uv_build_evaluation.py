@@ -346,17 +346,18 @@ def test_checked_evaluation_evidence_records_fail_closed_decision() -> None:
     assert report["status"] == "incompatible"
     assert report["tools"] == {
         "build_frontend": "uv 0.13.9",
-        "python": "3.14.6",
+        "python": "3.15.0",
         "setuptools": {
             "requirement": "setuptools>=83",
-            "version": "83.0.0",
+            "version": "84.2.1",
         },
         "uv_build": {
             "requirement": "uv_build>=0.12.0,<0.13",
-            "version": "0.12.3",
+            "version": "0.12.24",
         },
     }
     assert report["failure_codes"] == [
+        "UVBEVAL_PACKAGE_DATA_DRIFT",
         "UVBEVAL_PROJECT_FILE_DRIFT",
         "UVBEVAL_PROJECT_METADATA_DRIFT",
         "UVBEVAL_RECORD_DRIFT",
@@ -365,6 +366,7 @@ def test_checked_evaluation_evidence_records_fail_closed_decision() -> None:
         "UVBEVAL_WHEEL_ARTIFACT_DRIFT",
         "UVBEVAL_WHEEL_DESCRIPTOR_DRIFT",
         "UVBEVAL_WHEEL_METADATA_DRIFT",
+        "UVBEVAL_WHEEL_PAYLOAD_DRIFT",
     ]
     assert report["comparisons"]["uv_build_reproducibility"]["passed"] is True
     assert report["comparisons"]["uv_build_install_import_entrypoint"]["passed"] is True
