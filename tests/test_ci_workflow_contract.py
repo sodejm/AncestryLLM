@@ -264,8 +264,8 @@ def test_ci_runs_pinned_deterministic_documentation_screenshot_drift_check() -> 
     assert desktop_package["engines"] == {"node": "26.13.1", "pnpm": "12.23.0"}
     assert desktop_package["packageManager"] == "pnpm@12.23.0"
     assert desktop_package["devDependencies"]["electron"] == "45.4.1"
-    assert desktop_package["devDependencies"]["@playwright/test"] == "1.62.0"
-    assert desktop_package["devDependencies"]["playwright"] == "1.62.0"
+    assert desktop_package["devDependencies"]["@playwright/test"] == "1.65.1"
+    assert desktop_package["devDependencies"]["playwright"] == "1.65.1"
     assert desktop_package["devDependencies"]["@fontsource/inter"] == "5.3.0"
 
     assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2" in job
