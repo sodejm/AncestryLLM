@@ -485,7 +485,7 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
         files: ^(src|tests|scripts)/
 """
     uv_hook = """  - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 8ff2449591c8de025b17661ba76d60237a1ae62b
+    rev: 00eaed0068329eb6ca6bcb8de7b46c372d8d1c19
     hooks:
       - id: uv-lock
         args: ["--check"]
@@ -494,6 +494,9 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert uv_hook in hooks
     assert "ancestryllm-lockfile-consistency" not in hooks
     assert "entry: make lock-check" not in hooks
+    assert "exclude: ^desktop/pnpm-lock\\.yaml$" in hooks
+    assert "files: ^desktop/pnpm-lock\\.yaml$" in hooks
+    assert "args: [--allow-multiple-documents]" in hooks
     assert "--fix" not in ruff_hook
     assert "--unsafe-fixes" not in hooks
 
@@ -510,6 +513,17 @@ def test_git_hooks_keep_edit_loop_cheap_and_move_full_gates_to_pre_push() -> Non
     assert "$(UV_BIN) lock --check" in makefile
     assert "pre-push: system-python\n\t@$(PYTHON) scripts/run_pre_push.py" in makefile
     assert "install --hook-type pre-commit --hook-type pre-push" in makefile
+
+
+def test_canonical_macos_environment_matches_exact_desktop_toolchain() -> None:
+    environment = (ROOT / ".codex/environments/environment.toml").read_text(encoding="utf-8")
+
+    assert 'node_version="26.13.1"' in environment
+    assert 'pnpm_version="12.23.0"' in environment
+    assert "node-v26.13.1-darwin-arm64" in environment
+    assert "pnpm-12.23.0/node_modules/.bin" in environment
+    assert 'test "$(node --version)" = "v26.13.1"' in environment
+    assert 'test "$(pnpm --version)" = "12.23.0"' in environment
 
 
 def test_ci_docs_preserve_the_two_phase_ruleset_migration() -> None:
