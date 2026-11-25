@@ -322,41 +322,19 @@ def test_resolves_semgrep_beside_the_script_interpreter(
     assert runner._semgrep_executable() == semgrep
 
 
-@pytest.mark.parametrize(
-    ("name", "semantic_sha256", "sha256", "size"),
-    [
-        (
-            "python",
-            "058375e039e6ddf738c23faa469d195dacc3751851dc02464311a22652c2e271",
-            "de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5",
-            502_198,
-        ),
-        (
-            "trailofbits",
-            "94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
-            "3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
-            195_569,
-        ),
-    ],
-)
-def test_configures_reviewed_registry_snapshot(
-    name: str, semantic_sha256: str, sha256: str, size: int
-) -> None:
+def test_configures_reviewed_python_bundle() -> None:
     runner = _load_runner()
-    bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
-    bundle = bundles[name]
-
-    assert bundle.url == f"https://semgrep.dev/c/p/{name}"
-    assert bundle.semantic_sha256 == semantic_sha256
-    expected = (runner.RuleRevision(sha256=sha256, size=size),)
-    if name == "trailofbits":
-        expected += (
-            runner.RuleRevision(
-                sha256="66f427bfdf1aaa1b853d3d9f941d79384ebed7c0aa4ab428bbe7326c0de4f217",
-                size=195_569,
-            ),
-        )
-    assert bundle.revisions == expected
+    (bundle,) = runner.RULE_BUNDLES
+    assert bundle.name == "python"
+    assert bundle.url == "https://semgrep.dev/c/p/python"
+    assert (
+        bundle.semantic_sha256 == "058375e039e6ddf738c23faa469d195dacc3751851dc02464311a22652c2e271"
+    )
+    assert bundle.revisions == (
+        runner.RuleRevision(
+            "de5bc79d074c3b4146338a0bf95830406f169bd91ac590a2f1ef111f162e23f5", 502_198
+        ),
+    )
 
 
 def test_configures_version_pinned_reviewed_secrets_snapshot() -> None:
@@ -444,17 +422,28 @@ def test_rejects_mismatched_versioned_registry_rule_response(
         runner._download_registry_snapshot(snapshot)
 
 
-def test_configures_reviewed_trailofbits_registry_bundle() -> None:
+def test_configures_version_pinned_trailofbits_rules() -> None:
     runner = _load_runner()
-
-    bundles = {bundle.name: bundle for bundle in runner.RULE_BUNDLES}
-    trailofbits = bundles["trailofbits"]
-
-    assert trailofbits.url == "https://semgrep.dev/c/p/trailofbits"
-    assert len(trailofbits.include_rule_ids) == 10
-    assert all(
-        rule_id.startswith("trailofbits.generic.") for rule_id in trailofbits.include_rule_ids
+    snapshot = next(item for item in runner.RULE_REGISTRY_SNAPSHOTS if item.name == "trailofbits")
+    assert (
+        snapshot.semantic_sha256
+        == "4aa0085c653b340cf98ff1eabd231e7975ac69d81d272df59b3e111030b35fda"
     )
+    expected = {
+        "curl-insecure": "RGTKGnY",
+        "curl-unencrypted-url": "1QTokGb",
+        "gpg-insecure-flags": "BjTe0Jg",
+        "installer-allow-untrusted": "DkTG0Xg",
+        "node-disable-certificate-validation": "GxTPxzL",
+        "openssl-insecure-flags": "WrTdpG9",
+        "ssh-disable-host-key-checking": "0bTwbgN",
+        "tar-insecure-flags": "K3Trq8x",
+        "wget-no-check-certificate": "qkTQnL3",
+        "wget-unencrypted-url": "l4TyOon",
+    }
+    assert [(rule.rule_id, rule.version_id) for rule in snapshot.rules] == [
+        (f"trailofbits.generic.{name}.{name}", version) for name, version in expected.items()
+    ]
 
 
 def test_configures_commit_pinned_reviewed_archives() -> None:

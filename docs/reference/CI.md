@@ -308,26 +308,21 @@ matrix. See the [desktop verification guide](../DESKTOP_VERIFICATION.md).
 ## Semgrep rule policy
 
 The Semgrep gate scans the whole repository with one generated, local config.
-Every upstream input is pinned by exact bytes and semantic content, and rules
-with identical IDs or matching logic are deduplicated before Semgrep runs. A
-changed archive, missing reviewed rule, conflicting rule ID, or unreviewed
-redirect fails closed.
+The gate verifies each upstream input against its committed digest and
+deduplicates rules with identical IDs or matching logic before Semgrep runs.
+A changed archive, missing rule, conflicting rule ID or unreviewed redirect
+blocks the scan.
 
-The registry snapshots contain 151 Python rules and 52 secrets rules, plus the
-ten selected Trail of Bits rules below. The Python and Trail of Bits bundles
-pin exact bytes plus semantic content. The secrets snapshot instead retrieves
-each reviewed rule through its version-specific Semgrep Registry endpoint;
-the committed rule-ID/version-ID pairs and aggregate semantic digest cover the
-whole set before generated-config deduplication. When registry content changes, review the downloaded rules and
-selected IDs, update the applicable pins in `scripts/run_pinned_semgrep.py`
-and its contract tests, and run the security gate before committing. For a new
-byte encoding of an existing bundle, verify that the decoded rules produce the
-reviewed semantic digest before adding the byte digest. For a secrets update,
-compare every versioned definition with the approved snapshot, pin its expected
-version ID and the aggregate semantic digest, and never treat a fresh
-`p/secrets` response hash as approval. The Trail of Bits bundle has two
-reviewed byte encodings with identical decoded rules; remove obsolete byte
-encodings when the rules change.
+The Python bundle contains 151 rules. The gate checks both the byte digest and
+the semantic digest. For a new encoding, confirm that the decoded rules match
+the approved definitions before adding its byte digest.
+
+The 52 secrets rules and ten Trail of Bits rules each have a version-specific
+Semgrep Registry endpoint. The gate verifies each version ID and the semantic
+digest of the complete set. To update either set, compare the versioned
+definitions with the approved rules, update the ID pairs and digest in
+`scripts/run_pinned_semgrep.py` and its contract tests, then run
+`make security` before committing.
 
 The reviewed third-party additions deliberately cover only current repository
 surfaces:

@@ -89,33 +89,6 @@ RULE_BUNDLES = (
             ),
         ),
     ),
-    RuleBundle(
-        name="trailofbits",
-        url="https://semgrep.dev/c/p/trailofbits",
-        semantic_sha256="94aa4358fab490c5c3d556c0435ed3a19fea6f30e7e44851647740c78c8483ca",
-        revisions=(
-            RuleRevision(
-                sha256="3b7a9cf2b0f24affc26615a7b9382d4ac52eaf58c38025f016b8d6323f5067ab",
-                size=195_569,
-            ),
-            RuleRevision(
-                sha256="66f427bfdf1aaa1b853d3d9f941d79384ebed7c0aa4ab428bbe7326c0de4f217",
-                size=195_569,
-            ),
-        ),
-        include_rule_ids=(
-            "trailofbits.generic.curl-insecure.curl-insecure",
-            "trailofbits.generic.curl-unencrypted-url.curl-unencrypted-url",
-            "trailofbits.generic.gpg-insecure-flags.gpg-insecure-flags",
-            "trailofbits.generic.installer-allow-untrusted.installer-allow-untrusted",
-            "trailofbits.generic.node-disable-certificate-validation.node-disable-certificate-validation",
-            "trailofbits.generic.openssl-insecure-flags.openssl-insecure-flags",
-            "trailofbits.generic.ssh-disable-host-key-checking.ssh-disable-host-key-checking",
-            "trailofbits.generic.tar-insecure-flags.tar-insecure-flags",
-            "trailofbits.generic.wget-no-check-certificate.wget-no-check-certificate",
-            "trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url",
-        ),
-    ),
 )
 
 RULE_REGISTRY_SNAPSHOTS = (
@@ -308,6 +281,52 @@ RULE_REGISTRY_SNAPSHOTS = (
             RegistryRule(
                 "generic.secrets.security.detected-onfido-live-api-token.detected-onfido-live-api-token",
                 "A8TJzE2",
+            ),
+        ),
+    ),
+    RuleRegistrySnapshot(
+        name="trailofbits",
+        semantic_sha256="4aa0085c653b340cf98ff1eabd231e7975ac69d81d272df59b3e111030b35fda",
+        rules=(
+            RegistryRule(
+                "trailofbits.generic.curl-insecure.curl-insecure",
+                "RGTKGnY",
+            ),
+            RegistryRule(
+                "trailofbits.generic.curl-unencrypted-url.curl-unencrypted-url",
+                "1QTokGb",
+            ),
+            RegistryRule(
+                "trailofbits.generic.gpg-insecure-flags.gpg-insecure-flags",
+                "BjTe0Jg",
+            ),
+            RegistryRule(
+                "trailofbits.generic.installer-allow-untrusted.installer-allow-untrusted",
+                "DkTG0Xg",
+            ),
+            RegistryRule(
+                "trailofbits.generic.node-disable-certificate-validation.node-disable-certificate-validation",
+                "GxTPxzL",
+            ),
+            RegistryRule(
+                "trailofbits.generic.openssl-insecure-flags.openssl-insecure-flags",
+                "WrTdpG9",
+            ),
+            RegistryRule(
+                "trailofbits.generic.ssh-disable-host-key-checking.ssh-disable-host-key-checking",
+                "0bTwbgN",
+            ),
+            RegistryRule(
+                "trailofbits.generic.tar-insecure-flags.tar-insecure-flags",
+                "K3Trq8x",
+            ),
+            RegistryRule(
+                "trailofbits.generic.wget-no-check-certificate.wget-no-check-certificate",
+                "qkTQnL3",
+            ),
+            RegistryRule(
+                "trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url",
+                "l4TyOon",
             ),
         ),
     ),

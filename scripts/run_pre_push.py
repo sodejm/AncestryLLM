@@ -173,7 +173,8 @@ def run_gate(root: Path) -> None:
     _require_trivy_version(root)
     archive = _execute(["git", "archive", "--format=tar", head], root, capture=True)
     with tempfile.TemporaryDirectory(prefix="ancestryllm-push-") as temporary:
-        snapshot = Path(temporary)
+        snapshot = Path(temporary) / "scan"
+        snapshot.mkdir()
         with tarfile.open(fileobj=io.BytesIO(archive)) as contents:
             contents.extractall(snapshot, filter="data")
         _execute(
@@ -200,6 +201,11 @@ def run_gate(root: Path) -> None:
             ],
             root,
         )
+        # Acceptance cases can query the index and history at the proposed commit.
+        checkout = Path(temporary) / "checkout"
+        _git(root, "clone", "--quiet", "--local", "--no-checkout", "--", str(root), str(checkout))
+        _git(checkout, "checkout", "--quiet", "--detach", head)
+        _execute(["make", "setup"], root)
         venv_python = root / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
         _execute(
             [
@@ -209,7 +215,7 @@ def run_gate(root: Path) -> None:
                 base,
                 head,
                 "--snapshot",
-                str(snapshot),
+                str(checkout),
             ],
             root,
         )

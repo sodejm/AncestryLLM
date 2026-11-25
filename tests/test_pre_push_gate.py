@@ -142,7 +142,7 @@ def test_scan_uses_only_committed_files_and_enforces_finding_exit_code(repositor
     assert "--severity HIGH,CRITICAL --exit-code 1" in log
     assert "--ignorefile=" in log
     assert "--file-patterns uv:scripts/run_pinned_semgrep\\.py\\.lock" in log
-    assert "security\n" in log
+    assert log.splitlines().index("setup") < log.splitlines().index("security")
 
 
 def test_outdated_trivy_is_rejected_before_scanning(repository: Path) -> None:
@@ -344,10 +344,13 @@ def write_count(root, code, boundary="self.assertEqual(clamp(-1), 0)"):
     suite = root / "tests/test_behavior.py"
     suite.parent.mkdir(exist_ok=True)
     suite.write_text(
-        "import runpy\nimport unittest\n"
+        "import runpy\nimport subprocess\nimport unittest\n"
         f"clamp = runpy.run_path({code!r})['clamp_count']\n"
         "class Counts(unittest.TestCase):\n"
-        "    def test_success(self):\n        self.assertEqual(clamp(4), 4)\n"
+        "    def test_success(self):\n"
+        f"        tracked = subprocess.check_output(['git', 'ls-files', '--error-unmatch', {code!r}], text=True)\n"
+        f"        self.assertEqual(tracked.strip(), {code!r})\n"
+        "        self.assertEqual(clamp(4), 4)\n"
         f"    def test_boundary(self):\n        {boundary}\n",
         encoding="utf-8",
     )

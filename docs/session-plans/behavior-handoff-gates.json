@@ -17,7 +17,7 @@
       }
     },
     {
-      "action": "Extend the existing push gate to execute the exact named cases from the proposed commit and propagate any failures. Preserve the repository checks already attached to push.",
+      "action": "Extend the existing push gate to execute the exact named cases from the proposed commit and propagate any failures. Preserve the repository checks already attached to push. Run Git-aware acceptance in a detached checkout of the proposed commit, after scanning the archive.",
       "paths": [
         "scripts/run_pre_push.py",
         "scripts/session_delivery.py"
@@ -61,6 +61,19 @@
         "command": "python -m pytest -q -o addopts= tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page",
         "expected": "Pages stages the handoff guide with the canonical documentation."
       }
+    },
+    {
+      "action": "Fetch each selected Trail of Bits definition by its approved immutable version and verify the ten-rule digest using the existing registry snapshot loader.",
+      "paths": [
+        "scripts/run_pinned_semgrep.py",
+        "tests/test_run_pinned_semgrep.py",
+        "docs/reference/CI.md",
+        "docs/reference/LOCAL_PUSH_GATE.md"
+      ],
+      "verify": {
+        "command": "make security",
+        "expected": "Dependency audit and static scanning pass with all ten reviewed Trail of Bits definitions."
+      }
     }
   ],
   "acceptance": [
@@ -69,7 +82,7 @@
       "entrypoint": "git commit and git push to a local bare repository",
       "given": "The staged plan names a count function and two future acceptance tests.",
       "when": "Commit and push the plan, implement the function and tests, then commit and push the implementation.",
-      "then": "Both planned and implemented states reach the remote. Unmapped staged implementation is rejected before its commit.",
+      "then": "Both commits reach the remote. The acceptance test reads the tracked implementation with Git from the proposed checkout. Unmapped staged implementation is rejected before commit.",
       "paths": [
         ".pre-commit-config.yaml",
         "scripts/session_delivery.py",
@@ -132,6 +145,21 @@
       ],
       "runner": "pytest",
       "test": "tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page"
+    },
+    {
+      "kind": "success",
+      "entrypoint": "Semgrep registry snapshot selection",
+      "given": "The security gate loads its configured registry snapshots.",
+      "when": "Enumerate the selected Trail of Bits rule and version pairs.",
+      "then": "The ten reviewed pairs and their aggregate digest match the approved selection.",
+      "paths": [
+        "scripts/run_pinned_semgrep.py",
+        "tests/test_run_pinned_semgrep.py",
+        "docs/reference/CI.md",
+        "docs/reference/LOCAL_PUSH_GATE.md"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_run_pinned_semgrep.py::test_configures_version_pinned_trailofbits_rules"
     }
   ],
   "pending": []

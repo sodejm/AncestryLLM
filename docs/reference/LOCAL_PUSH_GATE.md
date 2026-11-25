@@ -72,9 +72,8 @@ provenance.
 
 The gate adds developer validation. Its initial scan also required upgrading
 the locked urllib3, PyJWT, and virtualenv dependencies and giving the
-docs-capture image a non-root default user. Semgrep accepts an additional
-verified encoding of the unchanged Trail of Bits rule bundle; its semantic
-digest remains pinned. The capture orchestrator retains its explicit non-root
+docs-capture image a non-root default user. Semgrep now verifies the ten selected Trail of Bits rules by version ID
+and aggregate digest. The capture orchestrator retains its explicit non-root
 runtime identity and isolation controls. Application architecture, application
 trust boundaries, provider consent, and API contracts are unaffected; the
 implementation is confined to developer tooling and dependency security fixes.
