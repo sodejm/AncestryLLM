@@ -49,6 +49,18 @@
         "command": "python -m pytest -q -o addopts= tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation",
         "expected": "Inventory accepts a new plan with its guide present and rejects a missing guide or an unrelated unmapped JSON file."
       }
+    },
+    {
+      "action": "Register the handoff guide in the documentation inventory and page metadata so Pages can publish it.",
+      "paths": [
+        "docs/_data/page_metadata.json",
+        "docs/DOCS_AUTHORING.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page",
+        "expected": "Pages stages the handoff guide with the canonical documentation."
+      }
     }
   ],
   "acceptance": [
@@ -106,6 +118,20 @@
       ],
       "runner": "pytest",
       "test": "tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation"
+    },
+    {
+      "kind": "success",
+      "entrypoint": "Documentation Pages staging command",
+      "given": "The tracked handoff guide and its metadata are present.",
+      "when": "Stage the repository documentation for publication.",
+      "then": "Every canonical Markdown page including the handoff guide is staged.",
+      "paths": [
+        "docs/_data/page_metadata.json",
+        "docs/DOCS_AUTHORING.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page"
     }
   ],
   "pending": []
