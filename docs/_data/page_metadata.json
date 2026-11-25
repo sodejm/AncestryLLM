@@ -209,6 +209,10 @@
     "title": "Documentation architecture and authoring guide — AncestryLLM",
     "description": "Canonical Diátaxis architecture, authoring rules, macOS arm64 runtime boundary, editorial baseline, and documentation migration inventory."
   },
+  "SESSION_HANDOFF.md": {
+    "title": "Handing a session to an implementer — AncestryLLM",
+    "description": "Write a session plan with runnable acceptance cases and verify it with the commit and push hooks."
+  },
   "CODE_DOCUMENTATION.md": {
     "title": "In-code documentation policy — AncestryLLM",
     "description": "Standards for Python docstrings, comments, API contracts, and documentation-focused review in AncestryLLM."

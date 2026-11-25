@@ -655,9 +655,8 @@ def check_file_documentation(rel: str, root: Path) -> list[str]:
 def check_inventory(tracked: list[str], root: Path) -> list[str]:
     """Classify every tracked path and return diagnostics for unknown extensions.
 
-    Also validates that non-comment-format files have an entry in
-    ``NON_COMMENT_FORMAT_MAP`` whose target exists, so their semantics are
-    discoverable.
+    Also verifies that each non-comment format has an existing documentation
+    target. Per-session JSON handoffs share one authoring guide.
     """
     diagnostics: list[str] = []
     for rel in tracked:
@@ -672,6 +671,8 @@ def check_inventory(tracked: list[str], root: Path) -> list[str]:
 
         if classification == "non-comment-format":
             documentation_path = NON_COMMENT_FORMAT_MAP.get(rel)
+            if Path(rel).parent == Path("docs/session-plans") and rel.endswith(".json"):
+                documentation_path = "docs/SESSION_HANDOFF.md"
             if documentation_path is None:
                 diagnostics.append(f"{rel}:non-comment-format-not-mapped")
             elif not (root / documentation_path).is_file():

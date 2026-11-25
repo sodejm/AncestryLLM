@@ -1,0 +1,166 @@
+{
+  "stage": "implementation",
+  "request": "Give agents an executable definition of done and leave a detailed plan an implementation-focused model can follow.",
+  "scope": "Check planning handoffs before commit and exercise each requested behavior before push via the existing Git hooks.",
+  "setup": "Run commands from the AncestryLLM repository root. Install Git and the project Python dependencies, then enable hooks with make hooks. Gate regression tests use temporary local repositories.",
+  "constraints": "Read the exact staged or committed inputs. Preserve existing checks. Run named tests using fixed runner commands. Keep plan-only work deliverable before its implementation exists.",
+  "steps": [
+    {
+      "action": "Read the current hook configuration and add a fast index check that rejects incomplete handoffs and unmapped behavior changes. Make branch plans available to later commits.",
+      "paths": [
+        ".pre-commit-config.yaml",
+        "scripts/session_delivery.py"
+      ],
+      "verify": {
+        "command": "python3 scripts/session_delivery.py plan docs/session-plans/behavior-handoff-gates.json",
+        "expected": "Exit zero for this complete handoff."
+      }
+    },
+    {
+      "action": "Extend the existing push gate to execute the exact named cases from the proposed commit and propagate any failures. Preserve the repository checks already attached to push. Run Git-aware acceptance in a detached checkout of the proposed commit, after scanning the archive.",
+      "paths": [
+        "scripts/run_pre_push.py",
+        "scripts/session_delivery.py"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_pre_push_gate.py::test_handoff_rejections",
+        "expected": "The test passes after observing each invalid push fail and the remote reference stay absent."
+      }
+    },
+    {
+      "action": "Add real Git fixtures for planning, valid implementation and broken behavior. Document the commands and the handoff lifecycle for the next implementer.",
+      "paths": [
+        "tests/test_pre_push_gate.py",
+        "AGENTS.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_pre_push_gate.py",
+        "expected": "All Git fixtures pass, including acceptance through staged commits and pushes to a bare remote."
+      }
+    },
+    {
+      "action": "Map each session plan JSON file to the handoff authoring guide in the tracked-file inventory.",
+      "paths": [
+        "scripts/check_code_documentation.py",
+        "tests/test_code_documentation_policy.py"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation",
+        "expected": "Inventory accepts a new plan with its guide present and rejects a missing guide or an unrelated unmapped JSON file."
+      }
+    },
+    {
+      "action": "Register the handoff guide in the documentation inventory and page metadata so Pages can publish it.",
+      "paths": [
+        "docs/_data/page_metadata.json",
+        "docs/DOCS_AUTHORING.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page",
+        "expected": "Pages stages the handoff guide with the canonical documentation."
+      }
+    },
+    {
+      "action": "Fetch each selected Trail of Bits definition by its approved immutable version and verify the ten-rule digest using the existing registry snapshot loader.",
+      "paths": [
+        "scripts/run_pinned_semgrep.py",
+        "tests/test_run_pinned_semgrep.py",
+        "docs/reference/CI.md",
+        "docs/reference/LOCAL_PUSH_GATE.md"
+      ],
+      "verify": {
+        "command": "make security",
+        "expected": "Dependency audit and static scanning pass with all ten reviewed Trail of Bits definitions."
+      }
+    }
+  ],
+  "acceptance": [
+    {
+      "kind": "success",
+      "entrypoint": "git commit and git push to a local bare repository",
+      "given": "The staged plan names a count function and two future acceptance tests.",
+      "when": "Commit and push the plan, implement the function and tests, then commit and push the implementation.",
+      "then": "Both commits reach the remote. The acceptance test reads the tracked implementation with Git from the proposed checkout. Unmapped staged implementation is rejected before commit.",
+      "paths": [
+        ".pre-commit-config.yaml",
+        "scripts/session_delivery.py",
+        "scripts/run_pre_push.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_handoff_success"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "git push to a local bare repository",
+      "given": "The public count function must clamp a negative value; a positive result alone is insufficient.",
+      "when": "Push variants with a missing, skipped, empty or failing boundary, then remove the clamp with the original assertions in place.",
+      "then": "Each push exits unsuccessfully and leaves the target reference absent.",
+      "paths": [
+        "scripts/run_pre_push.py",
+        "scripts/session_delivery.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_handoff_rejections"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "pytest acceptance runner",
+      "given": "Two parameter values exercise one named acceptance test.",
+      "when": "Run all passing values, then a mixture of passed and skipped values and an expected failure.",
+      "then": "Only the first run exits successfully.",
+      "paths": [
+        "scripts/session_delivery.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_pytest_acceptance_outcomes"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "Documentation policy check_inventory",
+      "given": "A future plan is tracked in docs/session-plans and its guide is absent.",
+      "when": "Check the inventory, add the guide, then check the plan and an unrelated JSON path.",
+      "then": "The missing guide fails, the documented plan passes and the unrelated file still fails.",
+      "paths": [
+        "scripts/check_code_documentation.py",
+        "tests/test_code_documentation_policy.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation"
+    },
+    {
+      "kind": "success",
+      "entrypoint": "Documentation Pages staging command",
+      "given": "The tracked handoff guide and its metadata are present.",
+      "when": "Stage the repository documentation for publication.",
+      "then": "Every canonical Markdown page including the handoff guide is staged.",
+      "paths": [
+        "docs/_data/page_metadata.json",
+        "docs/DOCS_AUTHORING.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_prepare_pages_source.py::test_repository_docs_stage_every_markdown_page"
+    },
+    {
+      "kind": "success",
+      "entrypoint": "Semgrep registry snapshot selection",
+      "given": "The security gate loads its configured registry snapshots.",
+      "when": "Enumerate the selected Trail of Bits rule and version pairs.",
+      "then": "The ten reviewed pairs and their aggregate digest match the approved selection.",
+      "paths": [
+        "scripts/run_pinned_semgrep.py",
+        "tests/test_run_pinned_semgrep.py",
+        "docs/reference/CI.md",
+        "docs/reference/LOCAL_PUSH_GATE.md"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_run_pinned_semgrep.py::test_configures_version_pinned_trailofbits_rules"
+    }
+  ],
+  "pending": []
+}

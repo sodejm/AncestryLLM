@@ -172,6 +172,18 @@ class TestCheckInventory:
         diagnostics = check_inventory(tracked, tmp_path)
         assert any("non-comment-format-not-mapped" in d for d in diagnostics)
 
+    def test_session_handoff_documentation(self, tmp_path: Path) -> None:
+        plan = "docs/session-plans/future-task.json"
+        assert check_inventory([plan], tmp_path) == [
+            f"{plan}:non-comment-format-map-target-missing"
+        ]
+        guide = tmp_path / "docs" / "SESSION_HANDOFF.md"
+        guide.parent.mkdir()
+        guide.write_text("# Session handoffs\n")
+        assert check_inventory([plan], tmp_path) == []
+        other = "docs/unrelated.json"
+        assert check_inventory([other], tmp_path) == [f"{other}:non-comment-format-not-mapped"]
+
     def test_non_comment_format_with_map_entry_passes(self, tmp_path: Path) -> None:
         # Use a key that is already in NON_COMMENT_FORMAT_MAP.
         key = next(iter(NON_COMMENT_FORMAT_MAP))
