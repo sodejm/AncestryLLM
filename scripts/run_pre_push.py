@@ -200,6 +200,19 @@ def run_gate(root: Path) -> None:
             ],
             root,
         )
+        venv_python = root / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+        _execute(
+            [
+                str(venv_python) if venv_python.is_file() else sys.executable,
+                str(Path(__file__).with_name("session_delivery.py")),
+                "push",
+                base,
+                head,
+                "--snapshot",
+                str(snapshot),
+            ],
+            root,
+        )
     for command in gate_commands(paths):
         print("Pre-push: " + " ".join(command), flush=True)
         _execute(command, root)

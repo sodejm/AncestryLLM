@@ -12,6 +12,13 @@ repos:
   # Use the locally installed gitleaks binary (brew) so no Go build is required.
   - repo: local
     hooks:
+      - id: session-handoff
+        name: Validate staged session handoff
+        entry: python3 scripts/session_delivery.py quick
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: gitleaks
         name: Detect hardcoded secrets (gitleaks)
         entry: gitleaks protect --staged --redact

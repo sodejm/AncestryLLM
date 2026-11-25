@@ -1,0 +1,112 @@
+{
+  "stage": "implementation",
+  "request": "Give agents an executable definition of done and leave a detailed plan an implementation-focused model can follow.",
+  "scope": "Check planning handoffs before commit and exercise each requested behavior before push via the existing Git hooks.",
+  "setup": "Run commands from the AncestryLLM repository root. Install Git and the project Python dependencies, then enable hooks with make hooks. Gate regression tests use temporary local repositories.",
+  "constraints": "Read the exact staged or committed inputs. Preserve existing checks. Run named tests using fixed runner commands. Keep plan-only work deliverable before its implementation exists.",
+  "steps": [
+    {
+      "action": "Read the current hook configuration and add a fast index check that rejects incomplete handoffs and unmapped behavior changes. Make branch plans available to later commits.",
+      "paths": [
+        ".pre-commit-config.yaml",
+        "scripts/session_delivery.py"
+      ],
+      "verify": {
+        "command": "python3 scripts/session_delivery.py plan docs/session-plans/behavior-handoff-gates.json",
+        "expected": "Exit zero for this complete handoff."
+      }
+    },
+    {
+      "action": "Extend the existing push gate to execute the exact named cases from the proposed commit and propagate any failures. Preserve the repository checks already attached to push.",
+      "paths": [
+        "scripts/run_pre_push.py",
+        "scripts/session_delivery.py"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_pre_push_gate.py::test_handoff_rejections",
+        "expected": "The test passes after observing each invalid push fail and the remote reference stay absent."
+      }
+    },
+    {
+      "action": "Add real Git fixtures for planning, valid implementation and broken behavior. Document the commands and the handoff lifecycle for the next implementer.",
+      "paths": [
+        "tests/test_pre_push_gate.py",
+        "AGENTS.md",
+        "docs/SESSION_HANDOFF.md"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_pre_push_gate.py",
+        "expected": "All Git fixtures pass, including acceptance through staged commits and pushes to a bare remote."
+      }
+    },
+    {
+      "action": "Map each session plan JSON file to the handoff authoring guide in the tracked-file inventory.",
+      "paths": [
+        "scripts/check_code_documentation.py",
+        "tests/test_code_documentation_policy.py"
+      ],
+      "verify": {
+        "command": "python -m pytest -q -o addopts= tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation",
+        "expected": "Inventory accepts a new plan with its guide present and rejects a missing guide or an unrelated unmapped JSON file."
+      }
+    }
+  ],
+  "acceptance": [
+    {
+      "kind": "success",
+      "entrypoint": "git commit and git push to a local bare repository",
+      "given": "The staged plan names a count function and two future acceptance tests.",
+      "when": "Commit and push the plan, implement the function and tests, then commit and push the implementation.",
+      "then": "Both planned and implemented states reach the remote. Unmapped staged implementation is rejected before its commit.",
+      "paths": [
+        ".pre-commit-config.yaml",
+        "scripts/session_delivery.py",
+        "scripts/run_pre_push.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_handoff_success"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "git push to a local bare repository",
+      "given": "The public count function must clamp a negative value; a positive result alone is insufficient.",
+      "when": "Push variants with a missing, skipped, empty or failing boundary, then remove the clamp with the original assertions in place.",
+      "then": "Each push exits unsuccessfully and leaves the target reference absent.",
+      "paths": [
+        "scripts/run_pre_push.py",
+        "scripts/session_delivery.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_handoff_rejections"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "pytest acceptance runner",
+      "given": "Two parameter values exercise one named acceptance test.",
+      "when": "Run all passing values, then a mixture of passed and skipped values and an expected failure.",
+      "then": "Only the first run exits successfully.",
+      "paths": [
+        "scripts/session_delivery.py",
+        "tests/test_pre_push_gate.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_pre_push_gate.py::test_pytest_acceptance_outcomes"
+    },
+    {
+      "kind": "boundary",
+      "entrypoint": "Documentation policy check_inventory",
+      "given": "A future plan is tracked in docs/session-plans and its guide is absent.",
+      "when": "Check the inventory, add the guide, then check the plan and an unrelated JSON path.",
+      "then": "The missing guide fails, the documented plan passes and the unrelated file still fails.",
+      "paths": [
+        "scripts/check_code_documentation.py",
+        "tests/test_code_documentation_policy.py"
+      ],
+      "runner": "pytest",
+      "test": "tests/test_code_documentation_policy.py::TestCheckInventory::test_session_handoff_documentation"
+    }
+  ],
+  "pending": []
+}

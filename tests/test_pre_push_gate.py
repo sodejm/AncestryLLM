@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -255,14 +256,13 @@ def test_pushing_a_different_commit_is_rejected(repository: Path) -> None:
 
 
 def test_branch_tests_count_across_incremental_pushes(repository: Path) -> None:
-    for path in ("scripts/example.py", "tests/test_example.py"):
-        destination = repository / path
-        destination.parent.mkdir(exist_ok=True)
-        destination.write_text("# Fictional implementation and test\n", encoding="utf-8")
+    write_count(repository, "scripts/example.py")
+    write_handoff(repository, handoff_record("scripts/example.py", "implementation"))
     _git(repository, "add", ".")
     _git(repository, "commit", "-m", "Add behavior with tests")
     previous = _git(repository, "rev-parse", "HEAD")
-    (repository / "scripts/example.py").write_text("# Follow-up implementation\n", encoding="utf-8")
+    with (repository / "scripts/example.py").open("a", encoding="utf-8") as source:
+        source.write("# Follow-up clarification\n")
     _git(repository, "add", ".")
     _git(repository, "commit", "-m", "Refine behavior")
     environment = _fake_tools(repository)
@@ -288,3 +288,209 @@ def test_deleted_tests_do_not_satisfy_development_check(repository: Path) -> Non
     result = _run(repository, _fake_tools(repository))
     assert result.returncode != 0
     assert "PUSHGATE_TESTS_REQUIRED" in result.stderr
+
+
+def handoff_record(code, stage):
+    """Describe an ordinary callable and its two observable outcomes."""
+    paths = [code, "tests/test_behavior.py"]
+    return {
+        "stage": stage,
+        "request": "Clamp a negative count to zero while preserving positive counts.",
+        "scope": "Expose clamp_count in the count module and exercise its public input.",
+        "setup": "Use Python 3 and the standard library unittest runner.",
+        "constraints": "Return integers and accept zero as a valid count.",
+        "steps": [
+            {
+                "action": "Define clamp_count(value) and add positive and negative input tests.",
+                "paths": paths,
+                "verify": {
+                    "command": "python3 -m unittest discover -s tests -p test_behavior.py",
+                    "expected": "Both tests pass for positive and negative inputs.",
+                },
+            }
+        ],
+        "acceptance": [
+            {
+                "kind": kind,
+                "entrypoint": "clamp_count(value)",
+                "given": given,
+                "when": "Call clamp_count with the given integer.",
+                "then": expected,
+                "paths": paths,
+                "runner": "unittest",
+                "test": "tests/test_behavior.py::Counts::test_" + kind,
+            }
+            for kind, given, expected in [
+                ("success", "A count of 4", "Return 4"),
+                ("boundary", "A count of -1", "Return 0"),
+            ]
+        ],
+        "pending": [],
+    }
+
+
+def write_handoff(root, record):
+    """Write the feature's versioned plan in the fixture repository."""
+    path = root / "docs/session-plans/clamp-count.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+
+def write_count(root, code, boundary="self.assertEqual(clamp(-1), 0)"):
+    """Install the public function and separate executable acceptance cases."""
+    source = root / code
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("def clamp_count(value):\n    return max(0, value)\n", encoding="utf-8")
+    suite = root / "tests/test_behavior.py"
+    suite.parent.mkdir(exist_ok=True)
+    suite.write_text(
+        "import runpy\nimport unittest\n"
+        f"clamp = runpy.run_path({code!r})['clamp_count']\n"
+        "class Counts(unittest.TestCase):\n"
+        "    def test_success(self):\n        self.assertEqual(clamp(4), 4)\n"
+        f"    def test_boundary(self):\n        {boundary}\n",
+        encoding="utf-8",
+    )
+
+
+def exercise_handoff_success(root, git, code):
+    """Commit a plan for future files and push it, then implement and push the feature."""
+    before = git("rev-parse", "HEAD").stdout
+    write_handoff(root, {"stage": "plan"})
+    git("add", "docs")
+    write_handoff(root, handoff_record(code, "plan"))
+    result = git("commit", "-m", "Incomplete staged plan", success=False)
+    assert result.returncode and b"request needs concrete text" in result.stderr, result.stderr
+    assert git("rev-parse", "HEAD").stdout == before
+    incomplete = handoff_record(code, "plan")
+    incomplete["steps"][0]["verify"] = {"command": "python3 -m unittest"}
+    write_handoff(root, incomplete)
+    git("add", "docs")
+    result = git("commit", "-m", "Omit the expected result", success=False)
+    assert result.returncode and b"step.verify.expected" in result.stderr
+    assert git("rev-parse", "HEAD").stdout == before
+    write_handoff(root, handoff_record(code, "plan"))
+    git("add", "docs")
+    git("commit", "-m", "Plan count behavior")
+    git("push", "origin", "feature/gate")
+    write_count(root, code)
+    git("add", code, "tests/test_behavior.py")
+    result = git("commit", "-m", "Implementation without mapping", success=False)
+    assert result.returncode and b"missing implementation acceptance coverage" in result.stderr
+    write_handoff(root, handoff_record(code, "implementation"))
+    git("add", "docs")
+    git("commit", "-m", "Implement count behavior")
+    git("push", "origin", "feature/gate")
+    assert (
+        git("rev-parse", "HEAD").stdout.strip() in git("ls-remote", "origin", "feature/gate").stdout
+    )
+
+
+def exercise_handoff_rejections(root, git, code):
+    """Keep the remote branch absent for skipped, failing, and missing acceptance."""
+    record = handoff_record(code, "implementation")
+    write_handoff(root, record)
+    for body, expected in [
+        ("pass", b"empty acceptance test"),
+        ("self.skipTest('unavailable')", b"required test did not pass"),
+        ("self.assertEqual(clamp(-1), 7)", b"required test did not pass"),
+    ]:
+        write_count(root, code, body)
+        git("add", "docs", code, "tests/test_behavior.py")
+        git("commit", "-m", "Record a boundary case")
+        result = git("push", "origin", "feature/gate", success=False)
+        assert result.returncode and expected in result.stderr + result.stdout, result.stderr
+        assert not git("ls-remote", "origin", "feature/gate").stdout
+    write_count(root, code)
+    (root / code).write_text("def clamp_count(value):\n    return value\n", encoding="utf-8")
+    git("add", code, "tests/test_behavior.py")
+    git("commit", "-m", "Remove the clamp while retaining its tests")
+    result = git("push", "origin", "feature/gate", success=False)
+    assert result.returncode and b"required test did not pass" in result.stdout + result.stderr
+    assert not git("ls-remote", "origin", "feature/gate").stdout
+    # Restore the implementation so the next failure isolates the missing selector.
+    write_count(root, code)
+    git("add", code)
+    record["acceptance"][1]["test"] = "tests/test_missing.py::Counts::test_boundary"
+    write_handoff(root, record)
+    git("add", "docs")
+    git("commit", "-m", "Point to missing selector")
+    result = git("push", "origin", "feature/gate", success=False)
+    assert result.returncode and b"missing acceptance test" in result.stderr + result.stdout, (
+        result.stderr
+    )
+    assert not git("ls-remote", "origin", "feature/gate").stdout
+
+
+@pytest.fixture
+def hook_git(repository: Path):
+    """Invoke the checked-in hook entry points with a real disposable Git remote."""
+    remote = repository.parent / "remote.git"
+    _git(repository, "init", "--bare", str(remote))
+    _git(repository, "remote", "add", "origin", str(remote))
+    _git(repository, "push", "origin", "main")
+    hooks = repository.parent / "hooks"
+    hooks.mkdir()
+    for name, argv in [
+        ("pre-commit", [sys.executable, str(SCRIPT.with_name("session_delivery.py")), "quick"]),
+        ("pre-push", [sys.executable, str(SCRIPT)]),
+    ]:
+        hook = hooks / name
+        hook.write_text("#!/bin/sh\nexec " + shlex.join(argv) + "\n", encoding="utf-8")
+        hook.chmod(0o755)
+    env = _fake_tools(repository)
+
+    def git(*args, success=True):
+        result = subprocess.run(
+            ["git", "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false", *args],
+            cwd=repository,
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+        if success:
+            assert result.returncode == 0, result.stderr
+        return result
+
+    return git
+
+
+def test_handoff_success(repository: Path, hook_git) -> None:
+    """Exercise plan and implementation delivery via real commit and push events."""
+    exercise_handoff_success(repository, hook_git, "scripts/example.py")
+
+
+def test_handoff_rejections(repository: Path, hook_git) -> None:
+    """Exercise missing, failing and skipped acceptance through the push hook."""
+    exercise_handoff_rejections(repository, hook_git, "scripts/example.py")
+
+
+def test_pytest_acceptance_outcomes(tmp_path: Path) -> None:
+    """Every selected parameter must run and pass, including setup and teardown."""
+    (tmp_path / "test_selected.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('n', [1, 2])\n"
+        "def test_values(n):\n    assert n > 0\n"
+        "@pytest.mark.parametrize('n', [1, 2])\n"
+        "def test_partial(n):\n    if n == 2: pytest.skip('fixture')\n    assert n == 1\n"
+        "@pytest.mark.xfail(reason='fixture')\n"
+        "def test_expected():\n    assert 1 == 2\n",
+        encoding="utf-8",
+    )
+    for name, expected in [
+        ("test_values", True),
+        ("test_partial", False),
+        ("test_expected", False),
+    ]:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT.with_name("session_delivery.py")),
+                "_pytest",
+                "test_selected.py::" + name,
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            check=False,
+        )
+        assert (result.returncode == 0) == expected, result.stdout + result.stderr

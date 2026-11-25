@@ -246,3 +246,12 @@ For an authorized request to work through a milestone or release, use the
 [usage guide](prompts/README.md) for scope, orchestration, model routing, and safe
 storage. The main goal agent owns integration and verified delivery. These files
 do not start a run or grant external-action authority by their presence alone.
+
+## Session plans and acceptance
+
+For planning or implementation requests, save the handoff under
+`docs/session-plans/` before calling the session complete, including sessions
+that end before a commit. Follow [Session handoffs](docs/SESSION_HANDOFF.md).
+Map each requested outcome to an observable assertion through its normal entry
+point. Record the failing baseline and passing result when implementing it.
+Report outstanding manual or platform checks explicitly.
